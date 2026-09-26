@@ -201,10 +201,22 @@ def test_orchestrator_excludes_symbols_whose_history_misses_the_listing(caplog):
     assert asyncio.run(orch.build_the_ground()) and len(orch.market_state["SWIGGY"]) == 944
 
 
-def test_orchestrator_accepts_a_listing_just_before_a_weekend():
+@pytest.mark.parametrize("listing,accepted", [(ist(2026, 9, 8), True),                   # the first bar's session
+                                              (ist(2026, 9, 7), False),                  # one session missing
+                                              (ist(2026, 9, 4), False)])                 # Friday: 1 session + weekend
+def test_orchestrator_needs_the_listing_session_itself(listing, accepted, caplog):
+    # v1.1 allowed 5 days of slack, which let Yahoo's 59-day clamp drop listing sessions unnoticed.
     ad = engine.CsvReplayAdapter({"SWIGGY": FIXTURE})
-    orch = engine.ProductionOrchestrator({"SWIGGY": ist(2026, 9, 5, 9, 15)}, ad, as_of=ist(2026, 9, 26))
-    assert asyncio.run(orch.build_the_ground())                            # first bar Mon 09-08 is within tolerance
+    orch = engine.ProductionOrchestrator({"SWIGGY": listing}, ad, as_of=ist(2026, 9, 26))
+    assert asyncio.run(orch.build_the_ground()) is accepted
+    assert ("symbol excluded" in caplog.text) is not accepted
+
+
+def test_orchestrator_without_a_listing_date_anchors_at_the_first_bar_and_says_so(caplog):
+    ad = engine.CsvReplayAdapter({"SWIGGY": FIXTURE})
+    orch = engine.ProductionOrchestrator({"SWIGGY": None}, ad, as_of=ist(2026, 9, 25, 15, 20))
+    assert asyncio.run(orch.build_the_ground())
+    assert "No listing date given: treating the first bar (2026-09-08 09:15) as the listing" in caplog.text
 
 
 def test_orchestrator_reports_failure_when_nothing_loads(tmp_path):
@@ -307,6 +319,79 @@ def test_kite_interval_table_bounds_each_request():
 
 def test_orchestrator_accepts_naive_listing_dates():
     ad = engine.CsvReplayAdapter({"SWIGGY": FIXTURE})
-    naive = datetime(2026, 9, 7)  # noqa: DTZ001 - the naive input is the point of this test
+    naive = datetime(2026, 9, 8)  # noqa: DTZ001 - the naive input is the point of this test
     orch = engine.ProductionOrchestrator({"SWIGGY": naive}, ad, as_of=ist(2026, 9, 26))
     assert asyncio.run(orch.build_the_ground())                            # v1.0: TypeError naive vs aware
+
+
+# ---------------------------------------------------------------- malformed inputs are errors, not crashes
+def test_csv_timestamps_with_utc_offsets_load(tmp_path):
+    src = pd.read_csv(FIXTURE).head(5)
+    utc = pd.to_datetime(src["datetime_ist"]).dt.tz_localize("Asia/Kolkata").dt.tz_convert("UTC")
+    src["datetime_ist"] = utc.dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")        # e.g. an export in UTC with an offset
+    path = tmp_path / "SWIGGY_utc.csv"
+    src.to_csv(path, index=False)
+    df = engine.CsvReplayAdapter.load(path)                                 # v1.1: TypeError, a raw traceback
+    assert df.index[0] == pd.Timestamp(ist(2026, 9, 8, 9, 15))
+
+
+def test_non_numeric_csv_values_are_reported(tmp_path, caplog):
+    src = pd.read_csv(FIXTURE).head(5)
+    src["volume"] = [f"{v:,}" for v in src["volume"]]                      # thousands separators
+    path = tmp_path / "SWIGGY_commas.csv"
+    src.to_csv(path, index=False)
+    engine.CsvReplayAdapter.load(path)
+    assert "were not numbers" in caplog.text                                # v1.1: silently every volume 0
+
+
+def test_a_csv_that_looks_like_another_symbol_is_flagged(caplog):
+    ad = engine.CsvReplayAdapter({"ZOMATO": FIXTURE})
+    asyncio.run(ad.fetch_historical_bars("ZOMATO", ist(2026, 9, 1), ist(2026, 9, 30)))
+    assert "does not look like ZOMATO data" in caplog.text
+
+
+@pytest.mark.parametrize("payload", [
+    [], {"chart": None}, {"chart": {"result": [None]}}, {"chart": {"result": [{"timestamp": [1], "indicators": {"quote": []}}]}},
+    {"chart": {"result": [{"timestamp": [1, 2, 3], "indicators": {"quote": [{"close": [1.0, 2.0]}]}}]}},
+])
+def test_malformed_yahoo_payloads_give_an_empty_frame(monkeypatch, fast_sleep, payload, caplog):
+    monkeypatch.setattr(engine.urllib.request, "urlopen", lambda req, timeout: FakeResponse(json.dumps(payload).encode()))
+    now = datetime.now(timezone.utc)
+    df = asyncio.run(engine.PublicExchangeAdapter().fetch_historical_bars("SWIGGY", now - timedelta(days=1), now))
+    assert df.empty and "Yahoo" in caplog.text
+
+
+def test_broker_start_up_failure_aborts_cleanly(caplog):
+    class ExpiredToken(engine.BrokerAdapter):
+        async def boot(self):
+            raise RuntimeError("TokenException: Incorrect `api_key` or `access_token`.")
+
+        async def fetch_historical_bars(self, *a, **k):
+            raise AssertionError("not reached")
+
+    orch = engine.ProductionOrchestrator({"SWIGGY": ist(2026, 9, 8)}, ExpiredToken(), as_of=ist(2026, 9, 26))
+    assert asyncio.run(orch.build_the_ground()) is False and "Broker start-up failed" in caplog.text
+
+
+def test_one_symbol_failing_to_fetch_does_not_stop_the_others(caplog):
+    class Flaky(engine.CsvReplayAdapter):
+        async def fetch_historical_bars(self, symbol, start_date, end_date, interval="5m"):
+            if symbol == "BROKEN":
+                raise KeyError("indicators")
+            return await super().fetch_historical_bars(symbol, start_date, end_date, interval)
+
+    orch = engine.ProductionOrchestrator({"BROKEN": ist(2026, 9, 8), "SWIGGY": ist(2026, 9, 8)},
+                                         Flaky({"SWIGGY": FIXTURE}), as_of=ist(2026, 9, 26))
+    assert asyncio.run(orch.build_the_ground()) and list(orch.market_state) == ["SWIGGY"]
+    assert "[BROKEN] History fetch failed" in caplog.text
+
+
+def test_thirty_minute_bars_are_anchored_at_the_open(monkeypatch, fast_sleep):
+    rows = [ist(2026, 9, 25, 9, 15), ist(2026, 9, 25, 9, 45), ist(2026, 9, 25, 10, 15)]
+    payload = yahoo_payload([int(t.timestamp()) for t in rows], [100.0, 101.0, 102.0])
+    monkeypatch.setattr(engine.urllib.request, "urlopen", lambda req, timeout: FakeResponse(json.dumps(payload).encode()))
+    df = asyncio.run(engine.PublicExchangeAdapter().fetch_historical_bars(
+        "SWIGGY", ist(2026, 9, 24), ist(2026, 9, 25, 11, 0), interval="30m"))
+    assert len(df) == 3                                                     # v1.1 kept none (hour-aligned grid)
+    assert engine.bar_floor(ist(2026, 9, 25, 9, 50), 30) == ist(2026, 9, 25, 9, 45)
+    assert engine.bar_floor(ist(2026, 9, 25, 9, 50), 5) == ist(2026, 9, 25, 9, 50)

@@ -119,9 +119,9 @@ def test_ltp_mode_ticks_carry_no_volume():
 def test_cumulative_volume_counter_restarts_each_session():
     a = adapter(started_at=ist(2026, 9, 25, 8, 55))                        # running through both opens
     t = engine.Tick("SWIGGY", 100.0, 0, ist(2026, 9, 25, 15, 25), cumulative_volume=9_000_000)
-    assert a._traded_quantity(t) == 9_000_000
+    assert a._traded_quantity(t) == (9_000_000, False)
     t = engine.Tick("SWIGGY", 100.0, 0, ist(2026, 9, 28, 9, 15, 1), cumulative_volume=40_000)
-    assert a._traded_quantity(t) == 40_000                                 # not negative, not ignored
+    assert a._traded_quantity(t) == (40_000, False)                        # not negative, not ignored
 
 
 def test_joining_mid_session_does_not_dump_the_days_volume_into_one_bar():
@@ -226,3 +226,135 @@ def test_bar_clock_task_flushes_on_its_own():
 
     a = asyncio.run(scenario())
     assert a.market_state["SWIGGY"].index[-1] == pd.Timestamp(ist(2026, 9, 28, 9, 15))
+
+
+# ---------------------------------------------------------------- feed gaps, blind spots and back-fill
+def cum_tick(price, cum, ts, symbol="SWIGGY"):
+    return engine.Tick(symbol, price, 0, ts, cumulative_volume=cum)
+
+
+def session_history(day=24, closes=None):
+    """A full 09:15-15:25 session of 5m bars on 2026-09-<day> (75 bars) at 100k shares each."""
+    closes = closes or [100.0] * 75
+    df = make_bars(closes, start=ist(2026, 9, day, 9, 15))
+    return df
+
+
+def test_reconnect_rebaselines_volume_and_discards_the_blind_bar():
+    """v1.1 credited all volume traded during a feed outage to the first bar after it: a fake RVOL spike."""
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 10)))
+    a.on_tick(cum_tick(100.2, 1_100_000, ist(2026, 9, 25, 10, 2, 0)))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 12, 0))                     # outage 10:02 -> 10:12
+    a.on_tick(cum_tick(101.0, 2_500_000, ist(2026, 9, 25, 10, 12, 5)))     # 1.4M traded while blind
+    a.on_tick(cum_tick(101.5, 2_600_000, ist(2026, 9, 25, 10, 15, 3)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 21))
+    df = a.market_state["SWIGGY"]
+    today = df[df.index >= pd.Timestamp(ist(2026, 9, 25))]
+    assert today.index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 15))]   # 10:00 and 10:10 spanned the gap
+    assert today["Volume"].tolist() == [100_000.0]                              # not 1,500,000
+
+
+def test_a_late_feed_connect_does_not_dump_the_days_volume_into_one_bar():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 5))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 11, 0, 0))                       # the websocket only got through at 11:00
+    a.on_tick(cum_tick(100.0, 4_200_000, ist(2026, 9, 25, 11, 0, 5)))
+    a.on_tick(cum_tick(100.1, 4_212_000, ist(2026, 9, 25, 11, 3, 0)))
+    a.flush_due_bars(ist(2026, 9, 25, 11, 6))
+    assert a.market_state["SWIGGY"].iloc[-1]["Volume"] == 12_000
+
+
+def test_a_counter_going_backwards_is_rebaselined_not_reset_to_zero():
+    a = adapter(started_at=ist(2026, 9, 25, 9, 0))
+    assert a._traded_quantity(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0))) == (1_000_000, False)
+    assert a._traded_quantity(cum_tick(100.0, 999_990, ist(2026, 9, 25, 10, 1))) == (0, True)   # v1.1: 999,990
+    assert a._traded_quantity(cum_tick(100.0, 1_000_500, ist(2026, 9, 25, 10, 2))) == (510, False)
+
+
+def test_quote_updates_without_a_trade_do_not_create_bars():
+    """In full mode Kite also sends depth changes; v1.1 turned those into flat zero-volume bars."""
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 0, 5)))
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 6, 0)))        # depth update, nothing traded
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 12, 0)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 30))
+    df = a.market_state["SWIGGY"]
+    assert df[df.index >= pd.Timestamp(ist(2026, 9, 25))].index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 0))]
+
+
+def test_a_late_print_does_not_move_the_volume_baseline():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 10)))
+    a.on_tick(cum_tick(100.0, 1_100_000, ist(2026, 9, 25, 10, 4, 50)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 2))                           # closes 10:00
+    a.on_tick(cum_tick(100.0, 1_160_000, ist(2026, 9, 25, 10, 4, 59)))     # arrives late: dropped
+    a.on_tick(cum_tick(100.0, 1_161_000, ist(2026, 9, 25, 10, 5, 4)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 11))
+    assert a.market_state["SWIGGY"]["Volume"].iloc[-2:].tolist() == [1_100_000.0, 61_000.0]   # v1.1: 1,000
+
+
+def test_market_time_follows_accepted_ticks_only():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 10, 0, 10)))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 9, 7, 0)))                  # pre-open: ignored
+    assert a.market_time == ist(2026, 9, 25, 10, 0, 10)
+
+
+class RecordingAlpha(engine.AlphaEngine):
+    def __init__(self):
+        super().__init__()
+        self.evaluated = []
+
+    def evaluate(self, symbol, df):
+        self.evaluated.append((df.index[-2], df.index[-1]))
+        return None
+
+
+def test_a_hole_is_backfilled_from_the_broker_before_the_next_bar_is_evaluated():
+    history = session_history(24)
+    history = pd.concat([history, make_bars([100.0] * 9, start=ist(2026, 9, 25, 9, 15))])   # today 09:15-09:55
+    fetched_bar = make_bars([100.5], start=ist(2026, 9, 25, 10, 0))
+    calls, seen = [], []
+
+    async def backfill(sym, start, end):
+        calls.append((sym, start, end))
+        return fetched_bar
+
+    async def scenario():
+        alpha = RecordingAlpha()
+        a = engine.LiveTickAdapter({"SWIGGY": history}, alpha, asyncio.Queue(), asyncio.get_running_loop(),
+                                   started_at=ist(2026, 9, 25, 10, 2, 40), backfill=backfill,
+                                   bar_listeners=[lambda s, ts, b: seen.append(ts)])
+        a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 10, 2, 45)))            # joins the 10:00 bar late: discarded
+        a.on_tick(tick(100.6, 10, ist(2026, 9, 25, 10, 5, 1)))
+        a.on_tick(tick(100.7, 10, ist(2026, 9, 25, 10, 10, 1)))            # closes 10:05 -> hole at 10:00
+        await asyncio.sleep(0.05)
+        return a, alpha
+
+    a, alpha = asyncio.run(scenario())
+    assert calls == [("SWIGGY", ist(2026, 9, 25, 10, 0), ist(2026, 9, 25, 10, 5))]
+    idx = a.market_state["SWIGGY"].index
+    assert idx[-2:].tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 0)), pd.Timestamp(ist(2026, 9, 25, 10, 5))]
+    assert alpha.evaluated == [(pd.Timestamp(ist(2026, 9, 25, 10, 0)), pd.Timestamp(ist(2026, 9, 25, 10, 5)))]
+    assert seen == [pd.Timestamp(ist(2026, 9, 25, 10, 0)), ist(2026, 9, 25, 10, 5)]   # listeners in time order
+
+
+def test_without_a_backfill_source_a_bar_after_a_hole_is_not_evaluated(caplog):
+    """Evaluating across a hole would report a 'first crossing' one bar late at a worse price."""
+    history = pd.concat([session_history(24), make_bars([100.0] * 9, start=ist(2026, 9, 25, 9, 15))])
+    alpha = RecordingAlpha()
+    a = engine.LiveTickAdapter({"SWIGGY": history}, alpha, asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 10, 2, 40))
+    a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 10, 2, 45)))
+    a.on_tick(tick(100.6, 10, ist(2026, 9, 25, 10, 5, 1)))
+    a.on_tick(tick(100.7, 10, ist(2026, 9, 25, 10, 10, 1)))
+    assert alpha.evaluated == [] and "Bars 10:00-10:05 are missing" in caplog.text
+    a.on_tick(tick(100.8, 10, ist(2026, 9, 25, 10, 15, 1)))               # contiguous again: evaluated
+    assert alpha.evaluated == [(pd.Timestamp(ist(2026, 9, 25, 10, 5)), pd.Timestamp(ist(2026, 9, 25, 10, 10)))]
+
+
+def test_a_reconnect_marks_the_forming_bar_incomplete():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 10, 0, 10)))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 3))
+    assert a.current_bars["SWIGGY"]["partial"] is True

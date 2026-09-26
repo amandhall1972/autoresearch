@@ -1,9 +1,15 @@
 """The whole pipeline through the real CLI entry points."""
 import asyncio
 import logging
+import signal
 import subprocess
 import sys
+import time
+import types
 import urllib.error
+from datetime import datetime
+
+import pytest
 
 import engine
 from conftest import FIXTURE
@@ -42,9 +48,25 @@ def test_live_flags_are_refused_without_the_kite_source():
     assert proc.returncode == 2 and "require --source kite" in proc.stderr
 
 
+def test_real_orders_require_a_live_feed_so_the_synthetic_tape_can_never_trade():
+    proc = cli("--source", "kite", "--listing-date", "2026-09-08", "--live-orders", "--expect-ip", "203.0.113.9")
+    assert proc.returncode == 2 and "--live-orders requires --live-feed" in proc.stderr
+
+
 def test_real_orders_require_a_verified_static_ip():
-    proc = cli("--source", "kite", "--live-orders")                     # refused before any network call
-    assert proc.returncode == 2 and "--live-orders requires --expect-ip" in proc.stderr
+    proc = cli("--source", "kite", "--listing-date", "2026-09-08", "--live-feed", "--live-orders")
+    assert proc.returncode == 2 and "--live-orders requires --expect-ip" in proc.stderr   # before any network call
+
+
+def test_kite_requires_the_real_listing_date():
+    proc = cli("--source", "kite")
+    assert proc.returncode == 2 and "--source kite requires --listing-date" in proc.stderr
+
+
+@pytest.mark.parametrize("flag,value", [("--expect-ip", "203.0.113.300"), ("--run-seconds", "-1")])
+def test_malformed_arguments_exit_2(flag, value):
+    proc = cli("--source", "csv", flag, value)
+    assert proc.returncode == 2 and "error" in proc.stderr
 
 
 def test_kite_source_requires_credentials(monkeypatch):
@@ -72,3 +94,81 @@ def test_a_crashed_worker_stops_the_engine_with_a_failure_code(monkeypatch, capl
     code = asyncio.run(engine.main(["--source", "csv", "--csv", str(FIXTURE), "--no-simulate", "--run-seconds", "30"]))
     assert code == 1
     assert "Worker 'bar-clock' stopped unexpectedly: RuntimeError('clock hardware fault')" in caplog.text
+
+
+# ---------------------------------------------------------------- time, signals and live-mode safety
+class FarFuture(datetime):
+    """Wall clock pinned to a date long after the bundled data (the v1.1 demo broke after 2026-09-28 09:26)."""
+    FIXED = datetime(2027, 3, 15, 11, 0, tzinfo=engine.IST)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.FIXED.astimezone(tz) if tz else cls.FIXED.replace(tzinfo=None)
+
+
+def test_the_offline_demo_does_not_depend_on_the_wall_clock(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    monkeypatch.setattr(engine, "datetime", FarFuture)
+    assert asyncio.run(engine.main(["--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "4.5"])) == 0
+    assert "[OMS DISPATCH] BUY 2884x SWIGGY LIMIT 291.30" in caplog.text
+    assert "Final Inventory State: {'SWIGGY'}" in caplog.text and "stale" not in caplog.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
+def test_ctrl_c_runs_the_orderly_shutdown_and_prints_the_halt_report():
+    proc = subprocess.Popen([sys.executable, engine.__file__, "--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "0"],
+                            stderr=subprocess.PIPE, text=True)
+    time.sleep(5)                                                         # the paper fill lands at ~3.3 s
+    proc.send_signal(signal.SIGINT)
+    _, err = proc.communicate(timeout=60)
+    assert proc.returncode == 130, err
+    assert "PAPER FILL" in err and "=== SYSTEM HALT ===" in err and "Open SWIGGY: 2884 @ 289.83" in err
+
+
+class FixtureAsKite(engine.CsvReplayAdapter):
+    """Stands in for ZerodhaKiteAdapter: serves the bundled bars whatever the requested window."""
+
+    def __init__(self, *args):
+        super().__init__({"SWIGGY": FIXTURE})
+
+    def token_map(self):
+        return {1234: "SWIGGY"}
+
+    async def fetch_historical_bars(self, symbol, start_date, end_date, interval="5m"):
+        return self.load(FIXTURE)
+
+
+def kite_env(monkeypatch, feed):
+    monkeypatch.setenv("KITE_API_KEY", "key")
+    monkeypatch.setenv("KITE_ACCESS_TOKEN", "token")
+    monkeypatch.setattr(engine, "ZerodhaKiteAdapter", FixtureAsKite)
+    monkeypatch.setattr(engine, "start_kite_feed", feed)
+
+
+def test_a_dead_websocket_stops_the_engine_and_a_live_feed_never_runs_the_synthetic_tape(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+
+    def feed_that_dies(api_key, access_token, tokens, tick_adapter, feed_dead):
+        assert tokens == [1234]
+        tick_adapter.loop.call_later(0.3, feed_dead.set)                  # KiteTicker gave up reconnecting
+        return types.SimpleNamespace(close=lambda: None)
+
+    kite_env(monkeypatch, feed_that_dies)
+    started = time.monotonic()
+    code = asyncio.run(engine.main(["--source", "kite", "--listing-date", "2026-09-08", "--live-feed", "--run-seconds", "30"]))
+    assert code == 1 and time.monotonic() - started < 10                  # v1.1 ran blind and exited 0
+    assert "Worker 'kite-feed' stopped unexpectedly" in caplog.text
+    assert "synthetic breakout tape is disabled" in caplog.text and "Initiating simulated stream" not in caplog.text
+
+
+def test_shutdown_waits_for_the_order_in_flight(monkeypatch, caplog):
+    """v1.1 cancelled the router 10 s into shutdown, stranding a live entry that can take 30 s to settle."""
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+
+    class SlowFill(engine.PaperGateway):
+        def __init__(self):
+            super().__init__(latency=3.0)                                 # dispatched at ~3.0 s, fills at ~6.0 s
+
+    monkeypatch.setattr(engine, "PaperGateway", SlowFill)
+    assert asyncio.run(engine.main(["--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "3.5"])) == 0
+    assert "PAPER FILL" in caplog.text and "Fill SWIGGY: 2884 @ 289.83" in caplog.text

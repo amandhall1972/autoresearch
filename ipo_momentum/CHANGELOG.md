@@ -1,5 +1,63 @@
 # Changelog
 
+## v1.2 (2026-09-26)
+
+v1.1 went through the same adversarial review as v1.0, run on a frozen snapshot
+(`ad48d8d`). Four reviewers had to reproduce each finding against it, and four
+skeptics then tried to refute each one. The 35 raw findings reduce to the 24
+defects below, because several reviewers independently found the same problem.
+Several are defects in v1.1's own fixes. Every behavior test added for v1.2
+fails on the v1.1 snapshot and passes here.
+
+Verdict: ✔ confirmed, ◐ confirmed with part of the claim overstated, *pending*
+until that area's skeptic reports. Severity is the skeptic's rating where
+available, otherwise the reviewer's.
+
+### Real-money safety
+
+| Sev | Verdict | v1.1 defect | v1.2 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| critical | ✔ | The synthetic tape stayed on under `--live-orders`/`--live-feed`. Its bars are stamped in the future, so the staleness check passed them, and invented ticks sent a **real** BUY and GTT. The README's live command even omitted `--no-simulate`. With a live feed, the synthetic bars also blocked every real tick. | `--live-orders` requires `--live-feed`, and a live feed turns the tape off. The router refuses any signal whose bar has not closed by its clock. | `test_real_orders_require_a_live_feed_so_the_synthetic_tape_can_never_trade`, `test_a_dead_websocket_stops_the_engine_and_a_live_feed_never_runs_the_synthetic_tape`, `test_signal_for_a_bar_that_has_not_closed_is_refused` |
+| critical | ✔ | Shutdown (timeout, Ctrl-C, crashed worker) cancelled the router after a 10 s drain, while an entry can take 30 s. The working LIMIT order was never cancelled, any fill got no GTT, and the run exited 0. | Shutdown stops producers, stops taking signals, then waits for the gateway's bounded settle time. An interrupted entry is cancelled and any fill protected before the cancellation propagates. | `test_shutdown_waits_for_the_order_in_flight`, `test_an_entry_interrupted_by_shutdown_is_cancelled_and_its_fill_protected` |
+| critical | *pending* | Any exception after `place_order` (a transient `order_history` error, a lost reply) released the symbol and abandoned a live BUY: no cancel, no GTT, and a second entry became possible. | Polling retries through transient errors. A lost reply is resolved by the order's unique tag. An unconfirmable state raises `OrderStateUnknown`: the symbol stays blocked, the run exits 1, and the order is listed under `ATTENTION`. | `test_transient_order_history_errors_keep_polling_instead_of_abandoning_the_order`, `test_a_lost_place_order_reply_is_found_by_its_tag_and_protected`, `test_a_place_order_failure_that_never_reached_the_exchange_releases_the_symbol`, `test_an_unverifiable_place_order_failure_keeps_the_symbol_blocked`, `test_an_api_refusal_releases_the_symbol_without_a_lookup` |
+| critical | *pending* | After cancelling a timed-out entry, one read was taken as final. A cancel that failed or had not landed released the symbol, and fills after that read got no GTT. | After cancelling, poll until the exchange confirms a terminal state (else `OrderStateUnknown`). The GTT covers the final filled quantity. | `test_a_cancel_that_never_lands_keeps_the_symbol_blocked`, `test_the_gtt_covers_the_final_filled_quantity_after_a_cancel` |
+| high | *pending* | Without `--listing-date`, Kite (including live orders) silently anchored the base at now − 20 days. | `--source kite` requires `--listing-date`. The demo default is logged as demo semantics. | `test_kite_requires_the_real_listing_date`, `test_orchestrator_without_a_listing_date_anchors_at_the_first_bar_and_says_so` |
+| medium | *pending* | The stop leg was a SELL LIMIT only 0.5% under its trigger, so a small gap left it unfilled. Paper booked the stop at the open, which was optimistic. | 2% stop-limit buffer. Paper plays the same limit mechanics: fill at the open, at the limit on recovery, or rest unfilled with a CRITICAL log. | `test_paper_gap_below_the_stop_limit_fills_only_if_price_recovers_to_it`, `test_paper_stop_gapped_through_fills_at_the_open_when_above_the_stop_limit` |
+| self | — | A transient GTT failure left a filled position unprotected. | The GTT is retried on transient errors. | `test_a_transient_gtt_failure_is_retried` |
+
+### Live data and time
+
+| Sev | Verdict | v1.1 defect | v1.2 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ✔ | Time bomb: the demo tape is dated 2026-09-28, but staleness and bar timing used the wall clock. From 09:26 IST that day, the headline demo and 8 tests would have stopped trading or failed. | Simulated runs keep time by the tape (`LiveTickAdapter.market_time`), and tests pin their clocks. | `test_the_offline_demo_does_not_depend_on_the_wall_clock`; the whole suite passes with the clock shifted into that window and to 2027 |
+| high | ✔ | After a websocket outage or a late connect, the first print's cumulative-volume delta held every share traded while blind. That one bar got a fake RVOL spike and fired false breakouts. A counter dip reset the baseline to zero. | Feed epochs: every (re)connect re-baselines the counters and discards the bar spanning the blind spot. A counter dip is re-baselined, not reset. | `test_reconnect_rebaselines_volume_and_discards_the_blind_bar`, `test_a_late_feed_connect_does_not_dump_the_days_volume_into_one_bar`, `test_a_counter_going_backwards_is_rebaselined_not_reset_to_zero`, `test_a_reconnect_marks_the_forming_bar_incomplete` |
+| medium | ✔ | A dead Kite websocket (retries exhausted) went unnoticed: the engine ran blind and exited 0. | `on_noreconnect` feeds a supervised watch, and the run stops with exit 1. | `test_a_dead_websocket_stops_the_engine_and_a_live_feed_never_runs_the_synthetic_tape` |
+| medium | ✔ | Quote and depth updates without a trade became flat zero-volume bars, which halved the RVOL baseline on illiquid names and fired false breakouts. | Prints without a trade make no bar, and zero-volume bars never enter the baseline. | `test_quote_updates_without_a_trade_do_not_create_bars`, `test_flat_zero_volume_bars_stay_out_of_the_volume_baseline` |
+| low | ◐ / ✔ | The bar forming at start-up (or at a reconnect) was permanently missing. The next bar was then evaluated across the hole, which could fire a "first crossing" one bar late at a worse price. | Holes are back-filled from broker history before the next bar is evaluated. Without a history source, that bar is not evaluated. | `test_a_hole_is_backfilled_from_the_broker_before_the_next_bar_is_evaluated`, `test_without_a_backfill_source_a_bar_after_a_hole_is_not_evaluated` |
+| low | ✔ | Late or out-of-order prints moved the volume baseline before being dropped, so their shares vanished. | They are dropped before the baseline moves. | `test_a_late_print_does_not_move_the_volume_baseline` |
+| low | ✔ | Ctrl-C, the only way to stop `--run-seconds 0`, skipped the halt report. | A SIGINT handler runs the orderly shutdown, prints the report and exits 130. | `test_ctrl_c_runs_the_orderly_shutdown_and_prints_the_halt_report` |
+
+### Alpha
+
+| Sev | Verdict | v1.1 defect | v1.2 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | The 150-bar base was documented as "two sessions". On a real listing (continuous trading from 10:00), it runs into session 3 and swallows a day-3 opening breakout. | Documented accurately. `--base-sessions N` defines the base by sessions. | `test_base_sessions_lets_a_day_three_opening_breakout_count` |
+| low | ✔ | `Base_High` on rows inside the base used later bars (look-ahead in the public `indicators()`). | Undefined (NaN) inside the base. | `test_base_high_is_never_visible_inside_the_base` |
+| low | ✔ | With `base_bars < rvol_lookback`, `scan()` reported breakouts that `evaluate()` never emits. | The same warm-up mask in both. | `test_scan_matches_walk_forward_evaluate_when_the_base_is_shorter_than_the_rvol_window` |
+| low | ◐ | The docstring promised "the first close above the base", but the code, like v1.0's, counts every crossing. | Documented as crossing semantics, and a re-cross is pinned. | `test_a_re_cross_after_falling_back_into_the_base_counts_again` |
+| low | ◐ | `time_of_day` RVOL took about 100 ms per evaluation, mostly `strftime`, on the event loop. | Integer slot key: identical output, about 6× faster. | the `time_of_day` tests (identical values) |
+
+### Data, CLI and documentation
+
+| Sev | Verdict | v1.1 defect | v1.2 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | *pending* | A 5-day listing tolerance accepted histories missing the listing sessions (e.g. after Yahoo's 59-day clamp). | The first bar must come from the listing session itself. | `test_orchestrator_needs_the_listing_session_itself` (3 cases) |
+| low | *pending* | Failures outside the retry loops escaped as tracebacks: an expired token at boot, malformed Yahoo payloads, offset-aware CSV timestamps. | Contained per symbol. Malformed payloads give an empty frame with an error log, and offsets are converted. | `test_broker_start_up_failure_aborts_cleanly`, `test_one_symbol_failing_to_fetch_does_not_stop_the_others`, `test_malformed_yahoo_payloads_give_an_empty_frame` (5 cases), `test_csv_timestamps_with_utc_offsets_load` |
+| low | *pending* | The CSV replay silently turned non-numeric values (e.g. `1,234,567`) into 0 volume, and replayed another symbol's file under `--symbol`. | Both are logged as warnings. | `test_non_numeric_csv_values_are_reported`, `test_a_csv_that_looks_like_another_symbol_is_flagged` |
+| low | *pending* | Yahoo 30m/60m bars were all discarded (the grid was anchored to the hour, not 09:15). | The grid and `bar_floor` are anchored at the 09:15 open. | `test_thirty_minute_bars_are_anchored_at_the_open` |
+| low | *pending* | Paper booked a STOP at the stop price when a bar opened beyond the target. | An open beyond the target fills the target at the open. | `test_paper_open_beyond_the_target_books_the_target_at_the_open` |
+| low | ✔ | README claims the code did not honor: a `last_trade_time` fallback, exit code 2 for every bad config, a "two sessions" base. Also, a malformed `--expect-ip` exited 1 and a negative `--run-seconds` ran forever. | README corrected. Malformed arguments exit 2. | `test_malformed_arguments_exit_2` |
+
 ## v1.1 (2026-09-26)
 
 v1.0 was committed unchanged (`6097028`), then run twice:

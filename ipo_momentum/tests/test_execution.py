@@ -2,6 +2,8 @@
 import asyncio
 import json
 import logging
+import re
+import threading
 
 import pandas as pd
 import pytest
@@ -14,8 +16,12 @@ def sig(entry=289.83, stop=286.2, target=300.72, symbol="SWIGGY"):
     return engine.Signal(symbol, entry, stop, target, "IPO_BASE_BREAKOUT", ist(2026, 9, 28, 9, 20))
 
 
+MARKET_NOW = ist(2026, 9, 28, 9, 25, 30)                               # 30 s after sig()'s bar closed
+
+
 def router(gateway=None, **kw):
     kw.setdefault("risk_per_trade", 15_000.0)
+    kw.setdefault("clock", lambda: MARKET_NOW)                           # never the wall clock: no time bombs
     return engine.ExecutionRouter(asyncio.Queue(), gateway=gateway or engine.PaperGateway(latency=0), **kw)
 
 
@@ -109,29 +115,51 @@ kiteconnect = pytest.importorskip("kiteconnect")
 
 
 class StubKite(kiteconnect.KiteConnect):
-    """The real SDK with only its HTTP transport replaced, so SDK-side validation still runs."""
+    """The real SDK with only its HTTP transport replaced, so SDK-side validation still runs.
 
-    def __init__(self, order_states, gtt_error=None, ltp=290.0):
+    Each scripted list is consumed in order (its last entry repeats); an Exception entry is raised.
+    """
+
+    def __init__(self, order_states, gtt_error=None, ltp=290.0, place_error=None, place_reached=False,
+                 orders_result=None, cancel_results=None, gtt_results=None):
         super().__init__(api_key="test_key", access_token="test_token")
         self.order_states = list(order_states)
-        self.gtt_error = gtt_error
         self.last_price = ltp
+        self.place_error, self.place_reached = place_error, place_reached
+        self.orders_result = orders_result
+        self.cancel_results = list(cancel_results or [{"order_id": "260928000000001"}])
+        self.gtt_results = list(gtt_results or ([gtt_error] if gtt_error else [{"trigger_id": 777}]))
         self.requests = []
+        self.placed_tag = None
+
+    @staticmethod
+    def _next(script):
+        item = script.pop(0) if len(script) > 1 else script[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
 
     def _request(self, route, method, url_args=None, params=None, is_json=False, query_params=None):
         self.requests.append((route, method, url_args, params))
         if route == "market.quote.ltp":
             return {key: {"instrument_token": 1234, "last_price": self.last_price} for key in params["i"]}
         if route == "order.place":
+            self.placed_tag = params.get("tag")
+            if self.place_error:
+                raise self.place_error
             return {"order_id": "260928000000001"}
+        if route == "orders":
+            if isinstance(self.orders_result, Exception):
+                raise self.orders_result
+            if self.orders_result is not None:
+                return self.orders_result
+            return [{"order_id": "260928000000001", "tag": self.placed_tag}] if self.place_reached else []
         if route == "order.info":
-            return [self.order_states.pop(0) if len(self.order_states) > 1 else self.order_states[0]]
+            return [self._next(self.order_states)]
         if route == "order.cancel":
-            return {"order_id": url_args["order_id"]}
+            return self._next(self.cancel_results)
         if route == "gtt.place":
-            if self.gtt_error:
-                raise self.gtt_error
-            return {"trigger_id": 777}
+            return self._next(self.gtt_results)
         raise AssertionError(f"unexpected route {route}")
 
     def routes(self):
@@ -156,16 +184,16 @@ def test_kite_entry_then_gtt_oco_on_the_filled_quantity():
     assert kite.routes() == ["market.quote.ltp", "order.place", "order.info", "order.info", "gtt.place"]
     _, _, url_args, entry = kite.requests[1]
     assert url_args == {"variety": "regular"}
+    assert re.fullmatch(r"ipm[0-9a-f]{12}", entry.pop("tag"))            # unique, so a lost reply can be traced
     assert entry == {"variety": "regular", "exchange": "NSE", "tradingsymbol": "SWIGGY", "transaction_type": "BUY",
-                     "quantity": 2941, "product": "CNC", "order_type": "LIMIT", "price": 291.30, "validity": "DAY",
-                     "tag": "ipomomentum"}
+                     "quantity": 2941, "product": "CNC", "order_type": "LIMIT", "price": 291.30, "validity": "DAY"}
     gtt = kite.requests[-1][3]
     assert gtt["type"] == "two-leg"
     condition, legs = json.loads(gtt["condition"]), json.loads(gtt["orders"])
     assert condition["trigger_values"] == [286.20, 300.70] and condition["last_price"] == 290.1
     assert [(l["transaction_type"], l["order_type"], l["product"], l["quantity"]) for l in legs] == \
            [("SELL", "LIMIT", "CNC", 2941)] * 2
-    assert legs[0]["price"] == 284.75                                     # stop limit: 286.20 * 0.995, down to tick
+    assert legs[0]["price"] == 280.45                                     # stop limit: 286.20 * 0.98, down to tick
     assert legs[1]["price"] == 300.70
 
 
@@ -208,8 +236,15 @@ def test_signal_is_stale_once_its_bar_is_long_closed(caplog):
     stale = router(clock=lambda: ist(2026, 9, 29, 9, 15, 0))              # the next morning
     assert not fresh.is_stale(s) and stale.is_stale(s)
     run_router(stale, [s])
-    assert stale.fills == [] and "stale; not trading it" in caplog.text
+    assert stale.fills == [] and "Signal not traded: it is stale" in caplog.text
     assert not router(clock=lambda: ist(2030, 1, 1), max_signal_age=None).is_stale(s)
+
+
+def test_signal_for_a_bar_that_has_not_closed_is_refused(caplog):
+    # Defence in depth: a synthetic or corrupt tape stamped in the future can never reach a gateway.
+    early = router(clock=lambda: ist(2026, 9, 28, 9, 24, 0))                # the 09:20 bar closes at 09:25
+    run_router(early, [sig()])
+    assert early.fills == [] and "has not closed yet" in caplog.text
 
 
 # ---------------------------------------------------------------- paper positions and simulated exits
@@ -235,11 +270,29 @@ def test_paper_target_exit_realizes_profit_and_frees_the_symbol():
     assert closed.pnl == pytest.approx((300.70 - 289.83) * pos.quantity)
 
 
-def test_paper_stop_gapped_through_fills_at_the_open():
-    r = filled_router()
-    r.on_bar("SWIGGY", ist(2026, 9, 28, 9, 25), bar(280.0, 281.0, 279.0, 280.5))
+def test_paper_stop_gapped_through_fills_at_the_open_when_above_the_stop_limit():
+    r = filled_router()                                                   # stop 286.20, stop limit 280.45
+    r.on_bar("SWIGGY", ist(2026, 9, 28, 9, 25), bar(283.0, 284.0, 282.0, 283.5))
     closed = r.closed_positions[0]
-    assert (closed.exit_reason, closed.exit_price) == ("STOP", 280.0)
+    assert (closed.exit_reason, closed.exit_price) == ("STOP", 283.0)
+
+
+def test_paper_gap_below_the_stop_limit_fills_only_if_price_recovers_to_it(caplog):
+    r = filled_router()
+    r.on_bar("SWIGGY", ist(2026, 9, 28, 9, 25), bar(279.0, 280.0, 278.0, 279.5))    # never reaches 280.45
+    pos = r.positions["SWIGGY"]
+    assert pos.stop_triggered and r.closed_positions == [] and "UNFILLED" in caplog.text
+    r.on_bar("SWIGGY", ist(2026, 9, 28, 9, 30), bar(279.5, 281.0, 279.0, 280.8))    # the resting limit fills
+    closed = r.closed_positions[0]
+    assert (closed.exit_reason, closed.exit_price) == ("STOP", 280.45)
+    assert r.active_inventory == set()
+
+
+def test_paper_open_beyond_the_target_books_the_target_at_the_open():
+    r = filled_router()
+    r.on_bar("SWIGGY", ist(2026, 9, 28, 9, 25), bar(305.0, 306.0, 285.0, 286.0))    # v1.1 booked this as a STOP
+    closed = r.closed_positions[0]
+    assert (closed.exit_reason, closed.exit_price) == ("TARGET", 305.0)
 
 
 def test_paper_bar_touching_both_levels_assumes_the_stop_first():
@@ -255,3 +308,102 @@ def test_live_gateway_positions_are_not_simulated():
     r = run_router(router(gateway=Live()), [sig()])
     r.on_bar("SWIGGY", ist(2026, 9, 28, 9, 25), bar(280.0, 281.0, 279.0, 280.5))
     assert "SWIGGY" in r.positions and r.closed_positions == []           # the broker's GTT owns the exit
+
+
+# ---------------------------------------------------------------- live order safety (real SDK, scripted transport)
+KE = kiteconnect.exceptions
+OPEN = {"status": "OPEN", "filled_quantity": 0}
+
+
+def fast_gateway(kite, **kw):
+    kw.setdefault("poll_interval", 0)
+    kw.setdefault("fill_timeout", 0.05)
+    kw.setdefault("cancel_grace", 0.05)
+    return engine.KiteOrderGateway(kite, **kw)
+
+
+def test_transient_order_history_errors_keep_polling_instead_of_abandoning_the_order():
+    kite = StubKite([KE.NetworkException("Gateway timed out", code=504), KE.NetworkException("Too many requests", code=429),
+                     {"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}])
+    fill = asyncio.run(fast_gateway(kite, fill_timeout=5).execute(kite_plan()))
+    assert fill.quantity == 2941 and fill.exit_order_id == "777"          # v1.1 raised and released the symbol
+
+
+def test_a_cancel_that_never_lands_keeps_the_symbol_blocked(caplog):
+    kite = StubKite([OPEN], cancel_results=[KE.NetworkException("Too many requests", code=429)])
+    r = run_router(router(gateway=fast_gateway(kite)), [sig(), sig()])
+    assert r.active_inventory == {"SWIGGY"} and r.fills == []
+    assert len(r.unresolved) == 1 and "not terminal" in r.unresolved[0]
+    assert kite.routes().count("order.place") == 1                         # the second signal did not re-enter
+    assert "CHECK THE BROKER TERMINAL" in caplog.text
+
+
+def test_the_gtt_covers_the_final_filled_quantity_after_a_cancel():
+    kite = StubKite([{"status": "OPEN", "filled_quantity": 1000, "average_price": 290.0},
+                     {"status": "OPEN", "filled_quantity": 1000, "average_price": 290.0},
+                     {"status": "OPEN", "filled_quantity": 1000, "average_price": 290.0},
+                     {"status": "CANCELLED", "filled_quantity": 1941, "average_price": 290.05}])
+    fill = asyncio.run(fast_gateway(kite, fill_timeout=0, cancel_grace=5).execute(kite_plan()))
+    assert fill.quantity == 1941                                          # v1.1 protected only the first 1000
+    assert all(leg["quantity"] == 1941 for leg in json.loads(kite.requests[-1][3]["orders"]))
+
+
+def test_a_lost_place_order_reply_is_found_by_its_tag_and_protected():
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    place_error=KE.NetworkException("Read timed out", code=504), place_reached=True)
+    fill = asyncio.run(fast_gateway(kite).execute(kite_plan()))
+    assert fill.order_id == "260928000000001" and fill.exit_order_id == "777"
+    assert kite.routes()[:3] == ["market.quote.ltp", "order.place", "orders"]
+
+
+def test_a_place_order_failure_that_never_reached_the_exchange_releases_the_symbol():
+    kite = StubKite([OPEN], place_error=KE.NetworkException("Connection refused", code=503), place_reached=False)
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert r.active_inventory == set() and r.unresolved == []
+
+
+def test_an_unverifiable_place_order_failure_keeps_the_symbol_blocked():
+    kite = StubKite([OPEN], place_error=KE.NetworkException("Read timed out", code=504),
+                    orders_result=KE.NetworkException("Gateway timed out", code=504))
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert r.active_inventory == {"SWIGGY"} and "could not check whether the entry reached the exchange" in r.unresolved[0]
+
+
+def test_an_api_refusal_releases_the_symbol_without_a_lookup():
+    kite = StubKite([OPEN], place_error=KE.InputException("Insufficient funds"))
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert r.active_inventory == set() and "orders" not in kite.routes()
+
+
+def test_an_entry_interrupted_by_shutdown_is_cancelled_and_its_fill_protected(caplog):
+    polled = threading.Event()
+
+    class SignallingKite(StubKite):
+        def _request(self, route, *args, **kwargs):
+            if route == "order.info":
+                polled.set()                                              # the entry is now working
+            return super()._request(route, *args, **kwargs)
+
+    kite = SignallingKite([OPEN, OPEN, OPEN, {"status": "CANCELLED", "filled_quantity": 800, "average_price": 290.2}])
+
+    async def scenario():
+        gw = fast_gateway(kite, fill_timeout=30, poll_interval=0.01, cancel_grace=5)
+        task = asyncio.create_task(gw.execute(kite_plan()))
+        assert await asyncio.to_thread(polled.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await gw.wait_aborts()
+        return gw
+
+    gw = asyncio.run(scenario())
+    assert "order.cancel" in kite.routes() and kite.routes()[-1] == "gtt.place"   # v1.1: neither happened
+    assert json.loads(kite.requests[-1][3]["orders"])[0]["quantity"] == 800
+    assert any("filled 800 while shutting down" in a for a in gw.alerts)
+
+
+def test_a_transient_gtt_failure_is_retried():
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Gateway timed out", code=504), {"trigger_id": 778}])
+    fill = asyncio.run(fast_gateway(kite).execute(kite_plan()))
+    assert fill.exit_order_id == "778" and kite.routes().count("gtt.place") == 2

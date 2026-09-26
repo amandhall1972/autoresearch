@@ -75,12 +75,19 @@ def test_stop_uses_avwap_when_it_is_the_closer_floor():
     assert sig.target == pytest.approx(116.0 + 3 * (116.0 - ind["AVWAP"]))
 
 
-def test_only_the_first_close_above_the_base_is_a_breakout():
+def test_a_breakout_is_a_cross_so_consecutive_closes_above_fire_once():
     closes = BASE + [102.0] * 20 + [106.0, 107.0]
     df = make_bars(closes, [100_000] * 170 + [500_000, 900_000])
     alpha = engine.AlphaEngine()
     assert [s.entry_price for s in alpha.scan("IPO", df)] == [106.0]
     assert alpha.evaluate("IPO", df) is None                           # prev close already above base
+
+
+def test_a_re_cross_after_falling_back_into_the_base_counts_again():
+    # v1.0 semantics, now documented: every crossing from at-or-below to above the base is a breakout.
+    closes = BASE + [102.0] * 20 + [106.0, 103.0, 106.5]
+    df = make_bars(closes, [100_000] * 170 + [500_000, 100_000, 600_000])
+    assert [s.entry_price for s in engine.AlphaEngine().scan("IPO", df)] == [106.0, 106.5]
 
 
 def test_price_below_avwap_blocks_the_breakout():
@@ -179,3 +186,51 @@ def test_vendor_gap_bars_are_left_out_of_the_volume_baseline():
     assert df.loc[gap, "High"] > df.loc[gap, "Low"]
     ind = engine.AlphaEngine().indicators(df)
     assert ind["RVOL"].iloc[-1] == pytest.approx(5.0)                      # 500k / mean of the 19 real bars
+
+
+def listing_sessions(day3_open_close=106.0, day3_volume=1_200_000):
+    """A real NSE listing shape: day 1 trades 10:00-15:25 (66 bars), day 2 a full 75, then day 3's open."""
+    idx, closes = [], []
+    for first, n in ((ist(2026, 9, 1, 10, 0), 66), (ist(2026, 9, 2, 9, 15), 75)):
+        for k in range(n):
+            idx.append(first + pd.Timedelta(minutes=5 * k))
+            closes.append(100.0 + (k % 5))                               # base high 104.5 with 0.5 spread
+    idx.append(ist(2026, 9, 3, 9, 15))
+    closes.append(day3_open_close)
+    df = make_bars(closes, [100_000] * (len(closes) - 1) + [day3_volume])
+    df.index = pd.DatetimeIndex(idx, name="datetime")
+    return df
+
+
+def test_base_sessions_lets_a_day_three_opening_breakout_count():
+    df = listing_sessions()
+    assert len(df) == 142                                                 # 66 + 75 + 1
+    assert engine.AlphaEngine().evaluate("IPO", df) is None               # 150-bar base swallows day 3's open
+    sig = engine.AlphaEngine(base_sessions=2).evaluate("IPO", df)
+    assert sig is not None and sig.bar_time == pd.Timestamp(ist(2026, 9, 3, 9, 15))
+    assert engine.AlphaEngine(base_sessions=2).indicators(df)["Base_High"].iloc[-1] == pytest.approx(104.5)
+
+
+def test_base_high_is_never_visible_inside_the_base(real_bars):
+    """v1.1 broadcast the full base high onto base rows, i.e. bar 10 'knew' bar 149's high."""
+    alpha = engine.AlphaEngine()
+    full = alpha.indicators(real_bars)
+    assert full["Base_High"].iloc[:150].isna().all() and full["Base_High"].iloc[150:].notna().all()
+    pd.testing.assert_frame_equal(full.iloc[:100], alpha.indicators(real_bars.iloc[:100]))
+
+
+def test_scan_matches_walk_forward_evaluate_when_the_base_is_shorter_than_the_rvol_window():
+    closes = [100 + (i % 5) for i in range(10)] + [102.0] * 5 + [106.0] + [102.0] * 10 + [106.5]
+    vols = [100_000] * 15 + [600_000] + [100_000] * 10 + [700_000]
+    df = make_bars(closes, vols)
+    alpha = engine.AlphaEngine(base_bars=10, rvol_lookback=20)
+    walk = [s.bar_time for i in range(len(df)) if (s := alpha.evaluate("IPO", df.iloc[: i + 1]))]
+    assert [s.bar_time for s in alpha.scan("IPO", df)] == walk            # v1.1 scan also fired at bar 15
+
+
+def test_flat_zero_volume_bars_stay_out_of_the_volume_baseline():
+    df = breakout_frame(breakout_volume=500_000)
+    flat = df.index[-6]
+    df.loc[flat, ["Open", "High", "Low", "Close", "Volume"]] = [102.0, 102.0, 102.0, 102.0, 0.0]   # no-trade bucket
+    ind = engine.AlphaEngine().indicators(df)
+    assert ind["RVOL"].iloc[-1] == pytest.approx(5.0)                     # v1.1 counted it as a real 0: 5.26x

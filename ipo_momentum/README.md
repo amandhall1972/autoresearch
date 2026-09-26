@@ -9,9 +9,10 @@ paper broker or to Zerodha Kite.
 python engine.py --source csv      # fully offline, on real SWIGGY bars: history -> ticks -> signal -> order
 ```
 
-> **Paper execution is the default.** Real orders need `--source kite --live-orders`
-> and Kite credentials. Nothing here is investment advice. The one real breakout
-> in the bundled data **failed** (see [Validation](#validation-on-real-data)).
+> **Paper execution is the default.** Real orders need
+> `--source kite --live-feed --live-orders --expect-ip <static IP>` and Kite
+> credentials. Nothing here is investment advice. The one real breakout in the
+> bundled data **failed** (see [Validation](#validation-on-real-data)).
 
 ---
 
@@ -19,15 +20,16 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 
 1. [Quick start](#quick-start)
 2. [What happened when the original file was run](#what-happened-when-the-original-file-was-run)
-3. [Architecture](#architecture)
-4. [Strategy specification](#strategy-specification)
-5. [Live bar synthesis](#live-bar-synthesis)
-6. [Execution and risk](#execution-and-risk)
-7. [CLI reference](#cli-reference)
-8. [Validation on real data](#validation-on-real-data)
-9. [Changes from v1.0](#changes-from-v10)
-10. [Known limitations](#known-limitations)
-11. [Tests](#tests)
+3. [Run modes and safety rules](#run-modes-and-safety-rules)
+4. [Architecture](#architecture)
+5. [Strategy specification](#strategy-specification)
+6. [Live bar synthesis](#live-bar-synthesis)
+7. [Execution and risk](#execution-and-risk)
+8. [CLI reference](#cli-reference)
+9. [Validation on real data](#validation-on-real-data)
+10. [How it was reviewed](#how-it-was-reviewed)
+11. [Known limitations](#known-limitations)
+12. [Tests](#tests)
 
 ---
 
@@ -37,22 +39,31 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 cd ipo_momentum
 uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 95 tests, ~13 s, fully offline
+uv run pytest                       # 143 tests, ~30 s, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
 `pytest` for the tests), then `python engine.py --source csv`.
 
-| Mode | Command | Needs |
-| --- | --- | --- |
-| Offline demo on real bars | `python engine.py --source csv` | nothing (bundled data) |
-| Original demo (Yahoo history) | `python engine.py` | outbound HTTPS to `query1.finance.yahoo.com` |
-| Zerodha history + simulated tape | `python engine.py --source kite` | `KITE_API_KEY`, `KITE_ACCESS_TOKEN` |
-| Zerodha live ticks, paper orders | `python engine.py --source kite --live-feed --no-simulate --run-seconds 0` | same |
-| Zerodha live ticks, **real orders** | `... --live-feed --live-orders --expect-ip <static IP>` | same, plus a funded account |
+| Mode | Command |
+| --- | --- |
+| Offline demo on real bars | `python engine.py --source csv` |
+| Original demo (Yahoo history) | `python engine.py` (needs HTTPS to `query1.finance.yahoo.com`) |
+| Zerodha history + simulated tape | `python engine.py --source kite --listing-date YYYY-MM-DD` |
+| Zerodha live ticks, paper orders | `python engine.py --source kite --listing-date YYYY-MM-DD --live-feed --run-seconds 0` |
+| Zerodha live ticks, **real orders** | `python engine.py --source kite --listing-date YYYY-MM-DD --live-feed --live-orders --expect-ip <static IP> --run-seconds 0` |
 
-Exit codes: `0` success, `1` no usable history or a crashed worker, `2`
-invalid configuration, `130` Ctrl-C.
+Kite modes need `KITE_API_KEY` and `KITE_ACCESS_TOKEN` in the environment.
+Real orders also need a funded account.
+
+**Exit codes**
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | No usable history, a failed IP check, a crashed worker or dead websocket, or a live order that could not be settled or protected (the run lists each under `ATTENTION`) |
+| `2` | Invalid configuration, including malformed arguments |
+| `130` | Ctrl-C, after the normal shutdown and halt report |
 
 ---
 
@@ -84,9 +95,10 @@ tick arrived, and none ever did:
 Final Inventory State: set()                             <- no signal, no order
 ```
 
-**Run 3: v1.1, the same command-line demo, offline on the same real bars:**
+**Run 3: the current engine, same demo, offline on the same real bars:**
 
 ```
+[SWIGGY] No listing date given: treating the first bar (2026-09-08 09:15) as the listing, so the base and AVWAP are anchored there (demo semantics).
 [SWIGGY] Map established. 944 concrete 5m bars acquired (2026-09-08 09:15 -> 2026-09-25 15:15 IST).
 📡 [EXCHANGE] Real Historical Base High to Beat: 285.55 | Last close: 264.85
 📊 [SWIGGY] 5m Bar Closed 2026-09-28 09:15 | O: 264.85 H: 265.38 L: 264.85 C: 265.38 | V: 150,000
@@ -102,8 +114,27 @@ Final Inventory State: {'SWIGGY'}
 ```
 
 The simulated tape is synthetic. Only the base high (285.55) and the last
-close (264.85) come from the data. The tape is timestamped at the next
-session's open, so it continues the real history.
+close (264.85) come from the data. It is stamped at the session after the data
+ends, and the run keeps time by the tape, so the demo behaves the same on any
+date.
+
+---
+
+## Run modes and safety rules
+
+| Rule | Why |
+| --- | --- |
+| `--live-orders` requires `--live-feed`, `--source kite` and `--expect-ip` | Without a live feed, only the synthetic tape could trigger an order |
+| `--live-feed` turns the synthetic tape off | Invented ticks must never mix with real ones |
+| The router refuses signals whose bar has not closed yet (by the router's clock) | Defence in depth against synthetic or corrupt timestamps |
+| `--source kite` requires `--listing-date` | The IPO base and AVWAP are anchored at the listing |
+| History must start in the listing session itself | Otherwise the "IPO base" comes from later sessions (e.g. after Yahoo's ~60-day limit). `--allow-partial-history` overrides this. |
+| Simulated runs keep time by the tape; live runs by the wall clock | Staleness checks and bar closing stay correct in both |
+
+Without `--listing-date` (Yahoo and CSV demos only), the first bar of the last
+20 days is treated as the listing, as in v1.0's demo, and the run says so. SWIGGY
+actually listed on 2024-11-13. With that date and the bundled data, the engine
+refuses to trade.
 
 ---
 
@@ -113,29 +144,38 @@ session's open, so it continues the real history.
  ┌───────────── 1. Data harmonization ─────────────┐
  │ PublicExchangeAdapter (Yahoo)                   │   harmonize_bars(): bars exist only if they traded,
  │ ZerodhaKiteAdapter    (Kite REST)  ──────────► │   IST index, float64, no future back-fill,
- │ CsvReplayAdapter      (offline)                 │   forming bar dropped
- └──────────────── ProductionOrchestrator ─────────┘   history must reach the listing date (fail closed)
+ │ CsvReplayAdapter      (offline)                 │   forming and off-grid bars dropped
+ └──────────────── ProductionOrchestrator ─────────┘   history must start in the listing session (fail closed)
                            │ market_state{symbol: DataFrame}
  broker websocket thread   ▼
  KiteTicker ──on_ticks──► LiveTickAdapter.broker_on_ticks ──call_soon_threadsafe──► tick_queue
-                                     (normalize: token→symbol, exchange time, cumulative volume)
+      └─on_connect──► mark_feed_reset (re-baseline volume)   on_noreconnect ──► supervised stop
                            │ event loop
                            ▼
           process_ticks ─► on_tick ─► close_bar ◄── bar_clock (closes bars with no later tick)
-                                        │  appends the bar, notifies bar listeners (paper exits)
+                                        │  hole? → back-fill from broker history, then evaluate
+                                        │  notifies bar listeners (paper OCO)
                                         ▼
                           AlphaEngine.evaluate (causal, vectorized)
                                         │ Signal
                                         ▼ oms_queue
           ExecutionRouter.process_orders ─► plan (tick-rounded, risk- and notional-capped)
                                         ▼
-                     PaperGateway   |   KiteOrderGateway (LIMIT entry → GTT OCO stop/target)
+                     PaperGateway   |   KiteOrderGateway (LIMIT entry → settle → GTT OCO)
 ```
 
-Three worker tasks run under supervision: the tick aggregator, the bar clock
-and the OMS router. A worker that stops ends the run with exit code 1. A
-failure while handling one tick, bar or order is logged and skipped. It never
+The tick aggregator, bar clock, OMS router and (live) websocket watch all run
+under supervision, and a worker that stops ends the run with exit code 1. A
+failure while handling one tick, bar or order is logged and skipped; it never
 kills a loop.
+
+**Shutdown** follows the same order whether the run times out, receives Ctrl-C
+or loses a worker:
+1. Stop everything that produces ticks or signals.
+2. Stop accepting new signals.
+3. Let the order in flight settle. The gateway bounds its own time, so this
+   cannot hang.
+4. Print the halt report.
 
 ---
 
@@ -147,17 +187,18 @@ test suite checks this by walking the real data bar by bar
 
 | Quantity | Definition |
 | --- | --- |
-| IPO base high | `max(High)` over the first `base_bars = 150` bars since listing (two sessions). No breakout is possible until the base is complete. |
-| AVWAP | VWAP anchored at the listing: `cumsum(TP·V) / cumsum(V)`, where `TP = (H+L+C)/3`. It is undefined until volume has traded. |
-| RVOL (`trailing`, default) | `V_t / mean(V over the previous 20 bars)`. The current bar is excluded. Vendor-gap bars (range > 0, volume 0) are ignored, and at least 15 valid bars are required. |
-| RVOL (`time_of_day`) | `V_t / mean(V of the same 5-minute slot over the previous 10 sessions)`. It falls back to trailing until the slot has history. |
-| ATR | 14-bar mean of **true range** `max(H−L, |H−C₋₁|, |L−C₋₁|)`, so gaps count. |
-| Breakout | `C₋₁ ≤ base < C` **and** `C > AVWAP` **and** `RVOL > 2.0` |
+| IPO base | The first `base_bars = 150` bars since listing (v1.0's definition), or with `--base-sessions N` every bar of the first N sessions. 150 bars is two full sessions. On a real listing day continuous trading starts at 10:00 (66 bars), so it reaches into session 3's first nine bars. |
+| Base high | `max(High)` over the base. Undefined on base rows, and no breakout until the base is complete. |
+| AVWAP | VWAP anchored at the listing: `cumsum(TP·V) / cumsum(V)`, where `TP = (H+L+C)/3`. Undefined until volume has traded. |
+| RVOL (`trailing`, default) | `V_t / mean(V over the previous 20 bars)`. The current bar is excluded, and so are zero-volume bars (vendor gaps or no-trade buckets). At least 15 valid bars are required. |
+| RVOL (`time_of_day`) | `V_t / mean(V of the same 5-minute slot over the previous 10 sessions)`. Falls back to trailing until the slot has history. |
+| ATR | 14-bar mean of **true range** `max(H−L, \|H−C₋₁\|, \|L−C₋₁\|)`, so gaps count. |
+| Breakout | A cross: `C₋₁ ≤ base < C` **and** `C > AVWAP` **and** `RVOL > 2.0`. A close back into the base followed by a new cross counts again. |
 | Stop | `max(C − 1.5·ATR, AVWAP)`: "risk bounded by 1.5 ATR, or the AVWAP floor, whichever is closer" |
 | Target | `C + 3 × (C − stop)` |
 
 **Why `time_of_day` exists.** On the bundled data, 75% of 09:15 bars have
-trailing RVOL > 2, against 11% of other bars. At the open the volume filter
+trailing RVOL > 2, against 11% of other bars, so at the open the volume filter
 barely filters. With `--rvol-mode time_of_day` the 09:15 rate drops to 17%.
 Trailing stays the default because it is the original strategy's definition.
 
@@ -168,77 +209,107 @@ Trailing stays the default because it is the original strategy's definition.
 * **Symbols.** Kite ticks carry an integer `instrument_token`, which is mapped
   to the tradingsymbol with the instrument dump loaded at boot. Unknown tokens
   are dropped and counted. So are ticks for a symbol whose history did not
-  load. Without history there is no IPO base, and bars built from live ticks
-  alone would anchor the base at start-up.
+  load: without history there is no IPO base.
 * **Session.** Only prints inside the continuous session (09:15–15:30 IST)
   make bars. Pre-open auction prints are dropped before the volume counter
   moves, so the auction volume lands in the 09:15 bar, as in broker candles.
-* **Time.** A tick belongs to the bar that contains its `exchange_timestamp`
-  (falling back to `last_trade_time`, then `timestamp`, then receive time).
-  KiteTicker delivers naive host-local datetimes, which are converted to IST.
+* **Time.** A tick belongs to the bar that contains its `exchange_timestamp`,
+  falling back to a `timestamp` field, then to receive time. `last_trade_time`
+  is deliberately not used, because for a quiet name it can be minutes old. A
+  zeroed exchange time, which the SDK parses as 1970, also falls back to
+  receive time. KiteTicker's naive host-local datetimes are converted to IST.
 * **Volume.** Full- and quote-mode ticks report cumulative day volume
-  (`volume_traded`), and a bar receives the *difference* between prints. The
-  first print of a day counts from zero only if the engine was running at the
-  09:15 open. Joining mid-session never dumps the day's earlier volume into one
-  bar. LTP-mode ticks carry no volume and contribute 0.
+  (`volume_traded`), and a bar receives the *difference* between prints.
+  - A print only opens or extends a bar if something traded, so depth updates
+    make no bars.
+  - Whenever the feed was not watching (start-up, a late connect, any
+    reconnect), the counter holds trades the engine never saw. It is
+    re-baselined, and the bar spanning the blind spot is discarded rather than
+    credited with an outage's volume.
+  - The first print of a day counts from zero only if the feed was up at 09:15.
+  - LTP-mode ticks carry no volume and make no bars; the feed uses full mode.
 * **Closing.** A bar closes when a tick for a later bucket arrives, *or* when
-  the bar clock sees the bucket ended more than 2 s ago. Without the clock, an
-  illiquid name's bar, or the session's 15:25 bar, would close at the next
-  day's open.
-* **Integrity.** Ticks for a bucket that has already closed are dropped, not
-  merged. The first bucket is discarded if the engine started inside it, because
-  its open and volume would be wrong. History fetches drop the still-forming bar.
+  the bar clock sees the bucket ended more than 2 s ago.
+* **Holes.** If bars are missing before a newly closed bar (a discarded blind
+  spot, or a bucket with no trades), they are back-filled from the broker's
+  history before that bar is evaluated. This prevents a "first crossing" from
+  firing one bar late at a worse price. Without a history source, a bar after
+  a hole is recorded but not evaluated.
+* **Integrity.** Late and out-of-order prints are dropped before they can move
+  the volume counter. History fetches drop the still-forming bar.
 
 ---
 
 ## Execution and risk
 
-**Sizing.** `qty = min(floor(risk_per_trade / (limit − stop)), floor(max_position_value / limit))`.
-Risk is measured from the *worst acceptable fill* (the limit price). Defaults:
-₹15,000 risk per trade and a ₹10,00,000 notional cap. Without the cap, a
-tight stop would size into crores. `risk_per_trade` is a fixed rupee amount,
-not a fraction of equity, and gaps can lose more than it.
+**Sizing.**
+`qty = min(floor(risk_per_trade / (limit − stop)), floor(max_position_value / limit))`.
+Risk is measured from the *worst acceptable fill*, the limit price.
+- Defaults: ₹15,000 risk per trade and a ₹10,00,000 notional cap. Without the
+  cap, a tight stop would size into crores.
+- `risk_per_trade` is a fixed rupee amount, not a fraction of equity, and gaps
+  can lose more than it.
 
 **Prices** are placed on the tick grid in the conservative direction. The
 entry limit (`signal × 1.005`) rounds up, and the stop and target round down.
 Kite supplies each instrument's tick size.
 
-**Static IP.** `--live-orders` refuses to start without `--expect-ip`. The
-check asks three IPv4-only echo services concurrently (IPv6-only ones for an
-IPv6 address). A dual-stack service would report the IPv6 address of an
-IPv4-whitelisted host. Any disagreeing answer aborts the run, and at least two
-services must confirm the address. Junk bodies (captive portals) and
-unreachable services are ignored.
+**Static IP.** `--live-orders` refuses to start without `--expect-ip`.
+- The check asks three IPv4-only echo services concurrently (IPv6-only ones for
+  an IPv6 address). A dual-stack service would report the IPv6 address of an
+  IPv4-whitelisted host.
+- Any disagreeing answer aborts the run, and at least two services must
+  confirm the address.
+- Junk bodies (captive portals) and unreachable services are ignored.
 
 **Guards.** The router applies these, in order:
-1. Skip a symbol that already has a pending or open position.
-2. Reject a signal whose bar closed more than 60 s ago.
-3. Reject degenerate geometry (NaN, a stop at or above the entry, a target
-   inside the limit).
+1. Stop taking signals once shutdown begins.
+2. Skip a symbol with a pending or open position, or an order in an unknown
+   state.
+3. Refuse a signal whose bar has not closed yet, or closed more than 60 s ago.
+4. Reject degenerate geometry: NaN, a stop at or above the entry, or a target
+   inside the limit.
 
 The Kite gateway also re-checks the live LTP. It skips the entry if the price
 has fallen to or below the stop, or has run above the limit.
 
-**PaperGateway** fills at the signal price and plays a simulated OCO on every
-later closed bar:
-* A stop gapped through fills at the open.
-* If one bar touches both levels, the stop is assumed to have come first.
-* Exits release the symbol and record realized P&L.
-
-**KiteOrderGateway** runs this sequence:
-1. A `regular` LIMIT BUY (product `CNC`).
-2. Poll `order_history` until the order is terminal. Cancel any remainder after
-   30 s.
-3. Place a **GTT OCO** on the filled quantity: a stop leg with a limit 0.5%
-   below its trigger, and a target leg.
-4. If the GTT fails after a fill, log `CRITICAL POSITION OPEN WITHOUT EXITS`.
+**KiteOrderGateway.** Once an order may exist at the exchange, it is never
+abandoned:
+1. It places a `regular` LIMIT BUY (product `CNC`) with a unique tag. If the
+   reply is lost, the tag finds the order.
+2. It polls `order_history` until the order reaches a terminal state, retrying
+   through transient API errors.
+3. If the order hasn't filled after 30 s, it cancels the remainder and polls
+   until the exchange confirms a terminal state.
+4. It places a **GTT OCO** on the final filled quantity, retrying on transient
+   errors. The stop leg is a SELL LIMIT 2% below its trigger (GTT legs must be
+   LIMIT). The target leg is a SELL LIMIT at the target.
+5. If shutdown interrupts an entry, the gateway cancels it, protects any fill
+   and records an alert before the cancellation propagates.
+6. If an order's state cannot be confirmed, the symbol stays blocked, so
+   nothing enters twice. The run then exits 1 and lists it under `ATTENTION`.
+   A fill that could not be protected is reported as
+   `POSITION OPEN WITHOUT EXITS`.
 
 Zerodha disabled bracket orders (`variety=bo`) in March 2020, and current
 `kiteconnect` has no `VARIETY_BO`. v1.0's commented `VARIETY_BO` call could
-never have worked. GTT supports CNC, NRML and MTF, which is why CNC is the
-default. The gateway is tested against the **real `kiteconnect` SDK** with only
-its HTTP transport stubbed, so the SDK's own GTT payload validation runs. It
-has not been run against a live account.
+never have worked. GTT supports CNC, NRML and MTF, hence CNC. The gateway is
+tested against the **real `kiteconnect` SDK** with only its HTTP transport
+scripted, so the SDK's own parameter handling and GTT validation run. It has
+not been run against a live account.
+
+**Gap risk.** A SELL LIMIT only fills at or above its price. If price gaps
+more than 2% through the stop, the triggered stop order rests unfilled until
+price recovers to it. **PaperGateway** plays exactly these mechanics on every
+later closed bar:
+- A gap through the trigger fills at the open if the open is above the stop
+  limit. It fills at the limit if price recovers to it within the bar.
+  Otherwise the position is reported as `STOP TRIGGERED, LIMIT UNFILLED` and
+  the limit keeps resting.
+- An open beyond the target fills the target at the open.
+- If one bar touches both levels from an open between them, the stop is
+  assumed to have come first.
+- Exits release the symbol and record realized P&L.
 
 ---
 
@@ -247,23 +318,20 @@ has not been run against a live account.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--source {yahoo,csv,kite}` | `yahoo` | Historical data source |
-| `--csv PATH` | bundled SWIGGY file | Bars for `--source csv` |
+| `--csv PATH` | bundled SWIGGY file | Bars for `--source csv` (a file named for another symbol is flagged) |
 | `--symbol` | `SWIGGY` | NSE tradingsymbol |
-| `--listing-date YYYY-MM-DD` | as-of − 20 days | IPO listing date (anchors base and AVWAP) |
-| `--allow-partial-history` | off | Trade even if history does not reach the listing |
+| `--listing-date YYYY-MM-DD` | demo: first bar of last 20 days | IPO listing date. **Required** for `--source kite`. |
+| `--base-sessions N` | off (first 150 bars) | Define the IPO base as the first N sessions |
+| `--allow-partial-history` | off | Trade even if history does not start in the listing session |
 | `--risk-per-trade` | `15000` | Rupees lost if the stop is hit at its trigger |
 | `--max-position-value` | `1000000` | Notional cap per position |
 | `--rvol-threshold` / `--rvol-mode` | `2.0` / `trailing` | Volume filter |
 | `--risk-reward` | `3.0` | Target distance in multiples of risk |
-| `--run-seconds` | `6` | Run time (`0` = until Ctrl-C) |
+| `--run-seconds` | `6` | Run time, ≥ 0 (`0` = until Ctrl-C) |
 | `--no-simulate` | off | Do not inject the synthetic breakout tape |
-| `--live-feed` / `--live-orders` | off | Kite websocket ticks / real orders (`--source kite` only) |
-| `--expect-ip` | none | Abort unless the public IP matches (static-IP whitelisting). **Required** with `--live-orders`. |
-
-The default listing date (20 days before the data) mirrors v1.0's demo, which
-treats SWIGGY as a fresh listing. SWIGGY actually listed on 2024-11-13. With
-its real date and the bundled data, the engine correctly refuses to trade, and
-`--allow-partial-history` overrides that.
+| `--live-feed` | off | Stream Kite websocket ticks (disables the synthetic tape) |
+| `--live-orders` | off | Real orders. Requires `--source kite --live-feed --expect-ip`. |
+| `--expect-ip` | none | Abort unless the public IP matches. **Required** with `--live-orders`. |
 
 ---
 
@@ -281,33 +349,48 @@ closed at 278.50:
 | | Stop | Target | Size | Outcome |
 | --- | --- | --- | --- | --- |
 | v1.0 logic | 277.90 (AVWAP, the *farther* stop) | 312.91 | 1,713 sh | stopped at 15:00, ≈ −₹14,990 |
-| v1.1 logic | 284.95 (1.5 ATR, the *closer* stop) | 291.70 | 3,471 sh (notional-capped) | stopped on the next bar, ≈ −₹5,900 at the signal price (≤ −₹10,934 at the limit) |
+| current logic | 284.95 (1.5 ATR, the *closer* stop) | 291.70 | 3,471 sh (notional-capped) | stopped on the next bar, ≈ −₹5,900 at the signal price (≤ −₹10,934 at the limit) |
 
 This is one trade. It verifies the pipeline end to end on real prints. It is
 not evidence of an edge in either direction.
 
 ---
 
-## Changes from v1.0
+## How it was reviewed
 
-[CHANGELOG.md](CHANGELOG.md) lists every v1.0 defect. For each it gives
-severity, the second reviewer's verdict, the v1.1 fix, and the test that pins
-it. Every item was reproduced against the original file by one reviewer, then
-re-checked by a second reviewer trying to refute it. No finding was refuted.
+Two adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
+lists every finding with its severity, verdict, fix and the test that pins it.
+
+1. **v1.0, the original file.** Four reviewers, one per area (live path, alpha,
+   execution, data/infra), had to reproduce each defect against the unmodified
+   file. Four skeptics then tried to refute each finding with independent
+   reproductions. **40 findings, none refuted**, plus 2 from a completeness
+   critic. These became v1.1.
+2. **v1.1, the first fix.** The same process ran on a frozen snapshot of v1.1.
+   It found real defects in the fixes themselves, for example:
+   - The synthetic tape could reach a live order.
+   - Shutdown could strand a working live entry.
+   - A feed reconnect could fake a volume spike.
+   - The demo would have stopped trading on 2026-09-28 09:26 IST.
+
+   These became v1.2. Every v1.2 behavior test fails on the v1.1 snapshot and
+   passes on this code.
 
 ---
 
 ## Known limitations
 
+* **Kite exits are not tracked.** After a live fill, the broker's GTT owns the
+  exit. The engine keeps the symbol reserved until restart and does not
+  reconcile positions or GTTs at boot.
+* **Gap risk.** A stop gapped more than 2% through its trigger rests unfilled
+  (see [Execution and risk](#execution-and-risk)).
+* **Sizing ignores margin and liquidity.** There is no check against available
+  funds or bar volume, beyond the notional cap.
 * **Special sessions** outside 09:15–15:30 (e.g. Diwali Muhurat trading) are
   dropped from both Yahoo history and live ticks.
 * **Exchange holidays** are not modelled. `next_session_open` skips weekends
   only, which affects the simulated tape's date, not live trading.
-* **Kite exits are not tracked.** After a live fill, the broker's GTT owns the
-  exit. The engine keeps the symbol reserved until restart and does not
-  reconcile positions at boot.
-* **Sizing ignores margin and liquidity.** There is no check against available
-  funds or bar volume, beyond the notional cap.
 * **The bundled data** has vendor artifacts: missing 15:20/15:25 bars and five
   zero-volume bars ([data/README.md](data/README.md)).
 * **The strategy is unvalidated.** One historical signal is not a backtest.
@@ -320,15 +403,21 @@ re-checked by a second reviewer trying to refute it. No finding was refuted.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 95 tests run offline in about 13 s. They pass on Python 3.10 with pandas
-2.2 and numpy 1.26, on Python 3.10 with pandas 2.3 and numpy 2.2 (the
-`uv.lock` resolution), and on Python 3.11 with pandas 3.0 and numpy 2.4.
+The 143 tests run offline in about 30 s (the slowest are real CLI runs,
+including a Ctrl-C). They pass in five configurations:
+- Python 3.10 with pandas 2.2 and numpy 1.26
+- Python 3.10 with pandas 2.3 and numpy 2.2 (the `uv.lock` resolution)
+- Python 3.11 with pandas 3.0 and numpy 2.4
+- the whole suite with the wall clock shifted to 2027
+- the whole suite with the wall clock shifted to inside the window where v1.1's
+  demo would have broken
+
 Pandas `FutureWarning`s raised from engine code fail the suite.
 
 | File | Covers |
 | --- | --- |
-| `test_alpha.py` | Breakout conditions, the exact stop/target math, true-range ATR, RVOL baselines, look-ahead freedom on real data, the pinned real signal |
-| `test_live.py` | Tick-to-OHLCV bars, the bar clock, partial/late ticks, Kite payloads (token map, exchange time, cumulative volume), thread safety, loop survival |
-| `test_execution.py` | Sizing caps, tick rounding, duplicates, failure recovery, paper OCO exits, the Kite gateway on the real SDK |
-| `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter, Yahoo/Kite/CSV adapters, retry policy, orchestrator anchoring |
-| `test_end_to_end.py` | The CLI: offline trade, abort exit codes, config validation, worker-crash supervision |
+| `test_alpha.py` | Breakout conditions and crossing semantics, the exact stop/target math, true-range ATR, RVOL baselines and modes, session-defined bases, look-ahead freedom (including inside the base), the pinned real signal |
+| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed reconnects and late connects, no-trade quotes, hole back-fill, thread safety, loop survival |
+| `test_execution.py` | Sizing caps, tick rounding, duplicates, future and stale signals, paper OCO mechanics incl. gaps, and the Kite gateway on the real SDK: lost replies, transient errors, cancels that don't land, partial fills, interrupted entries, GTT retries |
+| `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter, the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads, retry policy, orchestrator anchoring and error containment |
+| `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes, config and argument validation, live-mode safety, a dead websocket, shutdown with an order in flight, Ctrl-C |

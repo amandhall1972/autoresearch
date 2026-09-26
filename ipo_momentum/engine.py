@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.1)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.2)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -9,12 +9,13 @@ Architecture:
 4. Execution Router (Fixed-Risk Sizing, Notional Cap, Paper or Zerodha Execution)
 
 Quick start (see README.md):
-    python engine.py                 # Yahoo history + simulated breakout, paper fills
-    python engine.py --source csv    # bundled real SWIGGY 5m bars, fully offline
-    python engine.py --source kite   # Zerodha history (KITE_API_KEY, KITE_ACCESS_TOKEN)
+    python engine.py                                        # Yahoo history + simulated breakout, paper fills
+    python engine.py --source csv                           # bundled real SWIGGY 5m bars, fully offline
+    python engine.py --source kite --listing-date YYYY-MM-DD   # Zerodha history (KITE_API_KEY, KITE_ACCESS_TOKEN)
 
-Paper execution is the default. Real orders require --source kite --live-orders.
-Nothing here is investment advice.
+Paper execution is the default. Real orders require
+    --source kite --listing-date YYYY-MM-DD --live-feed --live-orders --expect-ip <static IP>
+and the synthetic tape never runs alongside a live feed. Nothing here is investment advice.
 ====================================================================================
 """
 
@@ -25,8 +26,10 @@ import json
 import logging
 import math
 import os
+import signal
 import sys
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,7 +38,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from datetime import time as dtime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -117,6 +120,8 @@ class Position:
     stop_loss: float
     target: float
     opened_at: datetime                         # first bar that can hit the stop or target
+    stop_limit: Optional[float] = None          # SELL LIMIT placed when the stop triggers (as in the live GTT)
+    stop_triggered: bool = False                # triggered, but the limit has not filled yet
     exit_price: Optional[float] = None
     exit_reason: Optional[str] = None           # "STOP" or "TARGET"
     closed_at: Optional[datetime] = None
@@ -141,8 +146,11 @@ def to_ist(ts: datetime) -> datetime:
 
 
 def bar_floor(ts: datetime, minutes: int = BAR_MINUTES) -> datetime:
-    """Start of the ``minutes``-wide bar containing ``ts`` (bars are aligned to the hour)."""
-    return ts.replace(minute=ts.minute - ts.minute % minutes, second=0, microsecond=0)
+    """Start of the ``minutes``-wide bar containing ``ts``. NSE bars are aligned to the 09:15 open,
+    which matters for 30- and 60-minute bars (09:15, 09:45, ...)."""
+    anchor = ts.replace(hour=SESSION_OPEN.hour, minute=SESSION_OPEN.minute, second=0, microsecond=0)
+    width = timedelta(minutes=minutes)
+    return anchor + ((ts - anchor) // width) * width
 
 
 def next_session_open(ts: datetime) -> datetime:
@@ -179,7 +187,11 @@ def harmonize_bars(df: pd.DataFrame) -> pd.DataFrame:
     """
     if df.empty:
         return empty_bars()
-    df = df[OHLCV].apply(pd.to_numeric, errors="coerce").astype("float64")
+    raw = df[OHLCV]
+    df = raw.apply(pd.to_numeric, errors="coerce").astype("float64")
+    coerced = int((df.isna() & raw.notna()).sum().sum())
+    if coerced:
+        logger.warning(f"{coerced} OHLCV values were not numbers (e.g. '1,234,567') and were treated as missing.")
     df = df[df["Close"].notna()].copy()
     for col in ["Open", "High", "Low"]:
         df[col] = df[col].fillna(df["Close"])
@@ -407,24 +419,33 @@ class PublicExchangeAdapter(BrokerAdapter):
                     return self._empty_map()
                 await asyncio.sleep(2 ** attempt)
 
-        chart = (data or {}).get('chart') or {}
-        if chart.get('error') or not chart.get('result'):
-            logger.error(f"[{symbol}] Yahoo returned no chart data: {chart.get('error')}")
+        chart = data.get('chart') if isinstance(data, dict) else None
+        results = chart.get('result') if isinstance(chart, dict) else None
+        res = results[0] if isinstance(results, list) and results else None
+        if not isinstance(res, dict):
+            logger.error(f"[{symbol}] Yahoo returned no chart data: {chart.get('error') if isinstance(chart, dict) else data!r:.200}")
             return self._empty_map()
-        res = chart['result'][0]
-        if not res.get('timestamp'):
+        stamps = res.get('timestamp') or []
+        quotes = (res.get('indicators') or {}).get('quote') or [None]
+        quote = quotes[0] if isinstance(quotes[0], dict) else {}
+        if not stamps or not quote:
             logger.error(f"[{symbol}] Yahoo chart has no bars in the requested window.")
             return self._empty_map()
-
-        quote = res['indicators']['quote'][0]
-        n = len(res['timestamp'])
-        df = pd.DataFrame({col: quote.get(col.lower()) or [None] * n for col in OHLCV},
-                          index=pd.to_datetime(res['timestamp'], unit='s', utc=True))
+        columns = {}
+        for col in OHLCV:
+            values = quote.get(col.lower())
+            if not isinstance(values, list) or len(values) != len(stamps):
+                logger.warning(f"[{symbol}] Yahoo '{col.lower()}' series is missing or misaligned; treated as empty.")
+                values = [None] * len(stamps)
+            columns[col] = values
+        df = pd.DataFrame(columns, index=pd.to_datetime(stamps, unit='s', utc=True))
         minutes = INTERVAL_MINUTES.get(interval, BAR_MINUTES)
         df = harmonize_bars(df)
         # Yahoo can append an off-grid "live" row (e.g. 15:29:59) and pre-open prints; neither is a bar.
+        # The grid is anchored at the 09:15 open (30-minute bars start 09:15, 09:45, ...).
         t = df.index
-        on_grid = (t.second == 0) & (t.minute % minutes == 0) & (t.time >= SESSION_OPEN) & (t.time < SESSION_CLOSE)
+        since_open = (t.hour * 60 + t.minute) - (SESSION_OPEN.hour * 60 + SESSION_OPEN.minute)
+        on_grid = (t.second == 0) & (since_open % minutes == 0) & (t.time >= SESSION_OPEN) & (t.time < SESSION_CLOSE)
         return drop_incomplete_bars(df[on_grid], end_date, minutes)
 
 class CsvReplayAdapter(BrokerAdapter):
@@ -439,7 +460,8 @@ class CsvReplayAdapter(BrokerAdapter):
     def load(path: Path) -> pd.DataFrame:
         raw = pd.read_csv(path)
         df = raw.rename(columns={c: c.capitalize() for c in ["open", "high", "low", "close", "volume"]})
-        df.index = pd.DatetimeIndex(pd.to_datetime(raw["datetime_ist"])).tz_localize(IST)
+        idx = pd.DatetimeIndex(pd.to_datetime(raw["datetime_ist"]))
+        df.index = idx.tz_localize(IST) if idx.tz is None else idx.tz_convert(IST)   # offsets allowed
         return harmonize_bars(df)
 
     async def fetch_historical_bars(self, symbol: str, start_date: datetime, end_date: datetime, interval: str = "5m") -> pd.DataFrame:
@@ -447,6 +469,8 @@ class CsvReplayAdapter(BrokerAdapter):
         if path is None or not path.exists():
             logger.error(f"[{symbol}] No CSV file for symbol (looked for {path}).")
             return self._empty_map()
+        if not path.stem.upper().startswith(symbol.upper()):
+            logger.warning(f"[{symbol}] {path.name} does not look like {symbol} data; replaying it as {symbol} anyway.")
         df = await asyncio.to_thread(self.load, path)
         window = df[(df.index >= pd.Timestamp(start_date)) & (df.index < pd.Timestamp(end_date))]
         logger.info(f"[{symbol}] Replaying {len(window)} bars from {path.name}.")
@@ -455,35 +479,51 @@ class CsvReplayAdapter(BrokerAdapter):
 class ProductionOrchestrator:
     """Loads each IPO's history from its listing date.
 
-    The base and AVWAP are anchored to the first bar, so a symbol whose history does not
-    reach its listing (vendor limits, or listed more than ``max_lookback_days`` ago) has no
-    IPO base: it is excluded unless ``allow_partial_history`` is set.
+    The base and AVWAP are anchored to the first bar, so the first bar must come from the
+    listing session itself. A symbol whose history starts later (vendor limits such as
+    Yahoo's ~60 days, or a listing older than ``max_lookback_days``) has no IPO base and
+    is excluded unless ``allow_partial_history`` is set. A listing date of ``None`` means
+    demo semantics: the first bar fetched is treated as the listing.
     """
-    LISTING_TOLERANCE = pd.Timedelta(days=5)   # listing on a Friday + weekend + holidays
-
-    def __init__(self, target_ipos: Dict[str, datetime], broker: BrokerAdapter,
-                 as_of: Optional[datetime] = None, max_lookback_days: int = 180, allow_partial_history: bool = False):
+    def __init__(self, target_ipos: Dict[str, Optional[datetime]], broker: BrokerAdapter,
+                 as_of: Optional[datetime] = None, max_lookback_days: int = 180, allow_partial_history: bool = False,
+                 demo_lookback_days: int = 20):
         # Naive dates are IST (comparing naive with aware datetimes raises TypeError).
-        self.watchlist = {s: d if d.tzinfo else d.replace(tzinfo=IST) for s, d in target_ipos.items()}
+        self.watchlist = {s: None if d is None else d if d.tzinfo else d.replace(tzinfo=IST) for s, d in target_ipos.items()}
         self.broker = broker
         self.as_of = as_of
         self.max_lookback_days = max_lookback_days
         self.allow_partial_history = allow_partial_history
+        self.demo_lookback_days = demo_lookback_days
         self.market_state: Dict[str, pd.DataFrame] = {}
 
     async def build_the_ground(self) -> bool:
-        await self.broker.boot()
+        try:
+            await self.broker.boot()
+        except Exception as e:
+            logger.critical(f"Broker start-up failed: {e!r}")
+            return False
         end_date = self.as_of or datetime.now(timezone.utc)
 
         for symbol, listing_date in self.watchlist.items():
-            start_date = max(listing_date, end_date - timedelta(days=self.max_lookback_days))
-            df = await self.broker.fetch_historical_bars(symbol, start_date, end_date, "5m")
+            if listing_date is None:
+                start_date = end_date - timedelta(days=self.demo_lookback_days)
+            else:
+                start_date = max(listing_date, end_date - timedelta(days=self.max_lookback_days))
+            try:
+                df = await self.broker.fetch_historical_bars(symbol, start_date, end_date, "5m")
+            except Exception:
+                logger.exception(f"[{symbol}] History fetch failed; symbol excluded.")
+                continue
             if df.empty:
                 logger.error(f"[{symbol}] No historical bars acquired; symbol excluded.")
                 continue
-            gap = df.index[0] - pd.Timestamp(listing_date)
-            if gap > self.LISTING_TOLERANCE:
-                msg = (f"[{symbol}] History starts {df.index[0]:%Y-%m-%d}, {gap.days} days after the "
+            if listing_date is None:
+                logger.warning(f"[{symbol}] No listing date given: treating the first bar ({df.index[0]:%Y-%m-%d %H:%M}) "
+                               f"as the listing, so the base and AVWAP are anchored there (demo semantics).")
+            elif df.index[0].date() != listing_date.astimezone(IST).date():
+                gap = (df.index[0].date() - listing_date.astimezone(IST).date()).days
+                msg = (f"[{symbol}] History starts {df.index[0]:%Y-%m-%d}, {gap} days after the "
                        f"{listing_date:%Y-%m-%d} listing, so the IPO base and AVWAP anchor are unknown")
                 if not self.allow_partial_history:
                     logger.error(f"{msg}; symbol excluded (--allow-partial-history to anchor at the first bar).")
@@ -499,27 +539,40 @@ class ProductionOrchestrator:
 # 3. ALPHA ENGINE & IN-MEMORY SYNTHESIZER
 # ==============================================================================
 class AlphaEngine:
-    """IPO base breakout: the first close above the high of the first ``base_bars`` bars
-    since listing, above the listing-anchored VWAP, on high relative volume.
+    """IPO base breakout: a close above the IPO base high after a close at or below it
+    (a crossing; a later re-cross counts again), above the listing-anchored VWAP, on
+    high relative volume.
 
-    Every indicator is causal: the value on bar *t* uses bars <= *t* only, and the
-    base is fully formed (``base_bars`` completed bars) before any breakout counts.
+    The base is the first ``base_bars`` bars since listing (v1.0's definition), or, with
+    ``base_sessions``, every bar of the first N sessions. Every indicator is causal: the
+    value on bar *t* uses bars <= *t* only, and no breakout counts until the base is done.
     """
     RVOL_MODES = ("trailing", "time_of_day")
 
     def __init__(self, rvol_threshold: float = 2.0, risk_reward_ratio: float = 3.0, base_bars: int = 150,
                  rvol_lookback: int = 20, atr_period: int = 14, atr_stop_multiple: float = 1.5,
-                 rvol_mode: str = "trailing", rvol_sessions: int = 10):
+                 rvol_mode: str = "trailing", rvol_sessions: int = 10, base_sessions: Optional[int] = None):
         if rvol_mode not in self.RVOL_MODES:
             raise ValueError(f"rvol_mode must be one of {self.RVOL_MODES}")
         self.rvol_threshold = rvol_threshold
         self.rr_ratio = risk_reward_ratio
         self.base_bars = base_bars
+        self.base_sessions = base_sessions      # listing day opens at 10:00, so 150 bars reach into session 3
         self.rvol_lookback = rvol_lookback
         self.rvol_mode = rvol_mode              # time_of_day: vs the same 5-minute slot of prior sessions
         self.rvol_sessions = rvol_sessions
         self.atr_period = atr_period
         self.atr_stop_multiple = atr_stop_multiple
+
+    def base_length(self, df: pd.DataFrame) -> int:
+        """Number of leading rows that form the IPO base."""
+        if self.base_sessions:
+            days = df.index.normalize()
+            return int(days.isin(days.unique()[:self.base_sessions]).sum())
+        return self.base_bars
+
+    def base_high(self, df: pd.DataFrame) -> float:
+        return float(df['High'].iloc[:self.base_length(df)].max())
 
     def indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df[OHLCV].copy()
@@ -527,13 +580,15 @@ class AlphaEngine:
         cum_vol = df['Volume'].cumsum()
         df['AVWAP'] = (typical * df['Volume']).cumsum() / cum_vol.where(cum_vol > 0)
         # Relative volume against *preceding* bars only; the current bar is not in its own baseline.
-        # A bar whose price moved on zero volume is a vendor gap, not a quiet bar: it is left out.
-        vol = df['Volume'].where(~((df['Volume'] == 0) & (df['High'] > df['Low'])))
+        # A bar exists only if it traded, so a zero-volume bar is a vendor gap or a no-trade bucket,
+        # never a quiet bar: it is left out of the baseline.
+        vol = df['Volume'].where(df['Volume'] > 0)
         min_obs = max(1, math.ceil(0.75 * self.rvol_lookback))
         vol_base = vol.rolling(self.rvol_lookback, min_periods=min_obs).mean().shift(1)
         if self.rvol_mode == "time_of_day":
             # Opening and closing bars are structurally heavy; compare each bar with its own slot.
-            slot_base = vol.groupby(df.index.strftime('%H:%M')).transform(
+            slot = (df.index.hour * 60 + df.index.minute).to_numpy()   # integer key: ~6x faster than strftime
+            slot_base = vol.groupby(slot).transform(
                 lambda s: s.shift(1).rolling(self.rvol_sessions, min_periods=2).mean())
             vol_base = slot_base.fillna(vol_base)   # young listings: trailing until slot history exists
         df['RVOL'] = df['Volume'] / vol_base.where(vol_base > 0)
@@ -541,10 +596,16 @@ class AlphaEngine:
         true_range = pd.concat([df['High'] - df['Low'], (df['High'] - prev_close).abs(),
                                 (df['Low'] - prev_close).abs()], axis=1).max(axis=1)
         df['ATR'] = true_range.rolling(self.atr_period, min_periods=1).mean()
-        df['Base_High'] = df['High'].iloc[:self.base_bars].max() if len(df) > self.base_bars else float('nan')
-        df['Breakout'] = ((prev_close <= df['Base_High']) & (df['Close'] > df['Base_High'])
-                          & (df['Close'] > df['AVWAP']) & (df['RVOL'] > self.rvol_threshold))
-        df.loc[df.index[:self.base_bars], 'Breakout'] = False  # the base itself cannot break out
+        # The base high exists only once the base is complete; rows inside the base get NaN, so no
+        # row ever sees a High from its future.
+        base_len = self.base_length(df)
+        df['Base_High'] = float('nan')
+        if len(df) > base_len:
+            df.iloc[base_len:, df.columns.get_loc('Base_High')] = df['High'].iloc[:base_len].max()
+        breakout = ((prev_close <= df['Base_High']) & (df['Close'] > df['Base_High'])
+                    & (df['Close'] > df['AVWAP']) & (df['RVOL'] > self.rvol_threshold))
+        breakout.iloc[:max(base_len, self.rvol_lookback)] = False   # same warm-up as evaluate()
+        df['Breakout'] = breakout
         return df
 
     def _signal(self, symbol: str, bar: pd.Series, bar_time: datetime) -> Signal:
@@ -555,7 +616,7 @@ class AlphaEngine:
         return Signal(symbol, close, stop_loss, target, "IPO_BASE_BREAKOUT", bar_time)
 
     def evaluate(self, symbol: str, df: pd.DataFrame) -> Optional[Signal]:
-        if len(df) <= max(self.base_bars, self.rvol_lookback): return None
+        if len(df) <= max(self.base_length(df), self.rvol_lookback): return None
 
         ind = self.indicators(df)
         latest = ind.iloc[-1]
@@ -567,7 +628,7 @@ class AlphaEngine:
 
     def scan(self, symbol: str, df: pd.DataFrame) -> List[Signal]:
         """Every bar on which evaluate() would have fired, in one vectorized pass (walk-forward)."""
-        if len(df) <= max(self.base_bars, self.rvol_lookback): return []
+        if len(df) <= max(self.base_length(df), self.rvol_lookback): return []
         ind = self.indicators(df)
         return [self._signal(symbol, row, ts) for ts, row in ind[ind['Breakout']].iterrows()]
 
@@ -575,13 +636,20 @@ class LiveTickAdapter:
     """Turns broker ticks into completed 5-minute bars and evaluates each one.
 
     Threading: ``broker_on_ticks`` runs on the broker's websocket thread and only
-    enqueues; all bar state is owned by the event loop (``process_ticks`` and
-    ``bar_clock``), so no locks are needed.
+    enqueues; all bar state is owned by the event loop (``process_ticks``, ``bar_clock``
+    and back-fill tasks), so no locks are needed.
+
+    Volume integrity: Kite reports cumulative day volume, and a bar gets the difference
+    between prints. Whenever the feed was not watching (start-up, a reconnect), the counter
+    holds trades we never saw, so it is re-baselined and the bar that spans the blind spot
+    is discarded. The hole it leaves is back-filled from the broker's history before the
+    next bar is evaluated.
     """
     def __init__(self, market_state: Dict[str, pd.DataFrame], alpha_engine: AlphaEngine, oms_queue: asyncio.Queue,
                  loop: asyncio.AbstractEventLoop, token_map: Optional[Dict[int, str]] = None,
                  bar_minutes: int = BAR_MINUTES, started_at: Optional[datetime] = None,
-                 bar_listeners: Optional[List[Callable[[str, datetime, pd.Series], None]]] = None):
+                 bar_listeners: Optional[List[Callable[[str, datetime, pd.Series], None]]] = None,
+                 backfill: Optional[Callable[[str, datetime, datetime], Awaitable[pd.DataFrame]]] = None):
         self.market_state = market_state
         self.alpha = alpha_engine
         self.oms_queue = oms_queue
@@ -592,10 +660,15 @@ class LiveTickAdapter:
         self.tick_queue = asyncio.Queue()
         self.current_bars: Dict[str, dict] = {}
         self.last_closed: Dict[str, datetime] = {}
-        self._cum_volume: Dict[str, Tuple[object, int]] = {}
+        self._cum_volume: Dict[str, Tuple[object, int, int]] = {}   # symbol -> (day, counter, feed epoch)
+        self._feed_epoch = 0
+        self._feed_since = self.started_at                           # watching continuously since
         self.dropped_ticks = 0
         self.bar_listeners = list(bar_listeners or [])
+        self.backfill = backfill
+        self._backfills: set = set()
         self._unanchored: set = set()
+        self.market_time: Optional[datetime] = None                  # latest accepted tick time
 
     def _normalize(self, t: dict) -> Optional[Tick]:
         if 'instrument_token' in t:
@@ -627,25 +700,33 @@ class LiveTickAdapter:
             # Thread-safe dispatch from the broker's C-Thread to our Async Event Loop
             self.loop.call_soon_threadsafe(self.tick_queue.put_nowait, tick)
 
-    def _traded_quantity(self, tick: Tick) -> int:
-        """Quantity to add to the bar: per-tick volume, or the delta of the day's cumulative volume."""
+    def mark_feed_reset(self, at: Optional[datetime] = None) -> None:
+        """The broker feed (re)connected. Every counter must be re-baselined, and bars that were
+        forming while the feed was down are incomplete. Must run on the event loop."""
+        self._feed_epoch += 1
+        self._feed_since = to_ist(at or datetime.now(IST))
+        for bar in self.current_bars.values():
+            bar['partial'] = True
+
+    def _traded_quantity(self, tick: Tick) -> Tuple[int, bool]:
+        """(quantity to add to the bar, whether the cumulative counter was re-baselined)."""
         if tick.cumulative_volume is None:
-            return max(0, tick.volume)
-        day = tick.timestamp.date()
-        prev_day, prev_cum = self._cum_volume.get(tick.symbol, (None, 0))
-        if prev_day != day:
-            # First print of the session for this symbol. If we were running at the open the counter
-            # holds only this session's trades; if we joined mid-session it holds everything traded
-            # before we started, which must not be dumped into the current bar.
-            prev_cum = 0 if self.started_at <= datetime.combine(day, SESSION_OPEN, tzinfo=IST) else tick.cumulative_volume
-        elif tick.cumulative_volume < prev_cum:
-            prev_cum = 0  # counter restarted (feed reset)
-        self._cum_volume[tick.symbol] = (day, tick.cumulative_volume)
-        return tick.cumulative_volume - prev_cum
+            return max(0, tick.volume), False
+        day, cum = tick.timestamp.date(), tick.cumulative_volume
+        prev = self._cum_volume.get(tick.symbol)
+        self._cum_volume[tick.symbol] = (day, cum, self._feed_epoch)
+        if prev is not None and prev[0] == day and prev[2] == self._feed_epoch:
+            return (cum - prev[1], False) if cum >= prev[1] else (0, True)   # a backwards counter is a glitch
+        # First print of the session, or the first since the feed (re)connected. The counter then holds
+        # trades we did not see; they belong to this bar only if we have been watching since the open.
+        new_session = prev is None or prev[0] != day
+        if new_session and self._feed_since <= datetime.combine(day, SESSION_OPEN, tzinfo=IST):
+            return cum, False
+        return 0, True
 
     def _open_bar(self, sym: str, bucket: datetime, price: float, volume: int) -> None:
-        # The first bucket seen after start-up is incomplete if the engine started inside it.
-        partial = sym not in self.last_closed and self.started_at > bucket
+        # A bucket that began before we were watching has an unknown open and volume.
+        partial = self._feed_since > bucket
         self.current_bars[sym] = {'timestamp': bucket, 'Open': price, 'High': price, 'Low': price,
                                   'Close': price, 'Volume': volume, 'partial': partial}
 
@@ -666,31 +747,64 @@ class LiveTickAdapter:
             # before the volume baseline moves puts auction volume in the 09:15 bar, as brokers do.
             self.dropped_ticks += 1
             return
-        volume = self._traded_quantity(tick)
-
-        if sym in self.last_closed and boundary <= self.last_closed[sym]:
-            self.dropped_ticks += 1  # late print for a bar that is already closed
-            return
         active = self.current_bars.get(sym)
+        if (sym in self.last_closed and boundary <= self.last_closed[sym]) or \
+                (active is not None and boundary < active['timestamp']):
+            # A late print for a closed bar, or out of order: dropped before it can move the volume
+            # baseline, so the next accepted print still carries its shares into the current bar.
+            self.dropped_ticks += 1
+            return
+        if self.market_time is None or tick.timestamp > self.market_time:
+            self.market_time = tick.timestamp
+        volume, rebaselined = self._traded_quantity(tick)
+        if volume <= 0 and not rebaselined:
+            # A quote or depth update without a trade: the last price is unchanged and a bucket in
+            # which nothing traded has no bar. It still proves the previous bucket is over.
+            if active is not None and boundary > active['timestamp']:
+                self.close_bar(sym)
+            return
         if active is None:
             self._open_bar(sym, boundary, tick.price, volume)
         elif boundary > active['timestamp']:
             self.close_bar(sym)
             self._open_bar(sym, boundary, tick.price, volume)
-        elif boundary < active['timestamp']:
-            self.dropped_ticks += 1  # out-of-order print from an earlier bucket
         else:
             active['High'] = max(active['High'], tick.price)
             active['Low'] = min(active['Low'], tick.price)
             active['Close'] = tick.price
             active['Volume'] += volume
 
+    def _hole_before(self, prev_idx: datetime, idx: datetime) -> Optional[datetime]:
+        """Start of the bars missing between history's last bar and ``idx`` in idx's session."""
+        session_open = datetime.combine(idx.date(), SESSION_OPEN, tzinfo=IST)
+        width = timedelta(minutes=self.bar_minutes)
+        if idx <= session_open or prev_idx >= idx - width:
+            return None
+        return max(prev_idx + width, session_open)
+
+    def _notify(self, sym: str, ts: datetime, bar: pd.Series) -> None:
+        for listener in self.bar_listeners:
+            try:
+                listener(sym, ts, bar)
+            except Exception:
+                logger.exception(f"[{sym}] Bar listener failed on the {ts:%Y-%m-%d %H:%M} bar.")
+
+    def _evaluate(self, sym: str, history: pd.DataFrame, idx: datetime) -> None:
+        # A failing evaluation must not abort bar bookkeeping, or the tick that closed the bar is lost too.
+        try:
+            signal = self.alpha.evaluate(sym, history)
+        except Exception:
+            logger.exception(f"[{sym}] Alpha evaluation failed on the {idx:%Y-%m-%d %H:%M} bar.")
+            return
+        if signal:
+            self.oms_queue.put_nowait(signal)
+
     def close_bar(self, sym: str) -> None:
         bar = self.current_bars.pop(sym)
         idx = bar['timestamp']
         self.last_closed[sym] = idx
         if bar['partial']:
-            logger.info(f"[{sym}] Discarding partial {idx:%H:%M} bar (engine started mid-bar).")
+            logger.info(f"[{sym}] Discarding the {idx:%H:%M} bar: it began before the feed was watching.")
             return
 
         history = self.market_state.get(sym)
@@ -701,25 +815,47 @@ class LiveTickAdapter:
             return
         row = pd.DataFrame([[float(bar[c]) for c in OHLCV]], columns=OHLCV,
                            index=pd.DatetimeIndex([idx], name=history.index.name))
+        hole_start = self._hole_before(history.index[-1], idx) if len(history) else None
         self.market_state[sym] = history = pd.concat([history, row]) if len(history) else row
         logger.info(f"📊 [{sym}] 5m Bar Closed {idx:%Y-%m-%d %H:%M} | O: {bar['Open']:.2f} H: {bar['High']:.2f} "
                     f"L: {bar['Low']:.2f} C: {bar['Close']:.2f} | V: {bar['Volume']:,}")
 
-        for listener in self.bar_listeners:
-            try:
-                listener(sym, idx, row.iloc[0])
-            except Exception:
-                logger.exception(f"[{sym}] Bar listener failed on the {idx:%Y-%m-%d %H:%M} bar.")
-
-        # Immediately evaluate the fully formed historical bar. A failing evaluation must not
-        # abort bar bookkeeping, or the tick that triggered this close would be lost too.
-        try:
-            signal = self.alpha.evaluate(sym, history)
-        except Exception:
-            logger.exception(f"[{sym}] Alpha evaluation failed on the {idx:%Y-%m-%d %H:%M} bar.")
+        if hole_start is not None:
+            # Evaluating across a hole could report a stale "first crossing" one bar late at a worse price.
+            if self.backfill is None:
+                logger.warning(f"[{sym}] Bars {hole_start:%H:%M}-{idx:%H:%M} are missing; the {idx:%H:%M} bar is not evaluated.")
+                self._notify(sym, idx, row.iloc[0])
+                return
+            task = asyncio.get_running_loop().create_task(self._backfill_then_evaluate(sym, hole_start, idx, row.iloc[0]))
+            self._backfills.add(task)
+            task.add_done_callback(self._backfills.discard)
             return
-        if signal:
-            self.oms_queue.put_nowait(signal)
+        self._notify(sym, idx, row.iloc[0])
+        self._evaluate(sym, history, idx)
+
+    async def _backfill_then_evaluate(self, sym: str, start: datetime, idx: datetime, live_bar: pd.Series) -> None:
+        try:
+            fetched = await self.backfill(sym, start, idx)
+            fetched = fetched[(fetched.index >= pd.Timestamp(start)) & (fetched.index < pd.Timestamp(idx))]
+        except Exception as e:
+            logger.warning(f"[{sym}] Back-fill of {start:%H:%M}-{idx:%H:%M} failed ({e!r}); the {idx:%H:%M} bar is not evaluated.")
+            self._notify(sym, idx, live_bar)
+            return
+        history = self.market_state[sym]
+        if len(fetched):
+            history = pd.concat([history, fetched])
+            history = history[~history.index.duplicated(keep='first')].sort_index()
+            self.market_state[sym] = history
+            logger.info(f"[{sym}] Back-filled {len(fetched)} missing bar(s) {start:%H:%M}-{idx:%H:%M} from the broker.")
+        for ts, bar in fetched.iterrows():
+            self._notify(sym, ts, bar)
+        self._notify(sym, idx, live_bar)
+        self._evaluate(sym, history.loc[:idx], idx)
+
+    async def cancel_backfills(self) -> None:
+        for task in list(self._backfills):
+            task.cancel()
+        await asyncio.gather(*self._backfills, return_exceptions=True)
 
     def flush_due_bars(self, now: datetime, grace: timedelta = timedelta(seconds=2)) -> None:
         """Close bars whose bucket has ended; without this, a bar waits for the *next* tick,
@@ -753,12 +889,26 @@ class LiveTickAdapter:
 # ==============================================================================
 # 4. EXECUTION ROUTER (OMS)
 # ==============================================================================
+class OrderStateUnknown(Exception):
+    """A live order may be working at the exchange, but its state could not be confirmed."""
+    def __init__(self, symbol: str, ref: str, detail: str):
+        super().__init__(f"[{symbol}] order {ref}: {detail}")
+        self.symbol, self.ref = symbol, ref
+
 class OrderGateway(ABC):
     simulates_exits = False                     # True: the engine itself must play the stop/target
+    settle_timeout = 5.0                        # upper bound on one execute() call, for shutdown
+
+    def __init__(self):
+        self.alerts: List[str] = []             # conditions an operator must act on
+        self._aborts: set = set()
 
     @abstractmethod
     async def execute(self, plan: OrderPlan) -> Optional[Fill]:
         """Enter the position and attach its stop/target exits; None if nothing was bought."""
+
+    async def wait_aborts(self) -> None:
+        await asyncio.gather(*self._aborts, return_exceptions=True)
 
 class PaperGateway(OrderGateway):
     """Simulated execution: fills at the signal price, sends nothing anywhere.
@@ -766,7 +916,9 @@ class PaperGateway(OrderGateway):
     simulates_exits = True
 
     def __init__(self, latency: float = 0.3):
+        super().__init__()
         self.latency = latency
+        self.settle_timeout = latency + 5.0
         self._orders = 0
 
     async def execute(self, plan: OrderPlan) -> Optional[Fill]:
@@ -781,35 +933,124 @@ class KiteOrderGateway(OrderGateway):
 
     Zerodha disabled bracket orders (variety ``bo``) in March 2020 and the SDK no longer
     defines ``VARIETY_BO``; GTT supports CNC/NRML/MTF, hence the CNC default.
+
+    Once ``place_order`` may have reached the exchange, nothing is abandoned: transient API
+    errors are retried, a timed-out entry is cancelled and polled until the exchange confirms a
+    terminal state, whatever filled gets a GTT, and an interrupted entry is settled the same way
+    before the cancellation propagates. If the state cannot be confirmed, OrderStateUnknown is
+    raised so the symbol stays blocked and the operator is alerted.
     """
+    TERMINAL = ("COMPLETE", "REJECTED", "CANCELLED")
+
     def __init__(self, kite, exchange: str = "NSE", product: str = "CNC", fill_timeout: float = 30.0,
-                 poll_interval: float = 1.0, stop_limit_buffer: float = 0.005, tick_size: float = 0.05):
+                 poll_interval: float = 1.0, cancel_grace: float = 15.0, stop_limit_buffer: float = 0.02,
+                 tick_size: float = 0.05):
+        super().__init__()
         self.kite = kite
         self.exchange = exchange
         self.product = product
         self.fill_timeout = fill_timeout
         self.poll_interval = poll_interval
+        self.cancel_grace = cancel_grace
         self.stop_limit_buffer = stop_limit_buffer
         self.tick_size = tick_size
+        self.settle_timeout = fill_timeout + 2 * cancel_grace + 10.0
 
-    async def _order_state(self, order_id: str) -> dict:
-        history = await asyncio.to_thread(self.kite.order_history, order_id)
-        return history[-1] if history else {}
+    async def _poll_state(self, order_id: str) -> Optional[dict]:
+        try:
+            history = await asyncio.to_thread(self.kite.order_history, order_id)
+        except Exception as e:
+            logger.warning(f"order_history({order_id}) failed: {e!r}; retrying.")
+            return None
+        return history[-1] if history else None
 
-    async def _await_terminal(self, order_id: str) -> dict:
-        deadline = time.monotonic() + self.fill_timeout
+    async def _wait_terminal(self, order_id: str, timeout: float) -> Optional[dict]:
+        """The order's terminal state, or None if the exchange has not confirmed one within ``timeout``."""
+        deadline = time.monotonic() + timeout
         while True:
-            state = await self._order_state(order_id)
-            if state.get('status') in (self.kite.STATUS_COMPLETE, self.kite.STATUS_REJECTED, self.kite.STATUS_CANCELLED):
+            state = await self._poll_state(order_id)
+            if state is not None and state.get('status') in self.TERMINAL:
                 return state
             if time.monotonic() >= deadline:
-                logger.warning(f"Entry order {order_id} not filled in {self.fill_timeout:.0f}s; cancelling remainder.")
-                try:
-                    await asyncio.to_thread(self.kite.cancel_order, self.kite.VARIETY_REGULAR, order_id)
-                except Exception as e:
-                    logger.error(f"Cancel of {order_id} failed: {e!r}")
-                return await self._order_state(order_id)
+                return None
             await asyncio.sleep(self.poll_interval)
+
+    async def _cancel_and_settle(self, sym: str, order_id: str) -> dict:
+        for attempt in range(3):
+            try:
+                await asyncio.to_thread(self.kite.cancel_order, self.kite.VARIETY_REGULAR, order_id)
+                break
+            except Exception as e:
+                # It may already be complete or cancelled; polling below decides either way.
+                logger.error(f"[{sym}] Cancel of {order_id} failed (attempt {attempt + 1}/3): {e!r}")
+                await asyncio.sleep(self.poll_interval)
+        state = await self._wait_terminal(order_id, self.cancel_grace)
+        if state is None:
+            raise OrderStateUnknown(sym, order_id, f"not terminal {self.cancel_grace:.0f}s after cancelling")
+        return state
+
+    async def _find_by_tag(self, sym: str, tag: str) -> Optional[str]:
+        try:
+            orders = await asyncio.to_thread(self.kite.orders)
+        except Exception as e:
+            raise OrderStateUnknown(sym, tag, f"could not check whether the entry reached the exchange: {e!r}") from e
+        return next((str(o['order_id']) for o in orders if o.get('tag') == tag), None)
+
+    async def _protect(self, plan: OrderPlan, order_id: str, state: dict) -> Optional[Fill]:
+        k, sym = self.kite, plan.signal.symbol
+        filled = int(state.get('filled_quantity') or 0)
+        if filled <= 0:
+            logger.warning(f"[{sym}] Entry {order_id} ended {state.get('status')} with no fill: {state.get('status_message')}")
+            return None
+        avg = float(state.get('average_price') or plan.signal.entry_price)
+        stop_limit = round_to_tick(plan.stop_loss * (1 - self.stop_limit_buffer), self.tick_size, "down")
+        legs = [
+            {"transaction_type": k.TRANSACTION_TYPE_SELL, "quantity": filled, "order_type": k.ORDER_TYPE_LIMIT,
+             "product": self.product, "price": stop_limit},
+            {"transaction_type": k.TRANSACTION_TYPE_SELL, "quantity": filled, "order_type": k.ORDER_TYPE_LIMIT,
+             "product": self.product, "price": plan.target},
+        ]
+        trigger_id = None
+        for attempt in range(3):
+            try:
+                gtt = await asyncio.to_thread(
+                    k.place_gtt, trigger_type=k.GTT_TYPE_OCO, tradingsymbol=sym, exchange=self.exchange,
+                    trigger_values=[plan.stop_loss, plan.target], last_price=avg, orders=legs)
+                trigger_id = str(gtt['trigger_id'])
+                logger.info(f"🛡️ [{sym}] GTT OCO {trigger_id} armed: stop {plan.stop_loss:.2f} (limit {stop_limit:.2f}) "
+                            f"/ target {plan.target:.2f}")
+                break
+            except Exception as e:
+                logger.error(f"[{sym}] GTT attempt {attempt + 1}/3 failed: {e!r}")
+                if is_permanent_error(e):
+                    break
+                await asyncio.sleep(self.poll_interval)
+        if trigger_id is None:
+            msg = f"[{sym}] POSITION OPEN WITHOUT EXITS: {filled} shares bought (order {order_id}) but no GTT could be placed."
+            logger.critical(msg)
+            self.alerts.append(msg)
+        return Fill(sym, filled, avg, order_id, trigger_id)
+
+    async def _abort(self, plan: OrderPlan, order_id: Optional[str], tag: str) -> None:
+        """Settle an entry interrupted by shutdown: cancel what is working, protect what filled."""
+        sym = plan.signal.symbol
+        try:
+            if order_id is None:
+                order_id = await self._find_by_tag(sym, tag)
+            if order_id is None:
+                logger.info(f"[{sym}] Interrupted entry never reached the exchange.")
+                return
+            state = await self._wait_terminal(order_id, 0) or await self._cancel_and_settle(sym, order_id)
+            fill = await self._protect(plan, order_id, state)
+            if fill is not None:
+                msg = (f"[{sym}] Entry {order_id} filled {fill.quantity} while shutting down; "
+                       f"exits {'armed (GTT ' + fill.exit_order_id + ')' if fill.exit_order_id else 'NOT armed'}.")
+                logger.critical(msg)
+                self.alerts.append(msg)
+        except Exception as e:
+            msg = f"[{sym}] Could not settle interrupted entry {order_id or tag}: {e!r}. CHECK THE BROKER TERMINAL."
+            logger.critical(msg)
+            self.alerts.append(msg)
 
     async def execute(self, plan: OrderPlan) -> Optional[Fill]:
         k, sym = self.kite, plan.signal.symbol
@@ -819,42 +1060,43 @@ class KiteOrderGateway(OrderGateway):
         if not plan.stop_loss < ltp <= plan.entry_limit:
             logger.warning(f"[{sym}] Entry skipped: LTP {ltp:.2f} outside ({plan.stop_loss:.2f}, {plan.entry_limit:.2f}].")
             return None
-        order_id = await asyncio.to_thread(
-            k.place_order, variety=k.VARIETY_REGULAR, exchange=self.exchange, tradingsymbol=sym,
-            transaction_type=k.TRANSACTION_TYPE_BUY, quantity=plan.quantity, product=self.product,
-            order_type=k.ORDER_TYPE_LIMIT, price=plan.entry_limit, validity=k.VALIDITY_DAY, tag="ipomomentum")
-        logger.info(f"[{sym}] Entry order {order_id} placed: BUY {plan.quantity} LIMIT {plan.entry_limit:.2f}")
 
-        state = await self._await_terminal(order_id)
-        filled = int(state.get('filled_quantity') or 0)
-        if filled <= 0:
-            logger.warning(f"[{sym}] Entry {order_id} ended {state.get('status')} with no fill: {state.get('status_message')}")
-            return None
-        avg = float(state.get('average_price') or plan.signal.entry_price)
-
-        stop_limit = round_to_tick(plan.stop_loss * (1 - self.stop_limit_buffer), self.tick_size, "down")
-        legs = [
-            {"transaction_type": k.TRANSACTION_TYPE_SELL, "quantity": filled, "order_type": k.ORDER_TYPE_LIMIT,
-             "product": self.product, "price": stop_limit},
-            {"transaction_type": k.TRANSACTION_TYPE_SELL, "quantity": filled, "order_type": k.ORDER_TYPE_LIMIT,
-             "product": self.product, "price": plan.target},
-        ]
+        tag = f"ipm{uuid.uuid4().hex[:12]}"   # finds the order if place_order fails after reaching the exchange
+        order_id: Optional[str] = None
         try:
-            gtt = await asyncio.to_thread(
-                k.place_gtt, trigger_type=k.GTT_TYPE_OCO, tradingsymbol=sym, exchange=self.exchange,
-                trigger_values=[plan.stop_loss, plan.target], last_price=avg, orders=legs)
-            trigger_id = str(gtt['trigger_id'])
-            logger.info(f"🛡️ [{sym}] GTT OCO {trigger_id} armed: stop {plan.stop_loss:.2f} / target {plan.target:.2f}")
-        except Exception as e:
-            trigger_id = None
-            logger.critical(f"[{sym}] POSITION OPEN WITHOUT EXITS: {filled} shares bought but GTT failed: {e!r}")
-        return Fill(sym, filled, avg, str(order_id), trigger_id)
+            try:
+                order_id = str(await asyncio.to_thread(
+                    k.place_order, variety=k.VARIETY_REGULAR, exchange=self.exchange, tradingsymbol=sym,
+                    transaction_type=k.TRANSACTION_TYPE_BUY, quantity=plan.quantity, product=self.product,
+                    order_type=k.ORDER_TYPE_LIMIT, price=plan.entry_limit, validity=k.VALIDITY_DAY, tag=tag))
+            except Exception as e:
+                if is_permanent_error(e):
+                    raise                     # refused by the API: nothing reached the exchange
+                logger.error(f"[{sym}] place_order failed ({e!r}); checking whether it reached the exchange (tag {tag}).")
+                order_id = await self._find_by_tag(sym, tag)
+                if order_id is None:
+                    raise
+            logger.info(f"[{sym}] Entry order {order_id} placed: BUY {plan.quantity} LIMIT {plan.entry_limit:.2f}")
+
+            state = await self._wait_terminal(order_id, self.fill_timeout)
+            if state is None:
+                logger.warning(f"[{sym}] Entry {order_id} not filled in {self.fill_timeout:.0f}s; cancelling remainder.")
+                state = await self._cancel_and_settle(sym, order_id)
+            return await self._protect(plan, order_id, state)
+        except asyncio.CancelledError:
+            # Shutdown interrupted the entry: never leave a working order or an unprotected fill behind.
+            task = asyncio.ensure_future(self._abort(plan, order_id, tag))
+            self._aborts.add(task)
+            task.add_done_callback(self._aborts.discard)
+            await asyncio.shield(task)
+            raise
 
 class ExecutionRouter:
     def __init__(self, oms_queue: asyncio.Queue, risk_per_trade: float, max_position_value: Optional[float] = None,
                  gateway: Optional[OrderGateway] = None, tick_size: float = 0.05, max_entry_slippage: float = 0.005,
                  max_signal_age: Optional[timedelta] = timedelta(seconds=60),
-                 clock: Optional[Callable[[], datetime]] = None, bar_minutes: int = BAR_MINUTES):
+                 clock: Optional[Callable[[], datetime]] = None, bar_minutes: int = BAR_MINUTES,
+                 stop_limit_buffer: float = 0.02):
         self.oms_queue = oms_queue
         self.risk_per_trade = risk_per_trade       # rupees lost if the stop is hit at its trigger
         self.max_position_value = max_position_value
@@ -864,39 +1106,75 @@ class ExecutionRouter:
         self.max_signal_age = max_signal_age       # None disables the staleness check
         self.clock = clock or (lambda: datetime.now(IST))
         self.bar_minutes = bar_minutes
+        self.stop_limit_buffer = stop_limit_buffer  # paper mirrors the live GTT's stop leg
+        self.accepting = True                      # False once shutdown begins
         self.active_inventory = set()              # symbols with a pending or open position
         self.fills: List[Fill] = []
         self.positions: Dict[str, Position] = {}   # open positions
         self.closed_positions: List[Position] = []
+        self.unresolved: List[str] = []            # live orders whose state could not be confirmed
+
+    @property
+    def settle_timeout(self) -> float:
+        return self.gateway.settle_timeout + 5.0
+
+    def _close_position(self, pos: Position, price: float, reason: str, bar_time: datetime) -> None:
+        pos.exit_price, pos.exit_reason, pos.closed_at = price, reason, bar_time
+        del self.positions[pos.symbol]
+        self.closed_positions.append(pos)
+        self.active_inventory.discard(pos.symbol)
+        logger.info(f"🏁 [{pos.symbol}] PAPER EXIT {reason}: {pos.quantity}x @ {price:.2f} "
+                    f"on the {to_ist(bar_time):%Y-%m-%d %H:%M} bar | P&L ₹{pos.pnl:,.0f}")
 
     def on_bar(self, sym: str, bar_time: datetime, bar: pd.Series) -> None:
-        """Play a simulated OCO against a closed bar (paper only; a live broker holds real exits).
+        """Play the OCO against a closed bar exactly as the live GTT would (paper only).
 
-        A stop that the bar gaps through fills at the open; if one bar touches both
-        levels the stop is assumed to have come first.
+        The stop leg is a SELL LIMIT ``stop_limit_buffer`` below its trigger: a gap through the
+        trigger fills at the open if the open is above that limit, later in the bar if price
+        recovers to it, and otherwise rests unfilled. An open beyond the target fills the
+        target at the open. If a bar touches both levels from an open between them, the stop is
+        assumed to have come first.
         """
         pos = self.positions.get(sym)
         if pos is None or not self.gateway.simulates_exits or pd.Timestamp(bar_time) < pd.Timestamp(pos.opened_at):
             return
-        if bar['Low'] <= pos.stop_loss:
-            pos.exit_price, pos.exit_reason = min(pos.stop_loss, float(bar['Open'])), "STOP"
-        elif bar['High'] >= pos.target:
-            pos.exit_price, pos.exit_reason = max(pos.target, float(bar['Open'])), "TARGET"
-        else:
+        o, h, lo = float(bar['Open']), float(bar['High']), float(bar['Low'])
+        limit = pos.stop_limit if pos.stop_limit is not None else pos.stop_loss
+        if pos.stop_triggered:
+            if h >= limit:
+                self._close_position(pos, max(limit, o), "STOP", bar_time)
             return
-        pos.closed_at = bar_time
-        del self.positions[sym]
-        self.closed_positions.append(pos)
-        self.active_inventory.discard(sym)
-        logger.info(f"🏁 [{sym}] PAPER EXIT {pos.exit_reason}: {pos.quantity}x @ {pos.exit_price:.2f} "
-                    f"on the {to_ist(bar_time):%Y-%m-%d %H:%M} bar | P&L ₹{pos.pnl:,.0f}")
+        if o >= pos.target:
+            self._close_position(pos, o, "TARGET", bar_time)
+        elif o <= pos.stop_loss:
+            if o >= limit:
+                self._close_position(pos, o, "STOP", bar_time)
+            elif h >= limit:
+                self._close_position(pos, limit, "STOP", bar_time)
+            else:
+                pos.stop_triggered = True
+                logger.critical(f"[{sym}] PAPER STOP TRIGGERED BUT UNFILLED: opened {o:.2f} below the "
+                                f"{limit:.2f} stop limit; the SELL LIMIT rests until price recovers.")
+        elif lo <= pos.stop_loss:
+            self._close_position(pos, pos.stop_loss, "STOP", bar_time)
+        elif h >= pos.target:
+            self._close_position(pos, pos.target, "TARGET", bar_time)
+
+    def signal_problem(self, signal: Signal) -> Optional[str]:
+        """Why a signal must not be traded now, if anything: its bar closed long ago (e.g. at the
+        next day's open), or it claims a bar that has not closed yet (a synthetic or corrupt tape)."""
+        if signal.bar_time is None:
+            return None
+        bar_close = to_ist(signal.bar_time) + timedelta(minutes=self.bar_minutes)
+        age = to_ist(self.clock()) - bar_close
+        if age < -timedelta(seconds=5):
+            return f"its {to_ist(signal.bar_time):%Y-%m-%d %H:%M} bar has not closed yet"
+        if self.max_signal_age is not None and age > self.max_signal_age:
+            return f"it is stale (the {to_ist(signal.bar_time):%Y-%m-%d %H:%M} bar closed {age.total_seconds():.0f}s ago)"
+        return None
 
     def is_stale(self, signal: Signal) -> bool:
-        """A signal is only actionable right after its bar closed (e.g. not at the next day's open)."""
-        if self.max_signal_age is None or signal.bar_time is None:
-            return False
-        bar_close = to_ist(signal.bar_time) + timedelta(minutes=self.bar_minutes)
-        return to_ist(self.clock()) - bar_close > self.max_signal_age
+        return self.signal_problem(signal) is not None
 
     def _calculate_qty(self, entry: float, stop_loss: float) -> int:
         risk_per_share = round(entry - stop_loss, 9)   # 3.0000000000000004 must not cost a share
@@ -930,11 +1208,15 @@ class ExecutionRouter:
 
     async def _route(self, signal: Signal) -> None:
         sym = signal.symbol
+        if not self.accepting:
+            logger.warning(f"[{sym}] Shutting down: signal from the {to_ist(signal.bar_time):%H:%M} bar not traded.")
+            return
         if sym in self.active_inventory:
             logger.info(f"[{sym}] Signal ignored: position already pending/open.")
             return
-        if self.is_stale(signal):
-            logger.warning(f"[{sym}] Signal from the {to_ist(signal.bar_time):%Y-%m-%d %H:%M} bar is stale; not trading it.")
+        problem = self.signal_problem(signal)
+        if problem:
+            logger.warning(f"[{sym}] Signal not traded: {problem}.")
             return
         plan = self.plan(signal)
         if plan is None:
@@ -949,6 +1231,11 @@ class ExecutionRouter:
         logger.info(f"🛡️ Target: {plan.target:.2f} | Stop Loss: {plan.stop_loss:.2f}")
         try:
             fill = await self.gateway.execute(plan)
+        except OrderStateUnknown as e:
+            # An order may be working: keep the symbol blocked so nothing enters twice.
+            self.unresolved.append(str(e))
+            logger.critical(f"{e}. {sym} stays blocked; CHECK THE BROKER TERMINAL.")
+            return
         except Exception:
             self.active_inventory.discard(sym)
             raise
@@ -957,23 +1244,26 @@ class ExecutionRouter:
             return
         self.fills.append(fill)
         opened_at = (signal.bar_time + timedelta(minutes=self.bar_minutes)) if signal.bar_time else self.clock()
-        self.positions[sym] = Position(sym, fill.quantity, fill.average_price, plan.stop_loss, plan.target, opened_at)
+        stop_limit = round_to_tick(plan.stop_loss * (1 - self.stop_limit_buffer), self.tick_size, "down")
+        self.positions[sym] = Position(sym, fill.quantity, fill.average_price, plan.stop_loss, plan.target,
+                                       opened_at, stop_limit=stop_limit)
 
 
 # ==============================================================================
 # 5. DYNAMIC MARKET SIMULATOR (FOR OUT-OF-BOX DEMONSTRATION)
 # ==============================================================================
 async def simulate_live_market(tick_adapter: LiveTickAdapter, sym: str, df: pd.DataFrame,
-                               base_bars: int = 150, pause: float = 1.0):
+                               base_high: Optional[float] = None, pause: float = 1.0, t0: Optional[datetime] = None):
     """Synthetic next-session tape that breaks the real historical base on heavy volume.
 
     Prices and volumes are invented; only the base high and last close come from data.
+    It must never share a run with a live feed or live orders (main() enforces this).
     """
     await asyncio.sleep(pause)
 
-    base_high = float(df['High'].iloc[:base_bars].max())
+    base_high = float(df['High'].iloc[:150].max()) if base_high is None else base_high
     last_close = float(df['Close'].iloc[-1])
-    t0 = next_session_open(df.index[-1])
+    t0 = t0 or next_session_open(df.index[-1])
     t1, t2 = t0 + timedelta(minutes=BAR_MINUTES), t0 + timedelta(minutes=2 * BAR_MINUTES)
 
     logger.info(f"📡 [EXCHANGE] Initiating simulated stream for {sym} ({t0:%a %Y-%m-%d} session)")
@@ -1003,21 +1293,52 @@ async def simulate_live_market(tick_adapter: LiveTickAdapter, sym: str, df: pd.D
 # ==============================================================================
 # 6. MAIN DEPLOYMENT PIPELINE
 # ==============================================================================
-def start_kite_feed(api_key: str, access_token: str, tokens: List[int], tick_adapter: LiveTickAdapter):
-    """Stream full-mode ticks (with cumulative volume and exchange time) into the synthesizer."""
+def start_kite_feed(api_key: str, access_token: str, tokens: List[int], tick_adapter: LiveTickAdapter,
+                    feed_dead: Optional[asyncio.Event] = None):
+    """Stream full-mode ticks (with cumulative volume and exchange time) into the synthesizer.
+
+    Every (re)connection re-baselines the volume counters; when KiteTicker gives up
+    reconnecting, ``feed_dead`` is set so main() can stop instead of running blind.
+    """
     from kiteconnect import KiteTicker
+    loop = tick_adapter.loop
     kws = KiteTicker(api_key, access_token)
     kws.on_ticks = tick_adapter.broker_on_ticks
 
     def on_connect(ws, response):
+        loop.call_soon_threadsafe(tick_adapter.mark_feed_reset)   # runs before this connection's first tick
         ws.subscribe(tokens)
         ws.set_mode(ws.MODE_FULL, tokens)
         logger.info(f"Kite websocket connected; streaming {len(tokens)} instruments.")
 
+    def on_noreconnect(ws):
+        logger.critical("Kite websocket gave up reconnecting.")
+        if feed_dead is not None:
+            loop.call_soon_threadsafe(feed_dead.set)
+
     kws.on_connect = on_connect
     kws.on_error = lambda ws, code, reason: logger.error(f"Kite websocket error {code}: {reason}")
+    kws.on_close = lambda ws, code, reason: logger.warning(f"Kite websocket closed ({code}: {reason}).")
+    kws.on_reconnect = lambda ws, attempts: logger.warning(f"Kite websocket reconnecting (attempt {attempts}).")
+    kws.on_noreconnect = on_noreconnect
     kws.connect(threaded=True)
     return kws
+
+async def _watch_feed(feed_dead: asyncio.Event) -> None:
+    await feed_dead.wait()
+    raise RuntimeError("the Kite websocket gave up reconnecting; no market data")
+
+def _ip_address(text: str) -> str:
+    try:
+        return str(ipaddress.ip_address(text.strip()))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an IP address") from None
+
+def _non_negative(text: str) -> float:
+    value = float(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return value
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="IPO momentum engine: history sync, bar synthesis, breakout alpha, execution.")
@@ -1025,31 +1346,47 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--csv", type=Path, default=DEFAULT_CSV, help="bar file for --source csv")
     p.add_argument("--symbol", default="SWIGGY", help="NSE tradingsymbol (default: SWIGGY)")
     p.add_argument("--listing-date", type=lambda s: datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=IST),
-                   help="IPO listing date YYYY-MM-DD (default: 20 days before the data's as-of time)")
+                   help="IPO listing date YYYY-MM-DD; required for --source kite (default for yahoo/csv demos: "
+                        "the first bar of the last 20 days)")
+    p.add_argument("--base-sessions", type=int, help="define the IPO base as the first N sessions (default: first 150 bars)")
     p.add_argument("--risk-per-trade", type=float, default=15_000.0, help="rupees lost if the stop is hit")
     p.add_argument("--max-position-value", type=float, default=1_000_000.0, help="rupee cap on a position's notional")
     p.add_argument("--rvol-threshold", type=float, default=2.0)
     p.add_argument("--rvol-mode", choices=AlphaEngine.RVOL_MODES, default="trailing",
                    help="volume baseline: previous 20 bars, or the same slot in prior sessions")
     p.add_argument("--risk-reward", type=float, default=3.0)
-    p.add_argument("--run-seconds", type=float, default=6.0, help="how long to run; 0 = until Ctrl-C")
+    p.add_argument("--run-seconds", type=_non_negative, default=6.0, help="how long to run; 0 = until Ctrl-C")
     p.add_argument("--no-simulate", action="store_true", help="do not inject the synthetic breakout tape")
     p.add_argument("--allow-partial-history", action="store_true",
                    help="trade symbols whose history does not reach the listing (base anchored at first bar)")
-    p.add_argument("--live-feed", action="store_true", help="stream Kite websocket ticks (needs --source kite)")
-    p.add_argument("--live-orders", action="store_true", help="send REAL orders to Zerodha (needs --source kite)")
-    p.add_argument("--expect-ip", help="abort unless the public IP equals this (required with --live-orders)")
+    p.add_argument("--live-feed", action="store_true",
+                   help="stream Kite websocket ticks (needs --source kite; disables the synthetic tape)")
+    p.add_argument("--live-orders", action="store_true",
+                   help="send REAL orders to Zerodha (needs --source kite --live-feed --expect-ip)")
+    p.add_argument("--expect-ip", type=_ip_address,
+                   help="abort unless the public IP equals this (required with --live-orders)")
     return p
+
+def _config_error(args: argparse.Namespace) -> Optional[str]:
+    if (args.live_orders or args.live_feed) and args.source != "kite":
+        return "--live-orders/--live-feed require --source kite."
+    if args.live_orders and not args.live_feed:
+        return "--live-orders requires --live-feed: without a live feed only the synthetic tape could trigger orders."
+    if args.live_orders and not args.expect_ip:
+        return "--live-orders requires --expect-ip <the static IP registered with the broker>."
+    if args.source == "kite" and args.listing_date is None:
+        return "--source kite requires --listing-date: the IPO base and AVWAP are anchored at the listing."
+    if args.base_sessions is not None and args.base_sessions < 1:
+        return "--base-sessions must be at least 1."
+    return None
 
 async def main(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     logger.info("=== INITIALIZING INSTITUTIONAL ENGINE ===")
 
-    if (args.live_orders or args.live_feed) and args.source != "kite":
-        logger.critical("--live-orders/--live-feed require --source kite.")
-        return 2
-    if args.live_orders and not args.expect_ip:
-        logger.critical("--live-orders requires --expect-ip <the static IP registered with the broker>.")
+    problem = _config_error(args)
+    if problem:
+        logger.critical(problem)
         return 2
     if args.expect_ip and not await verify_hardware_ip(args.expect_ip):
         return 1
@@ -1067,7 +1404,7 @@ async def main(argv: Optional[List[str]] = None) -> int:
         broker_adapter = CsvReplayAdapter({args.symbol: args.csv})
         try:
             last_bar = CsvReplayAdapter.load(args.csv).index[-1]
-        except (OSError, ValueError, KeyError, IndexError) as e:
+        except Exception as e:
             logger.critical(f"Cannot read bars from {args.csv}: {e!r}")
             return 1
         as_of = (last_bar + pd.Timedelta(minutes=BAR_MINUTES)).to_pydatetime()
@@ -1075,8 +1412,7 @@ async def main(argv: Optional[List[str]] = None) -> int:
         broker_adapter = PublicExchangeAdapter()
         as_of = datetime.now(timezone.utc)
 
-    listing_date = args.listing_date or (as_of - timedelta(days=20))
-    orchestrator = ProductionOrchestrator({args.symbol: listing_date}, broker_adapter, as_of=as_of,
+    orchestrator = ProductionOrchestrator({args.symbol: args.listing_date}, broker_adapter, as_of=as_of,
                                           allow_partial_history=args.allow_partial_history)
 
     if not await orchestrator.build_the_ground():
@@ -1086,35 +1422,60 @@ async def main(argv: Optional[List[str]] = None) -> int:
     # 2. Spin up Core Engine Components
     loop = asyncio.get_running_loop()
     oms_queue = asyncio.Queue()
+    history = orchestrator.market_state[args.symbol]
 
-    alpha = AlphaEngine(rvol_threshold=args.rvol_threshold, risk_reward_ratio=args.risk_reward, rvol_mode=args.rvol_mode)
+    # The synthetic tape never shares a run with a live feed. Simulated runs keep time by the tape
+    # itself, so the demo behaves the same whatever the wall clock says.
+    simulate = not args.no_simulate and not args.live_feed
+    if args.live_feed and not args.no_simulate:
+        logger.info("Live feed selected: the synthetic breakout tape is disabled.")
+    tape_start = next_session_open(history.index[-1]) if simulate else None
+    market_clock = (lambda: ticker.market_time or tape_start) if simulate else None
+
+    alpha = AlphaEngine(rvol_threshold=args.rvol_threshold, risk_reward_ratio=args.risk_reward,
+                        rvol_mode=args.rvol_mode, base_sessions=args.base_sessions)
     gateway: OrderGateway = PaperGateway()
     if args.live_orders:
         logger.warning("LIVE ORDERS ENABLED: signals will place real Zerodha orders.")
         gateway = KiteOrderGateway(broker_adapter.kite, tick_size=broker_adapter.tick_size(args.symbol))
     oms = ExecutionRouter(oms_queue, risk_per_trade=args.risk_per_trade, max_position_value=args.max_position_value,
-                          gateway=gateway, tick_size=broker_adapter.tick_size(args.symbol))
+                          gateway=gateway, tick_size=broker_adapter.tick_size(args.symbol), clock=market_clock)
     ticker = LiveTickAdapter(orchestrator.market_state, alpha, oms_queue, loop, token_map=broker_adapter.token_map(),
-                             bar_listeners=[oms.on_bar])
+                             started_at=tape_start - timedelta(seconds=1) if simulate else None,
+                             bar_listeners=[oms.on_bar],
+                             backfill=broker_adapter.fetch_historical_bars if args.live_feed else None)
 
     # 3. Launch Async Coroutines
-    workers = [
-        asyncio.create_task(ticker.process_ticks(), name="tick-aggregator"),
-        asyncio.create_task(ticker.bar_clock(), name="bar-clock"),
-        asyncio.create_task(oms.process_orders(), name="oms-router"),
-    ]
+    tick_worker = asyncio.create_task(ticker.process_ticks(), name="tick-aggregator")
+    clock_worker = asyncio.create_task(ticker.bar_clock(clock=market_clock), name="bar-clock")
+    oms_worker = asyncio.create_task(oms.process_orders(), name="oms-router")
+    workers = [tick_worker, clock_worker, oms_worker]
     helpers = []
-    if not args.no_simulate:
+    if simulate:
         # ⚠️ Starts the dynamic simulation pushing synthetic ticks into the system
         helpers.append(asyncio.create_task(
-            simulate_live_market(ticker, args.symbol, orchestrator.market_state[args.symbol], alpha.base_bars)))
+            simulate_live_market(ticker, args.symbol, history, alpha.base_high(history), t0=tape_start)))
     feed = None
     if args.live_feed:
+        feed_dead = asyncio.Event()
+        workers.append(asyncio.create_task(_watch_feed(feed_dead), name="kite-feed"))
         tokens = [t for t, s in broker_adapter.token_map().items() if s in orchestrator.market_state]
-        feed = start_kite_feed(*kite_creds, tokens, ticker)
+        feed = start_kite_feed(*kite_creds, tokens, ticker, feed_dead)
 
-    exit_code = 0
+    exit_code, interrupted = 0, False
     runtime = asyncio.create_task(asyncio.sleep(args.run_seconds) if args.run_seconds > 0 else asyncio.Event().wait())
+
+    def on_sigint():
+        nonlocal interrupted
+        interrupted = True
+        runtime.cancel()
+
+    try:
+        loop.add_signal_handler(signal.SIGINT, on_sigint)   # Ctrl-C takes the orderly shutdown path below
+        sigint_hooked = True
+    except (NotImplementedError, RuntimeError, ValueError):  # Windows, or not the main thread
+        sigint_hooked = False
+
     try:
         # Workers loop forever; one finishing early means it crashed, and the engine must not run half-blind.
         done, _ = await asyncio.wait({runtime, *workers}, return_when=asyncio.FIRST_COMPLETED)
@@ -1122,17 +1483,30 @@ async def main(argv: Optional[List[str]] = None) -> int:
             if t in done:
                 exit_code = 1
                 logger.critical(f"Worker '{t.get_name()}' stopped unexpectedly: {t.exception()!r}. Shutting down.")
+    except asyncio.CancelledError:
+        interrupted = True                                    # Ctrl-C where no signal handler could be set
     finally:
+        # 1. Stop everything that can produce ticks or signals.
         if feed is not None:
             feed.close()
-        if exit_code == 0:
-            # Drain what is already queued, then stop the workers cleanly.
-            try:
-                await asyncio.wait_for(asyncio.gather(ticker.tick_queue.join(), oms_queue.join()), timeout=10)
-            except asyncio.TimeoutError:
-                logger.warning("Queues did not drain within 10s; pending work abandoned.")
-        for t in [runtime, *workers, *helpers]: t.cancel()
-        await asyncio.gather(runtime, *workers, *helpers, return_exceptions=True)
+        for t in [runtime, *helpers, tick_worker, clock_worker, *workers[3:]]:
+            t.cancel()
+        await asyncio.gather(runtime, *helpers, tick_worker, clock_worker, *workers[3:], return_exceptions=True)
+        await ticker.cancel_backfills()
+        if ticker.tick_queue.qsize():
+            logger.info(f"{ticker.tick_queue.qsize()} queued ticks discarded at shutdown.")
+        # 2. Let the order in flight settle; the gateway bounds its own time, so this does not hang.
+        oms.accepting = False
+        try:
+            await asyncio.wait_for(oms_queue.join(), timeout=oms.settle_timeout)
+        except asyncio.TimeoutError:
+            exit_code = 1
+            logger.critical(f"The order router did not settle within {oms.settle_timeout:.0f}s; interrupting it.")
+        oms_worker.cancel()
+        await asyncio.gather(oms_worker, return_exceptions=True)
+        await gateway.wait_aborts()
+        if sigint_hooked:
+            loop.remove_signal_handler(signal.SIGINT)
 
     logger.info("=== SYSTEM HALT ===")
     logger.info(f"Final Inventory State: {oms.active_inventory or '{}'}")
@@ -1140,12 +1514,19 @@ async def main(argv: Optional[List[str]] = None) -> int:
         exits = f.exit_order_id or ("simulated OCO" if gateway.simulates_exits else "NONE")
         logger.info(f"   Fill {f.symbol}: {f.quantity} @ {f.average_price:.2f} (order {f.order_id}, exits: {exits})")
     for pos in oms.positions.values():
-        logger.info(f"   Open {pos.symbol}: {pos.quantity} @ {pos.entry_price:.2f} | stop {pos.stop_loss:.2f} | target {pos.target:.2f}")
+        state = " | STOP TRIGGERED, LIMIT UNFILLED" if pos.stop_triggered else ""
+        logger.info(f"   Open {pos.symbol}: {pos.quantity} @ {pos.entry_price:.2f} | stop {pos.stop_loss:.2f} | "
+                    f"target {pos.target:.2f}{state}")
     for pos in oms.closed_positions:
         logger.info(f"   Closed {pos.symbol}: {pos.exit_reason} @ {pos.exit_price:.2f} | P&L ₹{pos.pnl:,.0f}")
     if ticker.dropped_ticks:
-        logger.info(f"   {ticker.dropped_ticks} ticks dropped (unknown instrument, late, or malformed).")
-    return exit_code
+        logger.info(f"   {ticker.dropped_ticks} ticks dropped (unknown instrument, off-session, late, or malformed).")
+    attention = oms.unresolved + gateway.alerts
+    for line in attention:
+        logger.critical(f"   ATTENTION: {line}")
+    if attention:
+        return 1
+    return 130 if interrupted else exit_code
 
 def run(argv: Optional[List[str]] = None) -> int:
     configure_logging()
