@@ -58,9 +58,16 @@ def run_router(r, signals):
     return r
 
 
-def test_duplicate_signals_enter_once():
+def test_duplicate_signals_enter_once(caplog):
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
     r = run_router(router(), [sig(), sig(), sig()])
     assert r.active_inventory == {"SWIGGY"} and len(r.fills) == 1
+    assert caplog.text.count("Signal ignored: position already pending/open") == 2   # v1.0 dropped these silently
+
+
+def test_float_noise_in_the_stop_distance_does_not_cost_a_share():
+    assert 15_000 / (103.0 - 100.0 + 4e-13) < 5_000                     # naive floor would give 4,999
+    assert router()._calculate_qty(103.0 + 4e-13, 100.0) == 5_000
 
 
 class ExplodingGateway(engine.OrderGateway):

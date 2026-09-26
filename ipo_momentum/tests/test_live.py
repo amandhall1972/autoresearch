@@ -92,6 +92,13 @@ def test_kite_full_mode_payload_uses_token_map_exchange_time_and_cumulative_volu
     assert bar["Volume"] == 1600                                          # 1000 + (1600 - 1000), not 5 + 5
 
 
+def test_zeroed_exchange_time_falls_back_to_receive_time():
+    a = adapter(token_map={1234: "SWIGGY"})
+    t = a._normalize({"instrument_token": 1234, "last_price": 280.5, "volume_traded": 10,
+                      "exchange_timestamp": datetime.fromtimestamp(0)})  # noqa: DTZ006 - what the SDK yields for 0
+    assert abs((t.timestamp - datetime.now(engine.IST)).total_seconds()) < 5
+
+
 def test_unknown_instrument_tokens_are_dropped_instead_of_crashing():
     async def scenario():
         a = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), asyncio.get_running_loop(),

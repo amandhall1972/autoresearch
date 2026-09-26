@@ -37,7 +37,7 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 cd ipo_momentum
 uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 87 tests, ~13 s, fully offline
+uv run pytest                       # 89 tests, ~13 s, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
@@ -278,10 +278,10 @@ not evidence of an edge in either direction.
 
 ## Changes from v1.0
 
-See the defect ledger in the pull request that introduced v1.1. Every item was
-reproduced against the original file by an independent reviewer, then
-re-checked by a second reviewer trying to refute it. Each fix is pinned by a
-test named after the behavior it guarantees.
+[CHANGELOG.md](CHANGELOG.md) lists every v1.0 defect. For each it gives
+severity, the second reviewer's verdict, the v1.1 fix, and the test that pins
+it. Every item was reproduced against the original file by one reviewer, then
+re-checked by a second reviewer trying to refute it. No finding was refuted.
 
 ---
 
@@ -306,7 +306,7 @@ test named after the behavior it guarantees.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 87 tests run offline in about 13 s. They pass on Python 3.10 with pandas
+The 89 tests run offline in about 13 s. They pass on Python 3.10 with pandas
 2.2 and numpy 1.26, on Python 3.10 with pandas 2.3 and numpy 2.2 (the
 `uv.lock` resolution), and on Python 3.11 with pandas 3.0 and numpy 2.4.
 Pandas `FutureWarning`s raised from engine code fail the suite.

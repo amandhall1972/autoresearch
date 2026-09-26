@@ -574,10 +574,15 @@ class LiveTickAdapter:
         price = t.get('last_price', t.get('price'))
         if symbol is None or price is None or price <= 0:
             return None
-        ts = t.get('exchange_timestamp') or t.get('last_trade_time') or t.get('timestamp') or datetime.now(IST)
+        # Bucket by exchange time. last_trade_time is not used: for a quiet name it can be minutes old.
+        # A zeroed exchange field parses as 1970; fall back to receive time rather than trust it.
+        ts = t.get('exchange_timestamp') or t.get('timestamp')
+        ts = to_ist(ts) if ts is not None else None
+        if ts is None or ts.year < 2000:
+            ts = datetime.now(IST)
         cumulative = t.get('volume_traded')
         volume = t.get('last_traded_quantity', t.get('volume', 0)) if cumulative is None else 0
-        return Tick(symbol=symbol, price=float(price), volume=int(volume or 0), timestamp=to_ist(ts),
+        return Tick(symbol=symbol, price=float(price), volume=int(volume or 0), timestamp=ts,
                     cumulative_volume=None if cumulative is None else int(cumulative))
 
     def broker_on_ticks(self, ws, ticks: list):
@@ -850,7 +855,7 @@ class ExecutionRouter:
         return to_ist(self.clock()) - bar_close > self.max_signal_age
 
     def _calculate_qty(self, entry: float, stop_loss: float) -> int:
-        risk_per_share = entry - stop_loss
+        risk_per_share = round(entry - stop_loss, 9)   # 3.0000000000000004 must not cost a share
         if not (math.isfinite(entry) and math.isfinite(risk_per_share)) or entry <= 0 or risk_per_share <= 0:
             return 0
         qty = math.floor(self.risk_per_trade / risk_per_share)
