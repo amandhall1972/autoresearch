@@ -37,7 +37,7 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 cd ipo_momentum
 uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 89 tests, ~13 s, fully offline
+uv run pytest                       # 95 tests, ~13 s, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
@@ -91,7 +91,7 @@ Final Inventory State: set()                             <- no signal, no order
 📡 [EXCHANGE] Real Historical Base High to Beat: 285.55 | Last close: 264.85
 📊 [SWIGGY] 5m Bar Closed 2026-09-28 09:15 | O: 264.85 H: 265.38 L: 264.85 C: 265.38 | V: 150,000
 📊 [SWIGGY] 5m Bar Closed 2026-09-28 09:20 | O: 286.12 H: 290.40 L: 286.12 C: 289.83 | V: 850,000
-[SWIGGY] 🟢 ALPHA TRIGGER: Base Breakout @ 289.83 (base 285.55) | RVOL: 4.67x | AVWAP: 277.08
+[SWIGGY] 🟢 ALPHA TRIGGER: Base Breakout @ 289.83 (base 285.55) | RVOL: 4.44x | AVWAP: 277.08
 🚀 [OMS DISPATCH] BUY 2884x SWIGGY LIMIT 291.30 (signal 289.83) | notional ≤ ₹840,109 | risk ≤ ₹14,997
 🛡️ Target: 300.85 | Stop Loss: 286.10
 ✅ [SWIGGY] PAPER FILL (simulated, no order sent): 2884x @ 289.83.
@@ -167,7 +167,12 @@ Trailing stays the default because it is the original strategy's definition.
 
 * **Symbols.** Kite ticks carry an integer `instrument_token`, which is mapped
   to the tradingsymbol with the instrument dump loaded at boot. Unknown tokens
-  are dropped and counted.
+  are dropped and counted. So are ticks for a symbol whose history did not
+  load. Without history there is no IPO base, and bars built from live ticks
+  alone would anchor the base at start-up.
+* **Session.** Only prints inside the continuous session (09:15–15:30 IST)
+  make bars. Pre-open auction prints are dropped before the volume counter
+  moves, so the auction volume lands in the 09:15 bar, as in broker candles.
 * **Time.** A tick belongs to the bar that contains its `exchange_timestamp`
   (falling back to `last_trade_time`, then `timestamp`, then receive time).
   KiteTicker delivers naive host-local datetimes, which are converted to IST.
@@ -197,6 +202,13 @@ not a fraction of equity, and gaps can lose more than it.
 **Prices** are placed on the tick grid in the conservative direction. The
 entry limit (`signal × 1.005`) rounds up, and the stop and target round down.
 Kite supplies each instrument's tick size.
+
+**Static IP.** `--live-orders` refuses to start without `--expect-ip`. The
+check asks three IPv4-only echo services concurrently (IPv6-only ones for an
+IPv6 address). A dual-stack service would report the IPv6 address of an
+IPv4-whitelisted host. Any disagreeing answer aborts the run, and at least two
+services must confirm the address. Junk bodies (captive portals) and
+unreachable services are ignored.
 
 **Guards.** The router applies these, in order:
 1. Skip a symbol that already has a pending or open position.
@@ -246,7 +258,7 @@ has not been run against a live account.
 | `--run-seconds` | `6` | Run time (`0` = until Ctrl-C) |
 | `--no-simulate` | off | Do not inject the synthetic breakout tape |
 | `--live-feed` / `--live-orders` | off | Kite websocket ticks / real orders (`--source kite` only) |
-| `--expect-ip` | none | Abort unless the public IP matches (static-IP whitelisting) |
+| `--expect-ip` | none | Abort unless the public IP matches (static-IP whitelisting). **Required** with `--live-orders`. |
 
 The default listing date (20 days before the data) mirrors v1.0's demo, which
 treats SWIGGY as a fresh listing. SWIGGY actually listed on 2024-11-13. With
@@ -287,6 +299,8 @@ re-checked by a second reviewer trying to refute it. No finding was refuted.
 
 ## Known limitations
 
+* **Special sessions** outside 09:15–15:30 (e.g. Diwali Muhurat trading) are
+  dropped from both Yahoo history and live ticks.
 * **Exchange holidays** are not modelled. `next_session_open` skips weekends
   only, which affects the simulated tape's date, not live trading.
 * **Kite exits are not tracked.** After a live fill, the broker's GTT owns the
@@ -306,7 +320,7 @@ re-checked by a second reviewer trying to refute it. No finding was refuted.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 89 tests run offline in about 13 s. They pass on Python 3.10 with pandas
+The 95 tests run offline in about 13 s. They pass on Python 3.10 with pandas
 2.2 and numpy 1.26, on Python 3.10 with pandas 2.3 and numpy 2.2 (the
 `uv.lock` resolution), and on Python 3.11 with pandas 3.0 and numpy 2.4.
 Pandas `FutureWarning`s raised from engine code fail the suite.

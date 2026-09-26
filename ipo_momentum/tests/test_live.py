@@ -74,7 +74,7 @@ def test_late_and_out_of_order_ticks_are_dropped_not_merged():
 
 
 def test_kite_full_mode_payload_uses_token_map_exchange_time_and_cumulative_volume():
-    a = adapter(token_map={1234: "SWIGGY"})
+    a = adapter(history=make_bars([280.0] * 5, start=ist(2026, 9, 25, 15, 0)), token_map={1234: "SWIGGY"})
     epoch = ist(2026, 9, 28, 9, 16, 5).timestamp()
     kite_tick = {"tradable": True, "mode": "full", "instrument_token": 1234, "last_price": 280.5,
                  "last_traded_quantity": 5, "volume_traded": 1000,
@@ -136,11 +136,30 @@ def test_joining_mid_session_does_not_dump_the_days_volume_into_one_bar():
     assert bar["Volume"] == 10_000                                         # only what traded while we watched
 
 
-def test_symbol_without_history_accumulates_bars_instead_of_keyerror():
-    a = adapter()
-    a.on_tick(tick(50.0, 10, ist(2026, 9, 28, 9, 15, 1), symbol="NEWIPO"))
-    a.on_tick(tick(51.0, 10, ist(2026, 9, 28, 9, 20, 1), symbol="NEWIPO"))
-    assert a.market_state["NEWIPO"].iloc[0].tolist() == [50.0, 50.0, 50.0, 50.0, 10.0]
+def test_ticks_for_a_symbol_without_history_are_ignored_not_fatal(caplog):
+    # v1.0 raised KeyError here and the shared aggregator died for every symbol. Accumulating bars
+    # instead would later trade a base anchored at engine start-up, so the symbol is ignored.
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)))
+    for m in (15, 20, 25):
+        a.on_tick(tick(50.0, 10, ist(2026, 9, 28, 9, m, 1), symbol="NEWIPO"))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 9, 15, 1)))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 9, 20, 1)))
+    assert "NEWIPO" not in a.market_state and a.dropped_ticks == 3
+    assert a.market_state["SWIGGY"].index[-1] == pd.Timestamp(ist(2026, 9, 28, 9, 15))   # healthy symbol unaffected
+    assert caplog.text.count("[NEWIPO] Ticks ignored: no established history") == 1
+
+
+def test_pre_open_and_post_close_prints_are_not_bars_and_auction_volume_lands_at_the_open():
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)), started_at=ist(2026, 9, 28, 8, 55))
+    pre_open = engine.Tick("SWIGGY", 101.0, 0, ist(2026, 9, 28, 9, 7, 30), cumulative_volume=250_000)
+    first = engine.Tick("SWIGGY", 101.5, 0, ist(2026, 9, 28, 9, 15, 2), cumulative_volume=260_000)
+    for t in (pre_open, first):
+        a.on_tick(t)
+    a.on_tick(tick(101.0, 10, ist(2026, 9, 28, 15, 31, 0)))              # closing-session print
+    a.flush_due_bars(ist(2026, 9, 28, 9, 21))
+    df = a.market_state["SWIGGY"]
+    assert df.index[-1] == pd.Timestamp(ist(2026, 9, 28, 9, 15)) and a.dropped_ticks == 2
+    assert df.iloc[-1]["Volume"] == 260_000 and df.iloc[-1]["Open"] == 101.5   # auction volume, first in-session price
 
 
 def test_live_breakout_bar_close_emits_a_signal():
@@ -166,7 +185,8 @@ def test_process_ticks_survives_an_exception_and_keeps_counting_tasks():
             return None
 
         alpha.evaluate = flaky
-        a = engine.LiveTickAdapter({}, alpha, asyncio.Queue(), asyncio.get_running_loop(), started_at=PRE_OPEN)
+        history = {"X": make_bars([10.0] * 5, start=ist(2026, 9, 25, 15, 0))}
+        a = engine.LiveTickAdapter(history, alpha, asyncio.Queue(), asyncio.get_running_loop(), started_at=PRE_OPEN)
         worker = asyncio.create_task(a.process_ticks())
         a.broker_on_ticks(None, [{"symbol": "X", "price": 10.0, "volume": 1, "timestamp": ist(2026, 9, 28, 9, 15 + 5 * i)}
                                  for i in range(4)])
@@ -178,7 +198,7 @@ def test_process_ticks_survives_an_exception_and_keeps_counting_tasks():
     a, evaluations = asyncio.run(scenario())
     assert evaluations == 3                                               # bars 1-3 closed; the first raised
     # The raising evaluation still kept its bar and did not swallow the tick that closed it.
-    assert a.market_state["X"].index.tolist() == [pd.Timestamp(ist(2026, 9, 28, 9, m)) for m in (15, 20, 25)]
+    assert a.market_state["X"].index[-3:].tolist() == [pd.Timestamp(ist(2026, 9, 28, 9, m)) for m in (15, 20, 25)]
 
 
 def test_broker_callback_from_a_foreign_thread_is_delivered_to_the_loop():

@@ -42,6 +42,11 @@ def test_live_flags_are_refused_without_the_kite_source():
     assert proc.returncode == 2 and "require --source kite" in proc.stderr
 
 
+def test_real_orders_require_a_verified_static_ip():
+    proc = cli("--source", "kite", "--live-orders")                     # refused before any network call
+    assert proc.returncode == 2 and "--live-orders requires --expect-ip" in proc.stderr
+
+
 def test_kite_source_requires_credentials(monkeypatch):
     monkeypatch.delenv("KITE_API_KEY", raising=False)
     monkeypatch.delenv("KITE_ACCESS_TOKEN", raising=False)

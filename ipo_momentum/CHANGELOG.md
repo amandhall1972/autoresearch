@@ -82,7 +82,7 @@ reproduces the vectorized scan exactly (`test_walk_forward_equals_vectorized_sca
 | medium | ✔ | Both adapters swallowed every failure (HTTP, auth, JSON, partial chunks) into a silent empty frame. | Every attempt is logged. Only transient errors (5xx, 429, network) are retried. | `test_yahoo_failures_are_logged_and_only_transient_ones_retried`, `test_kite_permanent_errors_are_not_retried`, `test_kite_partial_history_failure_fails_closed_and_says_so` |
 | high | ✔ | Exit code 0 when history failed or a worker crashed. | 0 success, 1 no history or a crashed worker, 2 bad configuration, 130 Ctrl-C. | `test_unreachable_history_aborts_with_a_nonzero_exit`, `test_unreadable_csv_exits_with_an_error`, `test_a_crashed_worker_stops_the_engine_with_a_failure_code` |
 | high | ✔ | `boot()` kept only symbol→token, so there was no reverse map for ticks. | Both maps, plus per-instrument tick sizes. | `test_kite_history_is_chunked_contiguously_with_sdk_compatible_arguments` |
-| high | ✔ | `verify_hardware_ip` was fail-open: its result was ignored at the call site. | `--expect-ip` aborts on mismatch. Live orders without it log a warning. | `test_hardware_ip_mismatch_is_fatal` |
+| high | ✔ | `verify_hardware_ip` was fail-open: its result was ignored at the call site. | `--expect-ip` aborts on mismatch, and `--live-orders` refuses to start without it. | `test_hardware_ip_mismatch_is_fatal`, `test_real_orders_require_a_verified_static_ip` |
 | medium | ✔ | The still-forming bar was stored as complete. | Bars still forming at the fetch time are dropped. | `test_yahoo_keeps_only_complete_traded_session_bars` |
 | medium | ◐ | Null Yahoo rows became zero-volume bars, and leading gaps were back-filled from *future* closes. | A bar exists only if it traded. There is no back-fill. | `test_harmonize_never_backfills_from_the_future` |
 | medium | ✔ | Yahoo silently clamped the window to 59 days. | The clamp is logged, and the listing-anchor check applies to every adapter. | `test_orchestrator_excludes_symbols_whose_history_misses_the_listing` |
@@ -94,6 +94,18 @@ reproduces the vectorized scan exactly (`test_walk_forward_equals_vectorized_sca
 | low | ◐ | Only `5m` was mapped for Kite, and the 90-day chunk exceeds the 1-minute limit. | Interval table with per-request day limits. Unknown intervals raise. | `test_kite_interval_table_bounds_each_request` |
 | low | ✔ | The rate limiter was not FIFO, so a waiter could starve. | Slots are reserved in arrival order. | `test_limiter_serves_waiters_in_arrival_order`, `test_rate_limiter_admits_at_most_max_calls_per_window` |
 
+### Found by the completeness critic and the reviewers' notes
+
+A final reviewer read the whole file for anything the four areas missed. Its
+findings were reproduced by that reviewer only (no separate skeptic pass), and
+each is pinned by a test.
+
+| Sev | Source | v1.0 defect | v1.1 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | critic | A history load counted as success if *any* symbol loaded. The first live bar of a symbol whose history failed raised `KeyError` and killed the shared aggregator for every symbol. | Empty loads are logged. Ticks for a symbol without history are ignored, because it has no IPO base, and the other symbols are unaffected. | `test_ticks_for_a_symbol_without_history_are_ignored_not_fatal`, `test_orchestrator_reports_failure_when_nothing_loads` |
+| low | critic | The IP check trusted whichever provider answered first, and its fallbacks were dual-stack. One ipify timeout on an IPv6-capable host gave a FATAL mismatch for a correctly whitelisted IPv4 address. | Single-family providers queried concurrently. Any disagreement fails, at least two must confirm, and junk bodies are ignored. | `test_ip_check_survives_one_dead_provider_and_asks_only_single_family_hosts`, `test_ip_check_ignores_junk_and_wrong_family_answers_but_needs_two_confirmations`, `test_any_disagreeing_provider_fails_the_ip_check`, `test_ip_check_rejects_a_malformed_expected_address` |
+| medium | skeptic note | No session gating: pre-open or post-close prints became bars. | Only 09:15–15:30 prints make bars. Pre-open auction volume lands in the 09:15 bar. | `test_pre_open_and_post_close_prints_are_not_bars_and_auction_volume_lands_at_the_open` |
+
 ### Added
 
 * `CsvReplayAdapter` and 944 real NSE 5-minute SWIGGY bars, with provenance
@@ -101,4 +113,4 @@ reproduces the vectorized scan exactly (`test_walk_forward_equals_vectorized_sca
 * A CLI (`--source`, `--listing-date`, risk limits, `--rvol-mode`,
   `--live-feed`, `--live-orders`, `--expect-ip`, …) with meaningful exit codes.
 * `KiteOrderGateway` and `start_kite_feed` (KiteTicker in full mode).
-* Tests (89 cases), `uv.lock`, and `README.md`.
+* Tests (95 cases), `uv.lock`, and `README.md`.

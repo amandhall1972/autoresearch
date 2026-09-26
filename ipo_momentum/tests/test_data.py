@@ -213,10 +213,50 @@ def test_orchestrator_reports_failure_when_nothing_loads(tmp_path):
     assert asyncio.run(orch.build_the_ground()) is False and orch.market_state == {}
 
 
+def fake_ip_echo(monkeypatch, answers):
+    """Serve each provider URL its scripted body (bytes) or raise (an exception instance)."""
+    asked = []
+
+    def urlopen(req, timeout):
+        asked.append(req.full_url)
+        answer = answers[req.full_url]
+        if isinstance(answer, Exception):
+            raise answer
+        return FakeResponse(answer)
+
+    monkeypatch.setattr(engine.urllib.request, "urlopen", urlopen)
+    return asked
+
+
+V4 = engine.IP_ECHO_PROVIDERS[4]
+
+
 def test_hardware_ip_mismatch_is_fatal(monkeypatch):
-    monkeypatch.setattr(engine.urllib.request, "urlopen", lambda req, timeout: FakeResponse(b"203.0.113.9\n"))
+    fake_ip_echo(monkeypatch, {p: b"203.0.113.9\n" for p in V4})
     assert asyncio.run(engine.verify_hardware_ip("198.51.100.1")) is False
     assert asyncio.run(engine.verify_hardware_ip("203.0.113.9")) is True
+
+
+def test_ip_check_survives_one_dead_provider_and_asks_only_single_family_hosts(monkeypatch):
+    asked = fake_ip_echo(monkeypatch, {V4[0]: TimeoutError("timed out"), V4[1]: b"203.0.113.9", V4[2]: b"203.0.113.9\n"})
+    assert asyncio.run(engine.verify_hardware_ip("203.0.113.9")) is True   # v1.0: FATAL via a dual-stack fallback
+    assert sorted(asked) == sorted(V4) and "ifconfig.me" not in " ".join(asked)
+
+
+def test_ip_check_ignores_junk_and_wrong_family_answers_but_needs_two_confirmations(monkeypatch, caplog):
+    fake_ip_echo(monkeypatch, {V4[0]: b"<html>captive portal</html>", V4[1]: b"2406:da1a:6c3:c700::10", V4[2]: b"203.0.113.9"})
+    assert asyncio.run(engine.verify_hardware_ip("203.0.113.9")) is False
+    assert "answered with IPv6" in caplog.text and "only 1 of 3 IP verifiers answered" in caplog.text
+
+
+def test_any_disagreeing_provider_fails_the_ip_check(monkeypatch, caplog):
+    fake_ip_echo(monkeypatch, {V4[0]: b"203.0.113.9", V4[1]: b"203.0.113.9", V4[2]: b"198.51.100.77"})
+    assert asyncio.run(engine.verify_hardware_ip("203.0.113.9")) is False
+    assert "observed: 198.51.100.77 via https://ipv4.icanhazip.com" in caplog.text
+
+
+def test_ip_check_rejects_a_malformed_expected_address():
+    assert asyncio.run(engine.verify_hardware_ip("not-an-ip")) is False
 
 
 def test_limiter_serves_waiters_in_arrival_order():

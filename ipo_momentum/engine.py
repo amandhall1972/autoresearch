@@ -20,6 +20,7 @@ Nothing here is investment advice.
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import logging
 import math
@@ -206,22 +207,51 @@ def _read_url(req: urllib.request.Request, timeout: float) -> bytes:
     with urllib.request.urlopen(req, timeout=timeout) as response:
         return response.read()
 
-async def verify_hardware_ip(expected_static_ip: str) -> bool:
+# Single-family echo services: a dual-stack one would report the IPv6 address of an IPv4-whitelisted host.
+IP_ECHO_PROVIDERS = {
+    4: ("https://api.ipify.org", "https://v4.ident.me", "https://ipv4.icanhazip.com"),
+    6: ("https://api6.ipify.org", "https://v6.ident.me", "https://ipv6.icanhazip.com"),
+}
+
+async def verify_hardware_ip(expected_static_ip: str, min_agreeing: int = 2) -> bool:
+    """True only if the public egress IP is the address whitelisted with the broker.
+
+    All providers of the expected address family are asked concurrently. Any valid answer that
+    differs fails the check; otherwise at least ``min_agreeing`` providers must confirm it.
+    Unreachable providers and non-IP bodies (captive portals, error pages) are ignored.
+    """
     logger.info("Executing hardware IP verification...")
-    providers = ['https://api.ipify.org', 'https://ifconfig.me/ip', 'https://ident.me']
-    for provider in providers:
+    try:
+        expected = ipaddress.ip_address(expected_static_ip.strip())
+    except ValueError:
+        logger.critical(f"FATAL: {expected_static_ip!r} is not an IP address.")
+        return False
+    providers = IP_ECHO_PROVIDERS[expected.version]
+
+    async def ask(provider: str):
         req = urllib.request.Request(provider, headers={'User-Agent': 'Mozilla/5.0'})
         try:
-            actual_ip = (await asyncio.to_thread(_read_url, req, 5)).decode('utf-8').strip()
-            if actual_ip != expected_static_ip:
-                logger.critical(f"FATAL: IP Mismatch. Authorized: {expected_static_ip}, Actual: {actual_ip}.")
-                return False
-            logger.info(f"IP Verification Confirmed via {provider}. IP: {actual_ip}")
-            return True
+            answer = ipaddress.ip_address((await asyncio.to_thread(_read_url, req, 5)).decode('utf-8', 'replace').strip())
         except Exception as e:
-            logger.warning(f"IP provider {provider} failed: {e!r}. Retrying fallback...")
-    logger.critical("FATAL: Network isolation or all IP verifiers failed.")
-    return False
+            logger.warning(f"IP provider {provider} gave no usable answer: {e!r}")
+            return None
+        if answer.version != expected.version:
+            logger.warning(f"IP provider {provider} answered with IPv{answer.version} {answer}; ignored.")
+            return None
+        return answer
+
+    answers = await asyncio.gather(*(ask(p) for p in providers))
+    valid = {p: a for p, a in zip(providers, answers, strict=True) if a is not None}
+    mismatched = {p: a for p, a in valid.items() if a != expected}
+    if mismatched:
+        seen = ", ".join(f"{a} via {p}" for p, a in mismatched.items())
+        logger.critical(f"FATAL: IP Mismatch. Authorized: {expected}, observed: {seen}.")
+        return False
+    if len(valid) < min_agreeing:
+        logger.critical(f"FATAL: only {len(valid)} of {len(providers)} IP verifiers answered; {min_agreeing} must agree.")
+        return False
+    logger.info(f"IP Verification Confirmed by {len(valid)} providers. IP: {expected}")
+    return True
 
 class TokenBucketRateLimiter:
     """Sliding-window limiter: at most ``max_calls`` acquisitions in any ``period`` seconds.
@@ -565,6 +595,7 @@ class LiveTickAdapter:
         self._cum_volume: Dict[str, Tuple[object, int]] = {}
         self.dropped_ticks = 0
         self.bar_listeners = list(bar_listeners or [])
+        self._unanchored: set = set()
 
     def _normalize(self, t: dict) -> Optional[Tick]:
         if 'instrument_token' in t:
@@ -620,8 +651,21 @@ class LiveTickAdapter:
 
     def on_tick(self, tick: Tick) -> None:
         sym = tick.symbol
+        if sym not in self.market_state:
+            # No history means no IPO base or AVWAP anchor: trading its live bars later would be
+            # trading a made-up base, so the symbol is ignored (fail closed, like the orchestrator).
+            self.dropped_ticks += 1
+            if sym not in self._unanchored:
+                self._unanchored.add(sym)
+                logger.warning(f"[{sym}] Ticks ignored: no established history for this symbol.")
+            return
         # Floor the timestamp to the current 5-minute block
         boundary = bar_floor(tick.timestamp, self.bar_minutes)
+        if not SESSION_OPEN <= boundary.time() < SESSION_CLOSE:
+            # Pre-open auction and post-close prints are not continuous-session bars. Dropping them
+            # before the volume baseline moves puts auction volume in the 09:15 bar, as brokers do.
+            self.dropped_ticks += 1
+            return
         volume = self._traded_quantity(tick)
 
         if sym in self.last_closed and boundary <= self.last_closed[sym]:
@@ -994,20 +1038,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="trade symbols whose history does not reach the listing (base anchored at first bar)")
     p.add_argument("--live-feed", action="store_true", help="stream Kite websocket ticks (needs --source kite)")
     p.add_argument("--live-orders", action="store_true", help="send REAL orders to Zerodha (needs --source kite)")
-    p.add_argument("--expect-ip", help="abort unless the public IP equals this (static-IP whitelisting)")
+    p.add_argument("--expect-ip", help="abort unless the public IP equals this (required with --live-orders)")
     return p
 
 async def main(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     logger.info("=== INITIALIZING INSTITUTIONAL ENGINE ===")
 
-    if args.expect_ip and not await verify_hardware_ip(args.expect_ip):
-        return 1
     if (args.live_orders or args.live_feed) and args.source != "kite":
         logger.critical("--live-orders/--live-feed require --source kite.")
         return 2
     if args.live_orders and not args.expect_ip:
-        logger.warning("--live-orders without --expect-ip: the static IP registered with the broker is not verified.")
+        logger.critical("--live-orders requires --expect-ip <the static IP registered with the broker>.")
+        return 2
+    if args.expect_ip and not await verify_hardware_ip(args.expect_ip):
+        return 1
 
     # 1. Map the Reality (Historical Data Sync)
     kite_creds = None
