@@ -1750,3 +1750,120 @@ def test_a_provisional_bar_is_not_moved_into_a_bucket_that_already_closed():
     a.on_tick(stamped(100.9, 1_017_000, ist(2026, 9, 25, 10, 6, 35), -0.3))
     a.on_tick(stamped(101.0, 1_017_100, ist(2026, 9, 25, 10, 10, 5), -0.3))
     assert a.market_state["SWIGGY"].loc[pd.Timestamp(ist(2026, 9, 25, 10, 5)), "Volume"] == 7_000
+
+
+# ---------------------------------------------------------------- round 12: with no bar open, a print is filed late
+def broker_of(bars):
+    async def backfill(sym, start, end):
+        return bars[(bars.index >= pd.Timestamp(start)) & (bars.index < pd.Timestamp(end))]
+    return backfill
+
+
+def test_an_unstamped_trade_received_after_a_stamp_of_the_next_bucket_is_filed_in_that_bucket():
+    # Q, a stamped quote of 10:05:00, is received just before B, an unstamped 400k trade: B traded after 10:05:00. The
+    # name did not trade in 10:00 and no bar of it opened, so v1.11 filed B at feed time (10:04:59.65) in 10:00, took
+    # Q as proof of that bucket, and evaluated it: a fake breakout on the shares of the bar after.
+    alpha = RecordingAlpha()
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 10, 5, 0, 450000)]
+        a = illiquid_after_0955(now, loop=asyncio.get_running_loop(), backfill=broker_of(engine.empty_bars()))
+        a.alpha = alpha
+        a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5), -0.25))    # Q: no trade
+        a.on_tick(a._normalize(zeroed(413_000, 102.0)))                         # B
+        bar = a.current_bars["SWIGGY"]
+        assert (bar["timestamp"], bar["Volume"], bar["ambiguous"]) == (ist(2026, 9, 25, 10, 5), 400_000, False)
+        a.on_tick(stamped(100.2, 414_000, ist(2026, 9, 25, 10, 6), -0.3))
+        a.on_tick(stamped(100.2, 414_100, ist(2026, 9, 25, 10, 10, 1), -0.3))   # closes 10:05 across the 10:00 hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    a = asyncio.run(scenario())
+    assert [idx for _, idx in alpha.evaluated] == [pd.Timestamp(ist(2026, 9, 25, 10, 5))]
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in a.market_state["SWIGGY"].index
+
+
+@pytest.mark.parametrize("late,traded_after", [(2.6, 2.0), (4.0, 3.5), (1.3, 0.9)])
+def test_with_no_bar_open_an_unstamped_trade_is_filed_in_the_latest_bucket_it_can_belong_to(late, traded_after):
+    # One quote `late` seconds late holds the lag at `late` for a minute: a trade `traded_after` seconds past 10:05
+    # (received 0.3 s later) has feed time in 10:00. v1.11 opened, kept and evaluated a 10:00 bar for it; filed in
+    # 10:05 instead, the bar is provisional (a stamped print of 10:00 received later still moves it back).
+    now = [ist(2026, 9, 25, 10, 4, 10, 300000)]
+    a = illiquid_after_0955(now)
+    for second, ahead in [(10, -0.3), (20, -late), (40, -0.3)]:
+        a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 4, second), ahead))    # quotes
+    now[0] = ist(2026, 9, 25, 10, 5) + timedelta(seconds=traded_after + 0.3)
+    a.on_tick(a._normalize(zeroed(15_000, 100.5)))
+    bar = a.current_bars["SWIGGY"]
+    assert (bar["timestamp"], bar["provisional"], bar["ambiguous"]) == (ist(2026, 9, 25, 10, 5), True, True)
+
+
+def test_an_unstamped_trade_filed_late_is_not_counted_twice_when_the_bucket_it_can_belong_to_is_back_filled():
+    # Nothing else trades in 10:05, whose broker bar holds B. v1.11 built B's bar in 10:00 and back-filled 10:05 with
+    # B's shares again (800k over the two buckets, a fake RVOL spike); v1.12 has one 10:05 bar of 400k.
+    broker = make_bars([102.0], volumes=[400_000], start=ist(2026, 9, 25, 10, 5))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 10, 5, 0, 450000)]
+        a = illiquid_after_0955(now, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.on_tick(a._normalize(zeroed(413_000, 102.0)))                         # B
+        now[0] = ist(2026, 9, 25, 10, 5, 3, 450000)
+        a.note_feed_alive(now[0])
+        a.flush_due_bars(now[0])
+        a.on_tick(stamped(101.0, 414_000, ist(2026, 9, 25, 10, 11), -0.3))
+        a.on_tick(stamped(101.0, 414_500, ist(2026, 9, 25, 10, 15, 1), -0.3))
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    bars = asyncio.run(scenario()).market_state["SWIGGY"]
+    span = bars[(bars.index >= pd.Timestamp(ist(2026, 9, 25, 10, 0))) & (bars.index < pd.Timestamp(ist(2026, 9, 25, 10, 10)))]
+    assert span["Volume"].to_dict() == {pd.Timestamp(ist(2026, 9, 25, 10, 5)): 400_000}
+
+
+def test_an_unstamped_print_received_just_after_the_close_stays_in_the_sessions_last_bar():
+    # Control for filing late: the latest bucket such a print can belong to is the close's, which is not a session
+    # bucket; it traded in the session, so it keeps its feed time (15:29:59.5) and opens the 15:25 bar.
+    history = pd.concat([session_history(24), make_bars([100.0] * 73, start=ist(2026, 9, 25, 9, 15))])   # to 15:15
+    now = [ist(2026, 9, 25, 15, 20, 10, 300000)]
+    a = clocked(now, history=history)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 10_000, ist(2026, 9, 25, 15, 20, 10), -0.3))
+    a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 15, 22), -0.3))
+    a.flush_due_bars(ist(2026, 9, 25, 15, 25, 3))                          # closes 15:20
+    a.note_feed_lag(ist(2026, 9, 25, 15, 29, 40), 0.8)
+    now[0] = ist(2026, 9, 25, 15, 30, 0, 300000)
+    a.on_tick(a._normalize(zeroed(15_000, 100.5)))
+    assert a.dropped_ticks == 0
+    assert (a.current_bars["SWIGGY"]["timestamp"], a.current_bars["SWIGGY"]["Volume"]) == (ist(2026, 9, 25, 15, 25), 2_000)
+
+
+def test_a_bar_an_unstamped_print_opened_while_closing_a_partial_bar_is_not_evaluated_if_the_bucket_before_traded():
+    # Pin for R11-FEED-2 on the close-and-open path: a trade from about 11:04:59.5, 4 s late, has feed time past the
+    # grace while the bar clock has not closed the (partial) 11:00 bar yet. It closes that bar and opens 11:05, whose
+    # shares the back-fill of 11:00 counts again: not evaluated when the broker says 11:00 traded.
+    alpha = RecordingAlpha()
+    broker = make_bars([100.4], volumes=[70_000], start=ist(2026, 9, 25, 11, 0))
+
+    async def scenario():
+        history = pd.concat([session_history(24), make_bars([100.0] * 21, start=ist(2026, 9, 25, 9, 15))])  # to 10:55
+        now = [ist(2026, 9, 25, 11, 0, 20)]
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+        a.on_tick(stamped(100.0, 500_000, ist(2026, 9, 25, 11, 0, 20), -0.4))
+        a.mark_feed_reset(at=ist(2026, 9, 25, 11, 2))                          # a reconnect: 11:00 is partial
+        a.on_tick(stamped(100.1, 520_000, ist(2026, 9, 25, 11, 2, 30), -0.4))
+        a.on_tick(stamped(100.2, 530_000, ist(2026, 9, 25, 11, 4, 10), -0.5))
+        a.flush_due_bars(ist(2026, 9, 25, 11, 5, 2, 400000))                   # too early to close 11:00
+        now[0] = ist(2026, 9, 25, 11, 5, 3, 500000)
+        a.on_tick(a._normalize(zeroed(580_000, 100.4)))                        # 50k
+        assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 11, 5)
+        a.on_tick(stamped(101.5, 600_000, ist(2026, 9, 25, 11, 7), -0.4))
+        a.on_tick(stamped(101.6, 601_000, ist(2026, 9, 25, 11, 10, 1), -0.4))   # closes 11:05 across the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 11, 5)) not in [idx for _, idx in alpha.evaluated]

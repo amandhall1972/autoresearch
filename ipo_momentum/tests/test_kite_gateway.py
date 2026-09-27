@@ -919,7 +919,7 @@ def test_gtt_requests_refused_only_at_the_proxys_tunnel_leave_a_position_known_t
     gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
     r = run_router(router(gateway=gw), [sig()])
     assert [(f.exit_order_id, f.exits_unknown) for f in r.fills] == [(None, False)] and kite.created_gtts == []
-    assert kite.gtt_places == (3 if book_readable else 1)                  # the retry coverage is unchanged
+    assert kite.gtt_places == 3                                            # nothing can exist: every attempt is used
     assert "POSITION OPEN WITHOUT EXITS" in gw.alerts[-1] and not any("GTT STATE UNKNOWN" in a for a in gw.alerts)
     ticker = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None)
     engine._halt_report(r, gw, ticker, exit_code=0, stop_signal=None)
@@ -956,10 +956,12 @@ def test_a_gtt_that_had_already_fired_is_not_reported_as_the_positions_armed_exi
 def test_an_unconfirmed_cancel_does_not_call_a_fired_gtt_cover():
     kite = triggered_lost_reply([{"status": "OPEN", "filled_quantity": 800, "average_price": 290.2}])
     r = run_router(router(gateway=fast_gateway(kite)), [sig()])
-    assert f"800 shares already bought are covered by GTT 700 ({engine.FIRED_NOTE})" in r.unresolved[0]
+    assert f"800 shares already bought are NOT surely covered (GTT 700; {engine.FIRED_NOTE})" in r.unresolved[0]
+    assert "covered by GTT" not in r.unresolved[0]
 
 
-def test_a_fill_during_shutdown_whose_gtt_had_fired_is_not_reported_as_exits_armed():
+def test_a_fill_during_shutdown_whose_gtt_had_fired_is_not_reported_as_exits_armed(caplog):
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
     gw = fast_gateway(StubKite([OPEN]))
 
     async def settled():
@@ -973,6 +975,9 @@ def test_a_fill_during_shutdown_whose_gtt_had_fired_is_not_reported_as_exits_arm
     asyncio.run(scenario())
     assert gw.alerts == [f"[SWIGGY] Entry 260928000000001 filled 2941 while shutting down; exits: GTT 700 "
                          f"({engine.FIRED_NOTE})."]
+    ticker = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None)
+    engine._halt_report(router(gateway=gw), gw, ticker, exit_code=0, stop_signal=None)
+    assert f"filled during shutdown | exits: 700 ({engine.FIRED_NOTE})" in caplog.text     # the halt report's line too
 
 
 @pytest.mark.parametrize("status", ["triggered", "active"])
@@ -985,3 +990,62 @@ def test_a_duplicate_that_had_fired_marks_the_fill(status):
     gw = fast_gateway(kite)
     fill = asyncio.run(gw.execute(kite_plan()))
     assert (fill.exit_order_id, getattr(fill, "exits_fired", False)) == ("999", status == "triggered")
+
+
+# ---------------------------------------------------------------- round 12: refused tunnels carry nothing to Kite
+def proxy_outage(kite, error, until_places):
+    """Every GTT book read answers ``error`` until the ``until_places``-th GTT request (the proxy is back)."""
+    original = kite._request
+
+    def request(route, method, *args, **kwargs):
+        if route == "gtt" and kite.gtt_places < until_places:
+            raise error
+        return original(route, method, *args, **kwargs)
+
+    kite._request = request
+
+
+def test_a_proxy_outage_that_also_hides_the_gtt_book_is_ridden_out_with_every_attempt():
+    # The GTT book goes through the same proxy, so it is refused too. v1.11 stopped after the first refused tunnel
+    # ("no GTT can exist") with two attempts left, and left the filled position without exits.
+    tunnel = refused_tunnel()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[tunnel, tunnel, {"trigger_id": 777}])
+    proxy_outage(kite, tunnel, until_places=3)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == ("777", False) and kite.gtt_places == 3 and gw.alerts == []
+
+
+def test_a_refused_tunnel_then_an_expired_session_names_the_session():
+    # v1.11 gave up after the refused tunnel and blamed the proxy; the next attempt is the one that says why.
+    tunnel = refused_tunnel()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[tunnel, TOKEN], gtt_book=tunnel)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == (None, False) and kite.gtt_places == 2
+    assert "POSITION OPEN WITHOUT EXITS" in gw.alerts[-1] and "TokenException" in gw.alerts[-1]
+
+
+def test_a_gtt_armed_after_refused_tunnels_alone_starts_no_duplicate_watch():
+    # Only a request that may have reached Kite can have booked a second GTT. v1.11 watched anyway, and a book that
+    # failed at the end of the watch raised "could not rule out a duplicate" (and exit 1) for a clean run.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused_tunnel(), {"trigger_id": 777}],
+                    gtt_book_fail=lambda since, places: places >= 2)       # the book fails once 777 is armed
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    routes = kite.routes()
+    assert fill.exit_order_id == "777" and gw.alerts == []
+    assert "gtt" not in routes[len(routes) - routes[::-1].index("gtt.place"):]   # no read after the last request
+
+
+def test_a_gtt_armed_after_a_504_is_still_watched_for_a_duplicate():
+    # Control: a 504 may have reached Kite, so the watch runs, and a book that fails at its end is still reported.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Gateway timed out", code=504), {"trigger_id": 777}],
+                    gtt_book_fail=lambda since, places: places >= 2)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "777" and len(gw.alerts) == 1 and "to rule out a duplicate" in gw.alerts[0]

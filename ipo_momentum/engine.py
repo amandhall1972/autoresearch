@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.11)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.12)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -1075,13 +1075,16 @@ class LiveTickAdapter:
         if latest is not None and tick.timestamp.time() < SESSION_OPEN <= latest.time() \
                 and tick.timestamp.date() == latest.date():
             tick.timestamp = datetime.combine(latest.date(), SESSION_OPEN, tzinfo=IST)   # received in session
-        closed = self.last_closed.get(sym)
-        if latest is not None and closed is not None and sym not in self.current_bars \
-                and tick.timestamp < closed + timedelta(minutes=self.bar_minutes) <= latest:
-            # Received after the symbol's last bar closed (a stamped update of the next bucket closed it): it
-            # belongs after it. Dropped as late, its shares would ride into a later bar while the back-fill of
-            # the bucket it traded in counted them again.
-            tick.timestamp = closed + timedelta(minutes=self.bar_minutes)
+        if latest is not None and sym not in self.current_bars \
+                and (later := bar_floor(latest, self.bar_minutes)) > tick.timestamp \
+                and SESSION_OPEN <= later.time() < SESSION_CLOSE:
+            # With no bar open, a print that can belong to a later bucket than its feed time's is filed in the
+            # latest one. Filed early, the bar it opened would be evaluated, and the back-fill of the bucket it
+            # really traded in would count its shares again (a fake breakout); after the bar before it closed,
+            # it would be dropped as late, with the same result. Filed late, its bar is ambiguous (below), so it
+            # is not evaluated if the back-filled bucket before it traded: a missed signal at worst. Received
+            # after the close, it can only be the session's.
+            tick.timestamp = later
         # Floor the timestamp to the current 5-minute block
         boundary = bar_floor(tick.timestamp, self.bar_minutes)
         if not SESSION_OPEN <= boundary.time() < SESSION_CLOSE:
@@ -1134,7 +1137,8 @@ class LiveTickAdapter:
         # this bucket received before it (and no later than it could have traded) proves the bucket: in-order
         # delivery puts the print after it.
         last = self._last_update.get(sym)
-        proven = last is not None and last[0] == self._feed_epoch and boundary <= last[1] <= (latest or last[1])
+        proven = last is not None and last[0] == self._feed_epoch \
+            and boundary <= last[1] < boundary + width and last[1] <= (latest or last[1])
         ambiguous = tick.unstamped and boundary.time() != SESSION_OPEN and not proven
         provisional = ambiguous and active is None and tick.timestamp - boundary < BAR_CLOSE_GRACE
         if active is None:
@@ -1389,7 +1393,8 @@ class KiteOrderGateway(OrderGateway):
         from its tunnel set-up and writes a request only through an open tunnel, so the proxy received
         the CONNECT line and nothing else: the order never left. The GTT path keeps treating it as
         ambiguous on purpose: attempts plus book polls ride out a longer proxy outage than one never-sent
-        window would."""
+        window would. Refused tunnels alone never make a GTT possible, so they use every attempt even
+        while the book is unreadable, and start no duplicate watch."""
         reason = getattr(e.args[0], "reason", None) if type(e).__name__ == "ProxyError" and e.args else None
         reason = getattr(reason, "original_error", None)
         return isinstance(reason, OSError) and str(reason).startswith("Tunnel connection failed:")
@@ -1633,10 +1638,8 @@ class KiteOrderGateway(OrderGateway):
                     ambiguous = True
                     maybe_booked = maybe_booked or not self._tunnel_refused(e)
                     found, book_error = await self._await_gtt(sym, plan, filled, exclude=known or set())
-                    if found is None and book_error is None:
-                        continue                               # no GTT appeared in cancel_grace: retry
-                    if found is None and not maybe_booked:
-                        break                                  # only refused tunnels: no GTT can exist
+                    if found is None and (book_error is None or not maybe_booked):
+                        continue                               # none appeared in cancel_grace, or none can exist: retry
                     if found is None:
                         self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing "
                                     f"failed ({e!r}) and the GTT book could not be read ({book_error!r}). "
@@ -1656,7 +1659,7 @@ class KiteOrderGateway(OrderGateway):
             else:
                 logger.info(f"🛡️ [{sym}] GTT OCO {trigger_id} found in the GTT book; the lost reply is resolved.")
             break
-        if trigger_id is not None and ambiguous:
+        if trigger_id is not None and maybe_booked:
             fired = await self._watch_duplicates(sym, plan, filled, order_id, trigger_id, known or set()) or fired
         if trigger_id is None and maybe_booked:
             self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): every GTT request failed "
@@ -1691,7 +1694,8 @@ class KiteOrderGateway(OrderGateway):
             fill = await self._protect(plan, order_id, last, known) if last and int(last.get('filled_quantity') or 0) > 0 else None
             known = ""
             if fill is not None:
-                cover = (f"covered by GTT {fill.exit_order_id}{_fired(fill)}" if fill.exit_order_id else
+                cover = (f"NOT surely covered (GTT {fill.exit_order_id}; {FIRED_NOTE})" if fill.exits_fired else
+                         f"covered by GTT {fill.exit_order_id}" if fill.exit_order_id else
                          "of UNKNOWN GTT state (a GTT may exist: CHECK THE GTT BOOK)" if fill.exits_unknown else
                          "NOT covered by a GTT")
                 known = f"; {fill.quantity} shares already bought are {cover}"
@@ -2148,6 +2152,7 @@ class _StopRoutes:
     """
     def __init__(self):
         self.routes: Dict[int, dict] = {}
+        self.inherited: Dict[int, tuple] = {}     # in a forked child: parent engines' dispatcher -> the host's handler
 
     def _dispatch(self, signum: int) -> None:
         route = self.routes.get(signum)
@@ -2170,6 +2175,9 @@ class _StopRoutes:
         if previous == signal.SIG_IGN:
             return None
         handlers = getattr(loop, "_signal_handlers", None)
+        inherited = self.inherited.get(signum)
+        if inherited is not None and previous is inherited[0] and not (isinstance(handlers, dict) and handlers.get(signum)):
+            previous = inherited[1]       # a forked child restored the parent engines' dispatcher: hand back the host's
         route = {'loop': loop, 'callbacks': [], 'previous': previous, 'handler': None, 'installed': None,
                  'lost': False, 'handlers': handlers if isinstance(handlers, dict) else None,
                  'prior': handlers.get(signum) if isinstance(handlers, dict) else None, 'reclaim': None,
@@ -2222,9 +2230,22 @@ class _StopRoutes:
         for signum in STOP_SIGNALS:
             route = self.routes.get(signum)
             if route is not None and (route['loop'].is_closed() or route['pid'] != os.getpid()):
-                if route['pid'] == os.getpid() and any(getattr(c, 'held', False) for c in route['callbacks']):
-                    logger.warning(f"Signal {signum} was still held by a finished main(hold_signals=True) when its "
-                                   f"loop closed: it was never released (engine.release_signals()).")
+                if route['pid'] == os.getpid():
+                    current = signal.getsignal(signum)
+                    # A dispatcher of the dead loop (uvloop's, the engines' or one the host re-registered on it, or the
+                    # plain one) swallows every stop, and taken as the next engine's `previous` it would be handed back.
+                    # asyncio's close reset its own.
+                    dead = current is not None and (
+                        current is route['handler'] or getattr(current, '__self__', None) is route['loop'])
+                    unreleased = route['handlers'] is not None or (dead and current is (route['handler'] or route['installed']))
+                    if any(getattr(c, 'held', False) for c in route['callbacks']) and unreleased:
+                        logger.warning(f"Signal {signum} was still held by a finished main(hold_signals=True) when its "
+                                       f"loop closed: it was never released (engine.release_signals()).")
+                    if dead:
+                        try:
+                            signal.signal(signum, _host_handler(route, signum, forked=False))
+                        except (ValueError, OSError):
+                            pass
                 del self.routes[signum]                       # a loop that ended without handing back, or the
                 route = None                                  # parent's, inherited by a forked child
             if route is not None and route['loop'] is not loop:
@@ -2329,21 +2350,37 @@ class _StopRoutes:
 
 _STOP_ROUTES = _StopRoutes()
 
+def _loop_bound(handler, forked: bool = True) -> bool:
+    """Whether ``handler`` runs through an event loop (a loop's dispatcher or method, or asyncio.run's own SIGINT
+    handler on 3.11+) that cannot run it: none can in a forked child; otherwise one that has closed."""
+    owner = getattr(getattr(handler, 'func', handler), '__self__', None)
+    if isinstance(owner, getattr(asyncio, 'Runner', ())):
+        owner = getattr(owner, '_loop', None) or owner       # a closed Runner has dropped its loop
+    elif not isinstance(owner, asyncio.AbstractEventLoop):
+        return False
+    return forked or not isinstance(owner, asyncio.AbstractEventLoop) or owner.is_closed()
+
+def _host_handler(route: dict, signum: int, forked: bool = True):
+    """What the host had before the route's engines, as a plain handler: the default where that ran through a loop
+    that cannot run it (see _loop_bound)."""
+    previous = route['previous']
+    if previous is None or previous is route['installed'] or _loop_bound(previous, forked):
+        return signal.default_int_handler if signum == signal.SIGINT else signal.SIG_DFL
+    return previous
+
 def _forget_inherited_routes() -> None:
     """In a forked child, the parent's routes, its engines' dispatchers and its loop's wakeup fd are not the
     child's: give the child what the parent's hand-back would have restored (the host's own plain handler, or
     the default), from the moment it is forked, so a stop sent to it stops it, never the parent's engines."""
     routes, _STOP_ROUTES.routes = _STOP_ROUTES.routes, {}
     for signum, route in routes.items():
-        if signal.getsignal(signum) is not (route['handler'] or route['installed']):
+        current, dispatcher = signal.getsignal(signum), route['handler'] or route['installed']
+        _STOP_ROUTES.inherited[signum] = (dispatcher, _host_handler(route, signum))
+        if current is not dispatcher and not _loop_bound(current):
             continue                      # the host changed it (a SIG_IGN guard included): leave what it set
-        previous = route['previous']
-        through_loop = previous is None or route['prior'] is not None or route['lost'] \
-            or previous is route['installed'] or getattr(previous, '__self__', None) is route['loop'] \
-            or isinstance(getattr(previous, '__self__', None), asyncio.AbstractEventLoop)
         default = signal.default_int_handler if signum == signal.SIGINT else signal.SIG_DFL
-        try:
-            signal.signal(signum, default if through_loop else previous)
+        try:                              # a host loop callback set mid-run (uvloop) is dead here too: the default
+            signal.signal(signum, _host_handler(route, signum) if current is dispatcher else default)
         except (ValueError, OSError):
             pass
     if routes:

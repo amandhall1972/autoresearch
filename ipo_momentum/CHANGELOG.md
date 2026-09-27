@@ -1,5 +1,113 @@
 # Changelog
 
+## v1.12 (2026-09-27)
+
+v1.11 went through a twelfth adversarial review on a frozen snapshot
+(`607a31f`), with the same four areas. Every finder and skeptic completed. 15
+findings, two duplicates across areas: R12-DATA-DOCS-4 is R12-LIFECYCLE-3, and
+R12-DATA-DOCS-5 is the window part of R12-FEED-1. That leaves 13 defects. None
+refuted: 10 confirmed, 5 with part of the claim overstated. 4 medium, 9 low
+(the 13 distinct). Where the fix is not the finder's:
+- R12-FEED-1: the skeptic dated an unstamped print by a stamped update received
+  before it, and left the case with no stamp (and the one-late-packet window,
+  R12-DATA-DOCS-5) to the docs. v1.12 goes further. With no bar open, the print
+  is filed in the latest bucket it can belong to, and that bar is ambiguous as
+  before, which removes the fake breakout and the double count in both cases.
+  The price is a missed signal for a print that really traded in a bucket's
+  last moments (Known limitations). A print whose latest bucket is past the
+  close stays in the session's last bar.
+- R12-LIFECYCLE-3: the finder's fix reset any dispatcher still in place after
+  a closed held loop. On asyncio that is the shared no-op, which by then is a
+  host's new loop callback: the host lost it. Only a dispatcher bound to the
+  dead loop, or the route's own plain handler, goes back. The data/docs skeptic
+  (R12-DATA-DOCS-4) added a callback the host re-registered on the dead loop,
+  and restores the host's plain handler rather than always the default. v1.12
+  also keeps a host handler bound to a loop that is still running (one that
+  forwards the signal to another thread's loop). Only in a forked child, where
+  no loop of the parent runs, does every loop-bound handler go to the default.
+- R12-LIFECYCLE-4: the finder's warning condition read "reset to the default",
+  which missed SIGINT under 3.11's `asyncio.run` (its Runner installs its own
+  handler). The skeptic's dead-dispatcher test is used instead.
+- R12-DATA-DOCS-1: a precise type check for `asyncio.Runner`'s SIGINT handler,
+  not the finder's "a partial whose owner has a `_loop`", which would also have
+  reset a host's own handler of that shape.
+- R12-ORDERS-3: the finder's "under GTT n" still read as protection.
+
+Every v1.12 regression test fails on the v1.11 snapshot and passes here
+(`test_the_fast_modules_pass_without_the_kite_extra` fails there too, because
+it runs the fast modules; the Ctrl-C tests fail there on Python 3.11, whose
+`asyncio.run` installs the handler, and pass on 3.10). The exceptions are these
+controls:
+- `test_a_gtt_armed_after_a_504_is_still_watched_for_a_duplicate`: a request
+  that may have reached Kite still starts the duplicate watch;
+- `test_an_unstamped_print_received_just_after_the_close_stays_in_the_sessions_last_bar`:
+  filing late stops at the close. It fails when that guard is removed;
+- `test_a_forked_helper_is_stopped_by_its_own_stop_after_the_host_registered_a_callback_mid_run`
+  on asyncio (its shared no-op was always reset) and
+  `test_a_forked_helper_gets_the_hosts_live_plain_handler[set beside a loop callback-uvloop]`
+  (uvloop has no readable loop entry under the plain handler);
+- `test_after_a_held_asyncio_run_closed_unreleased_a_hosts_new_loop_callback_is_kept`:
+  it fails with the finder's version of the R12-LIFECYCLE-3 fix;
+- `test_a_held_signal_taken_back_before_its_loop_closed_is_reported_only_where_the_close_undid_it[asyncio]`:
+  the documented asyncio reset is still reported;
+- the pins for v1.11 rules that no test covered:
+  `test_a_forked_helper_with_a_host_plain_handler_does_not_forward_its_stop_to_the_parent`
+  (the at-fork wakeup-fd clear),
+  `test_a_bar_an_unstamped_print_opened_while_closing_a_partial_bar_is_not_evaluated_if_the_bucket_before_traded`
+  (R11-FEED-2 on the close-and-open path) and the halt-report assertion added
+  to `test_a_fill_during_shutdown_whose_gtt_had_fired_is_not_reported_as_exits_armed`.
+  Each fails on the mutation that removes its rule.
+
+Every v1.12 rule was also mutated on a copy, and each mutant failed its pins:
+- the Runner check (5 tests);
+- the child's map of inherited dispatchers (2);
+- the dead-loop match narrowed to the engines' own dispatcher (2);
+- the warning on any dead dispatcher (2);
+- the wakeup-fd clear (10);
+- the in-process restore treated like a fork's (1);
+- the close guard (1).
+
+Existing tests changed:
+- `test_gtt_requests_refused_only_at_the_proxys_tunnel_leave_a_position_known_to_have_no_gtt`
+  expects 3 attempts where the book is unreadable (was 1).
+- `test_an_unconfirmed_cancel_does_not_call_a_fired_gtt_cover` expects "NOT
+  surely covered (GTT 700; …)", with no "covered by GTT".
+- `test_a_fill_during_shutdown_whose_gtt_had_fired_is_not_reported_as_exits_armed`
+  also checks the halt report's line.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.11 defect | v1.12 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | After a refused tunnel, if the GTT book could not be read either, v1.11 left the loop ("only refused tunnels: no GTT can exist") with two attempts unused. The book goes through the same proxy, so in a real proxy outage it is refused too. An outage longer than about two windows (~30 s) left a filled position without exits. The alert also blamed the proxy even when the next attempt would have named an expired session. v1.10 gave up here too, reporting UNKNOWN. | When no GTT can exist (only refused tunnels), an unreadable book no longer stops the retries: every attempt is used, and the last one names its own error. | `test_a_proxy_outage_that_also_hides_the_gtt_book_is_ridden_out_with_every_attempt`, `test_a_refused_tunnel_then_an_expired_session_names_the_session`, `test_gtt_requests_refused_only_at_the_proxys_tunnel_leave_a_position_known_to_have_no_gtt[False]` (now 3 attempts) |
+| low | ✔ | The duplicate watch still ran after refused tunnels alone, which cannot book a GTT. A book that failed at the end of the watch raised "could not rule out a duplicate" and exit 1 for a cleanly protected run. | The watch runs only after an attempt that may have reached Kite. | `test_a_gtt_armed_after_refused_tunnels_alone_starts_no_duplicate_watch`, `test_a_gtt_armed_after_a_504_is_still_watched_for_a_duplicate` (control) |
+| low | ◐ | An unconfirmed cancel still said the bought shares were "covered by GTT n" when that GTT had fired. For a fired duplicate, it named the GTT that the DUPLICATE alert says to DELETE. Overstated: the TRIGGERED note was in the same sentence, and the path needs a partial fill, an unconfirmed cancel, a lost reply and a trigger during the watch. | "NOT surely covered (GTT n; a GTT for these shares has already TRIGGERED: …)"; an active GTT still reads "covered by GTT n". | `test_an_unconfirmed_cancel_does_not_call_a_fired_gtt_cover` (updated) |
+
+### Live feed
+
+| Sev | Verdict | v1.11 defect | v1.12 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ◐ | With no bar open, an unstamped trade was filed at feed time. That errs early by the stamps' truncation plus however much the minute's largest lag exceeds the trade's own latency, which is seconds after one late packet. In the repro, a stamped quote of 10:05:00 arrived just before the trade, yet the trade was filed in 10:00, where the name never traded. The quote, a stamp of a later bucket, even "proved" that bucket. The bar was evaluated: a fake breakout at 102, while the true 10:05 bar closed below the base high. When nothing else traded in 10:05, its back-fill counted the shares again, contradicting "not counted twice". R11-FEED-1's fix had covered only the case where a bar of 10:00 had closed. Overstated: it predates v1.11 (v1.10 fired the same signal), and the proof does not cause the fake signal. R12-DATA-DOCS-5 found that the README's "about a second" understated the window. | With no bar open, an unstamped print is filed in the latest bucket it can belong to (its latest possible time's), unless that bucket is past the close. This generalizes R11-FEED-1's rule, which it replaces. A stamp proves a print's bucket only if it belongs to that bucket; this is defense in depth and cannot be reached now. The README gives the real error of feed time and the missed-signal residual. | `test_an_unstamped_trade_received_after_a_stamp_of_the_next_bucket_is_filed_in_that_bucket`, `test_with_no_bar_open_an_unstamped_trade_is_filed_in_the_latest_bucket_it_can_belong_to` (a late packet of 2.6 s, 4 s and 1.3 s), `test_an_unstamped_trade_filed_late_is_not_counted_twice_when_the_bucket_it_can_belong_to_is_back_filled`, `test_an_unstamped_print_received_just_after_the_close_stays_in_the_sessions_last_bar` (control) |
+
+### Lifecycle
+
+| Sev | Verdict | v1.11 defect | v1.12 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | Take a held run whose loop closed without a release. uvloop cannot remove its dispatcher once the loop has stopped, and the plain handler (for a loop without signal support) outlives its loop. The next engine warned, then took that dead dispatcher for the host's handler and handed it back. Every later SIGTERM, SIGINT and SIGHUP was swallowed while no engine ran, and the host's own handler was lost. It predates v1.11. The data/docs reviewer found the same defect (R12-DATA-DOCS-4). | The next engine resets any dispatcher bound to the closed loop to what the host had before the run: the engines' dispatcher, a callback the host re-registered on that loop, or the closed route's plain handler. The host gets back its plain handler (including one bound to a loop still running elsewhere), or the default. asyncio's shared dispatcher is left alone: asyncio's close already reset its own, and one in place now belongs to a host's new callback. | `test_a_held_run_whose_loop_closed_unreleased_leaves_no_dead_dispatcher_behind` (held on uvloop, on a loop without signal support, and on uvloop with a host callback re-registered; next on uvloop and asyncio), `test_a_host_plain_handler_comes_back_after_a_held_uvloop_run_closed_unreleased`, `test_a_host_handler_that_forwards_to_a_live_loop_comes_back_after_a_held_run_closed_unreleased`, `test_after_a_held_asyncio_run_closed_unreleased_a_hosts_new_loop_callback_is_kept` (control) |
+| medium | ✔ | R12-DATA-DOCS-1: on 3.11+, `asyncio.run` (and `uvloop.run`) installs its own SIGINT handler, bound to the parent's loop and task. The at-fork reset did not count it as running through a loop, so the child got it back, and there the first Ctrl-C only woke the parent's loop. A Ctrl-C to the process group stopped the parent in order, and a worker went on to run its engine to the end. CPython does the same with no engine. | asyncio's Runner handler counts as loop-bound, so the child gets the default (`KeyboardInterrupt`). | `test_a_forked_worker_is_stopped_by_its_own_ctrl_c` (asyncio and uvloop, before its engine hooks and after it ended), `test_a_forked_helper_that_runs_no_engine_is_stopped_by_its_own_ctrl_c` |
+| low | ◐ | On uvloop each `loop.add_signal_handler` installs a new dispatcher. At fork, a host callback registered mid-run was taken for the host's own choice and left in the child, bound to the parent's loop. The child swallowed every stop before its own engine ran and, once that engine handed it back, after it too. Overstated: not a regression (v1.10 also forwarded the stop), and the README already says such a callback displaces the running engine. | At fork, any handler bound to a loop goes to the default in the child. | `test_a_forked_helper_is_stopped_by_its_own_stop_after_the_host_registered_a_callback_mid_run` (uvloop, before and after its own engine; asyncio controls) |
+| low | ◐ | A child could lift a `SIG_IGN` guard with the handler saved when the guard was set, which is the parent engines' dispatcher. It then swallowed every stop until its own engine hooked. That engine took the dispatcher for the host's handler and handed it back, so the child swallowed every stop after its engine too. Overstated: the host restores a handler the README warns against, and the child does start with the guard as it was set. | At fork, the child records the parent engines' dispatcher and what the host had. An engine that finds that dispatcher in place hands back the host's handler. The window before the child's engine hooks is documented: lift a guard with `SIG_DFL`. | `test_a_child_that_lifted_a_guard_with_the_saved_dispatcher_is_stopped_after_its_own_engine` (asyncio and uvloop) |
+| low | ✔ | A held signal taken back with `signal.signal`, as documented, survives uvloop's close, yet v1.11 warned that it had never been released. On asyncio the held entry, still in the loop's table, makes the close reset the signal to its default even after the take-back, which was undocumented. | The warning stays only where the close undid something. That is always the case on asyncio. On uvloop or the plain route, it is only while the engines' own dead dispatcher still holds the signal. The README says to release before the loop closes. | `test_a_held_signal_taken_back_before_its_loop_closed_is_reported_only_where_the_close_undid_it` (uvloop; asyncio pins the documented reset) |
+| low | ✔ | The at-fork reset gave a child the default whenever the host's loop callback sat under its plain handler, or a re-take had lost that callback. Yet the parent's hand-back restores the plain handler. The child was killed instead of running the host's handler. | Decided from what the host had alone, in one helper shared with the closed-loop hand-back. | `test_a_forked_helper_gets_the_hosts_live_plain_handler` (beside a loop callback, and set mid-run before a second engine; asyncio and uvloop) |
+
+### Tests and docs
+
+| Sev | Verdict | v1.11 defect | v1.12 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | The at-fork wakeup-fd clear, part of R11's high fix, had no test: removing it passed all 386. A plain handler restored in the child runs in Python, so the signal is also written to the parent loop's self-pipe, which stopped the PARENT's engines. | Pinned. | `test_a_forked_helper_with_a_host_plain_handler_does_not_forward_its_stop_to_the_parent` (SIGTERM and SIGINT). The Ctrl-C and plain-handler fork tests fail on that mutation too. |
+| low | ✔ | R11-FEED-2's rule was unpinned on the close-and-open path. An unstamped print past the grace that closed a partial bar and opened the next could have been evaluated with shares the back-fill counts again, and every test would still pass. | Pinned. | `test_a_bar_an_unstamped_print_opened_while_closing_a_partial_bar_is_not_evaluated_if_the_bucket_before_traded` |
+| low | ✔ | The fired-GTT note on the halt report's "filled during shutdown" line was unpinned. | Pinned. | `test_a_fill_during_shutdown_whose_gtt_had_fired_is_not_reported_as_exits_armed` (the halt line) |
+
 ## v1.11 (2026-09-27)
 
 v1.10 went through an eleventh adversarial review on a frozen snapshot

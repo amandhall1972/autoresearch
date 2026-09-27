@@ -1301,3 +1301,318 @@ def test_a_forked_helper_does_not_inherit_a_stale_loop_dispatcher_the_host_had()
     """)
     assert code == 0, out + err
     assert "helper -15" in out and "a 143" in out, out + err
+
+
+# ---------------------------------------------------------------- round 12: what a forked child and a closed loop leave
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("window", ["before its own engine", "after its own engine"])
+def test_a_forked_helper_is_stopped_by_its_own_stop_after_the_host_registered_a_callback_mid_run(loop_kind, window):
+    # On uvloop each registration installs a new dispatcher of the loop, which v1.11's at-fork reset took for the
+    # host's own choice and left in the child: bound to the parent's loop, it swallowed every stop sent to the child,
+    # and the child's own engine handed it back after its run. (Asyncio's shared no-op was always reset: a control.)
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host(f"""
+        import time
+        a = asyncio.create_task(engine.main(ARGS + ["3"]))
+        await hooked(1, a)
+        loop.add_signal_handler(signal.SIGTERM, got.append, "host")    # displaces the engine (documented)
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            if {window!r} == "after its own engine":
+                asyncio.run(engine.main(ARGS + ["0.3"]))
+            os.write(w, b"x")
+            time.sleep(5)
+            os._exit(7)
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(pid, signal.SIGTERM)
+        _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+        print("helper", os.waitstatus_to_exitcode(status), "host", got, "a", await a, flush=True)
+    """, uvloop=(loop_kind == "uvloop"))
+    assert code == 0, out + err
+    assert "helper -15 host [] a 0" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+def test_a_child_that_lifted_a_guard_with_the_saved_dispatcher_is_stopped_after_its_own_engine(loop_kind):
+    # The handler saved when the guard was set is the parent engines' dispatcher, which the README says not to restore.
+    # A child that restores it anyway swallows stops until its own engine hooks; v1.11's engine then took that dead
+    # dispatcher for the host's handler and handed it back, so the child swallowed every stop after its engine too.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host("""
+        import time
+        a = asyncio.create_task(engine.main(ARGS + ["3"]))
+        await hooked(1, a)
+        old = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            signal.signal(signal.SIGTERM, old)
+            asyncio.run(engine.main(ARGS + ["0.3"]))
+            os.write(w, b"x")
+            time.sleep(5)
+            os._exit(7)
+        signal.signal(signal.SIGTERM, old)
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(pid, signal.SIGTERM)
+        _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+        print("helper", os.waitstatus_to_exitcode(status), "a", await a, flush=True)
+    """, uvloop=(loop_kind == "uvloop"))
+    assert code == 0, out + err
+    assert "helper -15 a 0" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("case", ["set beside a loop callback", "set mid-run, then a second engine"])
+def test_a_forked_helper_gets_the_hosts_live_plain_handler(loop_kind, case):
+    # v1.11 gave the child the default whenever the host's loop callback sat under the plain handler (or a re-take
+    # had lost it), although the parent's own hand-back restores the plain handler.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host(f"""
+        import time
+        loop.add_signal_handler(signal.SIGTERM, got.append, "loop callback")
+        if {case!r} == "set beside a loop callback":
+            signal.signal(signal.SIGTERM, lambda signum, frame: os._exit(42))
+        a = asyncio.create_task(engine.main(ARGS + ["3"]))
+        await hooked(1, a)
+        if {case!r} == "set mid-run, then a second engine":
+            signal.signal(signal.SIGTERM, lambda signum, frame: os._exit(42))
+            b = asyncio.create_task(engine.main(ARGS + ["2"]))
+            await hooked(2, b)
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.write(w, b"x")
+            time.sleep(5)
+            os._exit(7)
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(pid, signal.SIGTERM)
+        _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+        print("helper", os.waitstatus_to_exitcode(status), "a", await a, flush=True)
+    """, uvloop=(loop_kind == "uvloop"))
+    assert code == 0, out + err
+    assert "helper 42 a 0" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="multiprocessing's fork start method")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("window", ["before its engine hooks", "after its engine ended"])
+def test_a_forked_worker_is_stopped_by_its_own_ctrl_c(loop_kind, window):
+    # On 3.11+ asyncio.run (and uvloop.run) installs its own SIGINT handler, bound to the parent's loop and task. v1.11
+    # gave it back to the child, where the first Ctrl-C only woke the parent's loop: the worker went on (and ran its
+    # engine to the end) after a Ctrl-C that stopped the parent in order.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host(f"""
+        import multiprocessing, time
+
+        def worker(ready):
+            if {window!r} == "after its engine ended":
+                asyncio.run(engine.main(ARGS + ["0.3"]))
+            os.write(ready, b"x")
+            time.sleep(5)
+            sys.exit(7)
+
+        a = asyncio.create_task(engine.main(ARGS + ["8"]))
+        await hooked(1, a, signal.SIGINT)
+        r, w = os.pipe()
+        p = multiprocessing.get_context("fork").Process(target=worker, args=(w,))
+        p.start()
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(p.pid, signal.SIGINT)                                # Ctrl-C to the worker only
+        done, _ = await asyncio.wait({{a}}, timeout=1.5)
+        print("parent", "running" if not done else a.result(), flush=True)
+        await loop.run_in_executor(None, p.join, 30)
+        os.kill(os.getpid(), signal.SIGTERM)
+        print("worker", p.exitcode, "a", await a, flush=True)
+    """, uvloop=(loop_kind == "uvloop"))
+    assert code == 0, out + err
+    assert "parent running" in out and "worker 1 a 143" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+def test_a_forked_helper_that_runs_no_engine_is_stopped_by_its_own_ctrl_c():
+    code, out, err = run_host("""
+        import time
+        a = asyncio.create_task(engine.main(ARGS + ["8"]))
+        await hooked(1, a, signal.SIGINT)
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            try:
+                os.write(w, b"x")
+                time.sleep(5)
+                os._exit(7)
+            except KeyboardInterrupt:
+                os._exit(1)
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(pid, signal.SIGINT)
+        done, _ = await asyncio.wait({a}, timeout=1.5)
+        _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+        print("parent", "running" if not done else a.result(), "helper", os.waitstatus_to_exitcode(status), flush=True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        print("a", await a, flush=True)
+    """)
+    assert code == 0, out + err
+    assert "parent running helper 1" in out and "a 143" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+@pytest.mark.parametrize("signame", ["SIGTERM", "SIGINT"])
+def test_a_forked_helper_with_a_host_plain_handler_does_not_forward_its_stop_to_the_parent(signame):
+    # Pin for the at-fork reset's wakeup-fd clear: the host's own plain handler, restored in the child, runs in Python,
+    # so the signal is also written to the inherited wakeup fd, the parent loop's self-pipe, which stopped the PARENT's
+    # engines.
+    code, out, err = run_host(f"""
+        import time
+        signum = getattr(signal, {signame!r})
+        signal.signal(signum, lambda *args: os._exit(9))              # the host's own plain handler, before the engine
+        a = asyncio.create_task(engine.main(ARGS + ["8"]))
+        await hooked(1, a, signum)
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.write(w, b"x")
+            time.sleep(5)
+            os._exit(7)
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(pid, signum)
+        _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+        done, _ = await asyncio.wait({{a}}, timeout=1.0)
+        print("parent", "running" if not done else a.result(), "helper", os.waitstatus_to_exitcode(status), flush=True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        print("a", await a, flush=True)
+    """)
+    assert code == 0, out + err
+    assert "parent running helper 9" in out and "a 143" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("held_on", ["uvloop", "a loop without signal support", "uvloop, then a host callback on it"])
+@pytest.mark.parametrize("next_on", ["uvloop", "asyncio"])
+def test_a_held_run_whose_loop_closed_unreleased_leaves_no_dead_dispatcher_behind(held_on, next_on):
+    # uvloop cannot remove its dispatcher once the loop stopped, and a plain handler outlives its loop: v1.11 warned,
+    # then took the dead dispatcher for the host's handler and handed it back, so every later stop was swallowed.
+    pytest.importorskip("uvloop")
+    code, out, err = run_script(f"""
+        import time, uvloop
+
+        def refuse(*args, **kwargs):
+            raise NotImplementedError
+
+        held = asyncio.new_event_loop() if {held_on!r} == "a loop without signal support" else uvloop.new_event_loop()
+        if {held_on!r} == "a loop without signal support":
+            held.add_signal_handler = refuse
+        print("held", held.run_until_complete(engine.main(ARGS + ["0.3"], hold_signals=True)), flush=True)
+        if {held_on!r} == "uvloop, then a host callback on it":
+            held.add_signal_handler(signal.SIGTERM, print, "host")     # takes it back, but only on this loop
+        held.close()
+        nxt = uvloop.new_event_loop() if {next_on!r} == "uvloop" else asyncio.new_event_loop()
+        print("next", nxt.run_until_complete(engine.main(ARGS + ["0.3"])), flush=True)
+        nxt.close()
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(1)
+        print("SIGTERM swallowed", flush=True)
+    """)
+    assert code == -15 and "held 0" in out and "next 0" in out and "swallowed" not in out, out + err
+    reported = "Signal 15 was still held by a finished main(hold_signals=True) when its loop closed" in err
+    assert reported is (held_on != "uvloop, then a host callback on it"), err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_host_plain_handler_comes_back_after_a_held_uvloop_run_closed_unreleased():
+    pytest.importorskip("uvloop")
+    code, out, err = run_script("""
+        import time, uvloop
+        signal.signal(signal.SIGTERM, lambda *args: os._exit(9))
+        held = uvloop.new_event_loop()
+        print("held", held.run_until_complete(engine.main(ARGS + ["0.3"], hold_signals=True)), flush=True)
+        held.close()
+        print("next", asyncio.run(engine.main(ARGS + ["0.3"])), flush=True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(1)
+        print("SIGTERM swallowed", flush=True)
+    """)
+    assert code == 9 and "next 0" in out and "swallowed" not in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_host_handler_that_forwards_to_a_live_loop_comes_back_after_a_held_run_closed_unreleased():
+    # Only a handler bound to a loop that cannot run it goes to the default: one that forwards the signal to a loop
+    # still running in another thread is the host's own, and comes back as itself (in a forked child, no such thread).
+    pytest.importorskip("uvloop")
+    code, out, err = run_script("""
+        import functools, threading, time, uvloop
+        got = []
+
+        def note(*args):
+            got.append("forwarded")
+
+        other = asyncio.new_event_loop()
+        threading.Thread(target=other.run_forever, daemon=True).start()
+        signal.signal(signal.SIGTERM, functools.partial(other.call_soon_threadsafe, note))
+        held = uvloop.new_event_loop()
+        print("held", held.run_until_complete(engine.main(ARGS + ["0.3"], hold_signals=True)), flush=True)
+        held.close()
+        print("next", asyncio.run(engine.main(ARGS + ["0.3"])), flush=True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(0.5)
+        print("got", got, flush=True)
+    """)
+    assert code == 0 and "next 0" in out and "got ['forwarded']" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_after_a_held_asyncio_run_closed_unreleased_a_hosts_new_loop_callback_is_kept():
+    # Control: asyncio's close already reset its own dispatcher, and the one now in place is the host's new callback's.
+    code, out, err = run_script("""
+        print("held", asyncio.run(engine.main(ARGS + ["0.3"], hold_signals=True)), flush=True)
+
+        async def host():
+            got = []
+            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, got.append, "host")
+            print("next", await engine.main(ARGS + ["0.3"]), flush=True)
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(0.5)
+            print("host got", got, flush=True)
+
+        asyncio.run(host())
+    """)
+    assert code == 0 and "next 0" in out and "host got ['host']" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+def test_a_held_signal_taken_back_before_its_loop_closed_is_reported_only_where_the_close_undid_it(loop_kind):
+    # A take-back with signal.signal survives uvloop's close: v1.11 still warned it was never released. On asyncio the
+    # held entry is still in the loop's table, so the close resets the signal to its default: that is reported.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_script(f"""
+        import time
+        hits = []
+        if {loop_kind!r} == "uvloop":
+            import uvloop
+            held = uvloop.new_event_loop()
+        else:
+            held = asyncio.new_event_loop()
+        print("held", held.run_until_complete(engine.main(ARGS + ["0.3"], hold_signals=True)), flush=True)
+        signal.signal(signal.SIGTERM, lambda signum, frame: hits.append(signum))      # the documented take-back
+        held.close()
+        print("next", asyncio.run(engine.main(ARGS + ["0.3"])), flush=True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        time.sleep(0.5)
+        print("hits", hits, flush=True)
+    """)
+    held = "was still held by a finished main(hold_signals=True) when its loop closed"
+    assert f"Signal 2 {held}" in err, out + err
+    if loop_kind == "uvloop":
+        assert code == 0 and "hits [15]" in out and f"Signal 15 {held}" not in err, out + err
+    else:
+        assert code == -15 and f"Signal 15 {held}" in err, out + err
