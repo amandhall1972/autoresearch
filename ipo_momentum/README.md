@@ -39,7 +39,7 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 cd ipo_momentum
 uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest, uvloop (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 312 tests, ~2.5 min, fully offline
+uv run pytest                       # 354 tests, ~2.5 min, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
@@ -211,18 +211,22 @@ last one ends:
   shutdown short.
 - On asyncio's own loops, a host that embeds `main()` gets back exactly what it
   had, including callbacks registered with `loop.add_signal_handler` and a
-  plain handler set beside one.
+  plain handler set beside one. A plain handler the engine displaced comes back
+  as the same handler, re-installed with `signal.signal`, so without
+  `SA_RESTART` if the host had set it with `signal.siginterrupt(sig, False)`
+  (see Known limitations).
 - Whatever the host sets while engines run (a loop callback, a plain handler,
-  `SIG_IGN`) is what is handed back. On asyncio a plain handler keeps its own
-  flags, unless an engine started after the host set it: that engine displaced
-  it, and it comes back without `SA_RESTART` (see Known limitations, also for
-  uvloop). An engine that starts after such a change takes the signal back for
-  its own run; what the host had before the change is kept for the hand-back.
+  `SIG_IGN`) is what is handed back. On asyncio a plain handler set mid-run
+  keeps its own flags, unless an engine started after the host set it: that
+  engine displaced it. An engine that starts after such a change takes the
+  signal back for its own run; what the host had before the change is kept for
+  the hand-back.
 - A signal the host sets to `SIG_IGN` while engines run (a common guard around
   spawning workers) stays ignored, as under `nohup`: an engine that starts
   inside the guard joins the running ones. Once the host lifts the ignore,
-  whatever it restores, the engines take the signal back within 50 ms
-  (`RECLAIM_POLL`) if it no longer reaches them, for instance because the host
+  whatever it restores, the engines take the signal back at their next check,
+  every 50 ms (`RECLAIM_POLL`) while the event loop is free, if it no longer
+  reaches them, for instance because the host
   had re-registered or removed its own callback before the guard. An engine that
   starts under `SIG_IGN` while no engine runs stays unhooked, as under `nohup`.
 - If the last engine ends inside such a guard, the signal is handed back
@@ -235,6 +239,12 @@ last one ends:
   `signal.signal` or `loop.add_signal_handler` (the next engine then drops the
   held one). Restoring a handler saved from `signal.getsignal()` is not enough on
   asyncio, whose process-level handler is one shared function for every callback.
+  Call it from the main thread, which alone can hand signals back (elsewhere it
+  raises `ValueError` before changing anything); a host that drives its loop
+  with `run_until_complete` can call `engine.release_signals(loop)` between runs.
+- Routes belong to the process that took them: a worker forked while engines run
+  (multiprocessing's `fork`) takes its own signals, so a stop sent to the worker
+  stops the worker's engine, not the parent's.
 - uvloop's callbacks cannot be read back. A host callback it held for a stop
   signal before the run is therefore lost: the engine logs a warning, and the
   signal is back at its default (never silently swallowed). Re-register it
@@ -286,12 +296,21 @@ Trailing stays the default because it is the original strategy's definition.
   zeroed exchange time, which the SDK parses as 1970, also falls back to
   receive time (and is not a lag sample). KiteTicker's naive host-local
   datetimes are converted to IST. A zeroed stamp's receive time is taken in
-  feed time (corrected by the feed's lag). If that falls within the bar clock's
-  2 s grace after the end of a bar that is still open, the print joins that bar:
-  it cannot close a bar before the bar clock would, even when latency has just
-  risen. Otherwise it stays in its own bucket, so it never opens a bar for a
-  bucket that had no trades, is never dropped as pre-open when it arrives just
-  after 09:15, and a counter it re-baselines blinds its own bucket.
+  feed time, corrected by the feed's lag as measured on every print received
+  before it. Feed time errs early, by up to about a second (stamps are whole
+  seconds, so the lag includes their truncation); the print's latest possible
+  time is its receive time on the exchange's clock. So:
+  - Within the bar clock's 2 s grace after the end of a bar that is still open,
+    the print joins that bar: it cannot close a bar before the bar clock would,
+    even when latency has just risen.
+  - Received after the print that opened the current bar, it joins that bar;
+    received in session, it is never dropped as pre-open; a counter it
+    re-baselines blinds the latest bucket it can belong to.
+  - With no bar open, a bar it opens within 2 s after a boundary is
+    provisional: it may hold the bucket before's shares. A later stamped print
+    of that bucket moves the bar there. If none comes, and the broker's
+    back-fill says that bucket traded, the bar is not evaluated, since its
+    shares may be counted twice.
 * **The 30 s rule.** A tick stamped more than 30 s ahead of the host clock is
   dropped with a critical log before it moves the lag or the market time: the
   exchange cannot stamp a print in the future, so either the stamp is corrupt
@@ -328,8 +347,11 @@ Trailing stays the default because it is the original strategy's definition.
     re-baselines again), unless the name has provably not traded today: the
     packet's own `last_trade_time` is from an earlier day and no bar of today is
     known (forming, closed or in the synced history). Then the zero hid nothing,
-    so it is the baseline and no bucket is blind: an illiquid name's first
-    traded bar is kept whole, and a breakout on it is evaluated.
+    so it is the baseline and its re-baseline blinds no bucket: an illiquid
+    name's first traded bar is kept whole, and a breakout on it is evaluated,
+    when that bar's bucket began after the join or reconnect. A first trade in
+    the join's own bucket still loses that bar to the back-fill (the bucket began
+    before the feed was watching).
   - The first print of a day counts from zero only if the feed was up at 09:15,
     judged in exchange time.
   - LTP-mode ticks carry no volume and make no bars; the feed uses full mode.
@@ -459,7 +481,8 @@ or duplicated:
      … CHECK THE GTT BOOK` says a duplicate could not be ruled out.
    - If the book cannot be read at the end of the (extended) poll, or every
      request failed ambiguously, a `GTT STATE UNKNOWN` alert says a GTT may
-     exist.
+     exist, and the halt report lists the position's exits as `UNKNOWN`, not
+     `NONE`.
 5. Steps 1–4 run as one shielded task. Shutdown never interrupts it: an entry
    that fills during shutdown is protected once and reported. Once shutdown has
    begun, no new entry is sent.
@@ -536,7 +559,7 @@ not evidence of an edge in either direction.
 
 ## How it was reviewed
 
-Nine adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
+Ten adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
 lists every finding with its severity, verdict, fix and the test that pins it.
 
 1. **v1.0, the original file.** Four reviewers, one per area (live path, alpha,
@@ -635,6 +658,18 @@ lists every finding with its severity, verdict, fix and the test that pins it.
      no pin, and the CHANGELOG misdescribed four test changes.
 
    These became v1.9.
+10. **v1.9, the ninth fix.** All four skeptics ran. 16 findings, none refuted
+    (3 partly overstated), 3 medium and 13 low:
+    - With no bar open, a zeroed-stamp print filed at feed time could open the
+      next bucket's bar and credit it with shares the back-fill counted again:
+      a fake RVOL breakout.
+    - A held run released outside a stopped uvloop loop left the signal
+      swallowed; a worker forked while engines ran never owned its own signals.
+    - A GTT whose state was unknown was reported as "exits: NONE".
+    - Feed time erred early by the stamps' truncation, several v1.9 rules were
+      unpinned, and some docs overclaimed.
+
+    These became v1.10.
 
 ---
 
@@ -654,15 +689,23 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 * **On uvloop, a host's own stop-signal callback is lost** after `main()`,
   because uvloop cannot hand it back. The engine warns, and the signal is at
   its default; re-register the callback. For the same reason, a plain handler
-  the host sets mid-run is re-installed on hand-back (without `SA_RESTART`),
-  and a loop callback registered before it in the same run is removed. On
-  asyncio the same happens to a plain handler the host set mid-run if another
-  engine starts after it: that engine displaces it, and it comes back without
-  `SA_RESTART`.
-* **A stop sent within 50 ms of a host lifting a `SIG_IGN` guard** can miss the
-  engines if the host had displaced or removed their signal before the guard:
-  they take it back on their next check (`RECLAIM_POLL`). No event marks a
+  the host sets mid-run is re-installed on hand-back, and a loop callback
+  registered before it in the same run is removed.
+* **`SA_RESTART` is not kept on a plain handler the engine displaced**: one the
+  host had before the run, one it set mid-run before another engine started,
+  or on uvloop any it set mid-run. It comes back as the same handler,
+  re-installed with `signal.signal`, which cannot set the flag, and the flag
+  cannot be read back in Python. PEP 475 retries interrupted calls in Python
+  code anyway.
+* **A stop sent soon after a host lifts a `SIG_IGN` guard** (within 50 ms,
+  `RECLAIM_POLL`, or for as long as the host then blocks its event loop) can
+  miss the engines if the host had displaced or removed their signal before the
+  guard: they take it back on their next check. No event marks a
   `signal.signal()` call, so the engine polls.
+* **An unstamped print within about a second after a bucket boundary**, with no
+  bar open, can open a bar for the bucket before it: feed time errs early by the
+  stamps' truncation. Its shares move one bucket early; they are not counted
+  twice.
 * **An untraded name's zero counter is trusted** when its packet dates the last
   trade to an earlier day and no bar of today is known. If a name first traded
   while the feed was down and a stale pre-open snapshot then arrives before any
@@ -703,7 +746,7 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 336 tests run offline in about 2.5 minutes. The slowest are real CLI runs that
+The 354 tests run offline in about 2.5 minutes. The slowest are real CLI runs that
 deliver SIGINT, SIGTERM and SIGHUP mid-entry and during exit, and a shutdown
 that must outlast v1.1's 10 s drain. They pass in seven configurations:
 - Python 3.10 with pandas 2.2 and numpy 1.26
@@ -719,8 +762,8 @@ Pandas `FutureWarning`s raised from engine code fail the suite.
 | File | Covers |
 | --- | --- |
 | `test_alpha.py` | Breakout conditions and crossing semantics, the exact stop/target math, true-range ATR, RVOL baselines and modes, session-defined bases, look-ahead freedom (including inside the base), the pinned real signal |
-| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, zeroed stamps and untraded names, feed liveness in feed time, feed lag in both directions, clock skew, host clock steps, suspends, far-future stamps and the 30 s rule and its straddle stop, the silent-socket watchdog, strict hole back-fill within and across sessions, thread safety, loop survival |
+| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, zeroed stamps (feed time, provisional bars, the lag race) and untraded names, feed liveness in feed time, feed lag in both directions, clock skew, host clock steps, suspends, far-future stamps and the 30 s rule and its straddle stop, the silent-socket watchdog, strict hole back-fill within and across sessions, thread safety, loop survival |
 | `test_execution.py` | Sizing caps, tick rounding, duplicates, future and stale signals, paper OCO mechanics incl. gaps, the halt report. No Kite dependency. |
-| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies and refused tunnels, repeated outages, GTTs booked during an outage), broker refusals classified by HTTP status, transient errors, cancels that don't land, partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books (incl. an expired session). Skipped without `kiteconnect`. |
+| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies and refused tunnels, repeated outages, GTTs booked during an outage), broker refusals classified by HTTP status, transient errors, cancels that don't land, partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books (incl. an expired session), unknown GTT states reported as unknown. Skipped without `kiteconnect`. |
 | `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter (incl. wake-up order under clock jitter), the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads and bad timestamps, the session's last 30m/60m bar and special sessions, retry policy, strict back-fill, midnight lookback clamps, listing dates in any zone, orchestrator anchoring and error containment, collecting and running the suite without the Kite extra |
-| `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (asyncio and uvloop, incl. handlers changed mid-run and `SA_RESTART`), several engines in one loop incl. one started after the host took a signal back or under its `SIG_IGN` guard, held runs and `release_signals()`, `run()` from a worker thread |
+| `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (asyncio and uvloop, incl. handlers changed mid-run and `SA_RESTART`), several engines in one loop incl. one started after the host took a signal back or under its `SIG_IGN` guard, held runs and `release_signals()` (incl. between runs, and from another thread), forked workers, `run()` from a worker thread |

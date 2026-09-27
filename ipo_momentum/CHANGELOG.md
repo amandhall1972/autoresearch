@@ -1,5 +1,84 @@
 # Changelog
 
+## v1.10 (2026-09-27)
+
+v1.9 went through a tenth adversarial review on a frozen snapshot
+(`18afd78`), with the same four areas. Every skeptic ran. 16 findings, no
+duplicates, none refuted: 13 confirmed, 3 with part of the claim overstated.
+None is critical or high: 3 medium, 13 low. Several skeptics' refinements
+replaced the finder's fix:
+- R10-FEED-1: the finder's reclaim alone still double-counted when no stamped
+  print of the earlier bucket arrived. A bar the reclaim cannot settle is not
+  evaluated if the broker's back-fill says the bucket before it traded.
+- R10-FEED-2: the finder dropped an unstamped print whose bucket was unclear
+  when no bar was open. On an illiquid name that moved its shares into a later
+  bar, which the back-fill then counted again (a new fake breakout). The print
+  is kept, and the residual is documented.
+- R10-LIFECYCLE-3: the finder deferred a release from another thread to the
+  loop. If that loop never ran again, the release was lost and the host's
+  handler with it. `release_signals()` now refuses up front, off the main
+  thread, before anything changes.
+- R10-DATA-DOCS-1: the finder's code alternative would have trusted the zero
+  counter in the join's own bucket, which in the documented stale-snapshot
+  residual keeps a bar carrying the whole outage's volume, and a signal. Docs
+  only.
+
+Every v1.10 regression test fails on the v1.9 snapshot and passes here
+(`test_the_fast_modules_pass_without_the_kite_extra` fails there too, because
+it runs the fast modules, which include the new feed and order tests). The
+exceptions are these controls:
+- `test_a_position_that_surely_has_no_gtt_still_reports_none`: a GTT that
+  cannot exist is still "NONE";
+- `test_a_bar_an_unstamped_print_opened_just_past_a_boundary_is_not_evaluated_if_the_bucket_before_traded[False]`:
+  when the broker says the bucket before did not trade, the bar is evaluated;
+- the pins for v1.9 rules that no test covered (R10-DATA-DOCS-2):
+  `test_a_zeroed_rebaselining_print_joined_to_the_open_bar_blinds_the_bucket_of_its_feed_time`
+  (it also fails on v1.8) and
+  `test_a_zeroed_print_past_the_grace_does_not_join_a_bar_the_bar_clock_has_not_closed_yet`.
+  Each fails on the mutation that removes its rule.
+
+Existing tests changed:
+- The Ctrl-C CLI test waits for the paper fill instead of sleeping 5 s, which
+  failed under heavy load (R10-DATA-DOCS-3).
+- Four hand-back tests assert that their engine ran (R10-DATA-DOCS-4). With an
+  engine that exits before hooking, each now fails with its fix reverted.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.9 defect | v1.10 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | A fill whose GTT state is unknown (a lost reply, then an unreadable book, including v1.9's expired-session exit) was reported like one with no GTT. The halt report said `exits: NONE`, an unconfirmed cancel said the shares were "NOT covered by a GTT" and a late fill "exits NOT armed", next to an alert saying a GTT may exist, and in the lost-reply case one did. That invites a manual second exit. It predates v1.9. | A `Fill` carries `exits_unknown` (not part of equality). Those reports now say `UNKNOWN` / "of UNKNOWN GTT state (a GTT may exist: CHECK THE GTT BOOK)". A position that surely has no GTT still says `NONE`. | `test_a_fill_whose_gtt_state_is_unknown_is_reported_as_unknown_not_as_unprotected`, `test_an_unconfirmed_cancel_says_the_bought_shares_gtt_state_is_unknown`, `test_a_fill_during_shutdown_whose_gtt_state_is_unknown_says_so`, `test_a_position_that_surely_has_no_gtt_still_reports_none` (control) |
+
+### Live feed
+
+| Sev | Verdict | v1.9 defect | v1.10 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | With no bar open, v1.9 filed a zeroed-stamp print at feed time. When latency rose at a boundary, a trade from the last second of an illiquid bucket opened the next bucket's bar. A late stamped print of the earlier bucket was then dropped as out of order, both went into the next bar, and the back-fill of the earlier bucket counted them again: a fake RVOL breakout, where v1.8 was right. The skeptic showed it needs no dropped print: the zeroed print alone is counted twice. | Such a bar is provisional: a later stamped print of the bucket before moves it there. A bar that is still unsettled when it closes is not evaluated if the broker's back-fill says the bucket before traded (its shares may be counted twice). That errs toward a missed signal, never toward an order. | `test_a_bar_an_unstamped_print_opened_is_given_back_to_the_bucket_its_late_neighbour_proves`, `test_a_bar_an_unstamped_print_opened_just_past_a_boundary_is_not_evaluated_if_the_bucket_before_traded` (the broker says it traded, and a control where it did not) |
+| low | ◐ | Feed time is a lower bound: the lag includes the stamps' whole-second truncation. So within about a second after a boundary, v1.9's zeroed-stamp fixes did not hold: a re-baseline blinded the previous bucket, a print just after the bar opened was dropped as out of order, and after a lag left over from the last session the opening print was dropped as pre-open. Overstated: the pre-open case needs a run spanning sessions; a bar opened for an empty bucket only moves shares one bucket early. | The print's latest possible time is its receive time on the exchange's clock. A re-baseline blinds the latest bucket it can belong to; a print received after the one that opened the bar joins it; one received in session is filed at 09:15, not dropped. The empty-bucket case is documented (dropping the print instead would double-count). | `test_a_rebaselining_unstamped_print_blinds_the_latest_bucket_it_can_belong_to`, `test_an_unstamped_print_received_after_a_bar_opened_joins_it_even_when_feed_time_says_earlier`, `test_an_unstamped_opening_print_is_not_dropped_on_a_lag_left_over_from_the_last_session` |
+| low | ◐ | The broker thread fixed an unstamped print's feed time with the lag of that moment. A queued print that raised the lag was processed after it, so the print missed the clamp and closed the bar before the bar clock would, dropping its tail. Overstated: the window is at most the bar clock's 1 s tick; it predates v1.9. | Feed time is recomputed on the loop, with the lag of every print received before it. | `test_an_unstamped_print_is_judged_on_the_lag_of_every_print_received_before_it` |
+
+### Lifecycle
+
+| Sev | Verdict | v1.9 defect | v1.10 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | On uvloop, `release_signals(loop)` between runs (a host on `run_until_complete`) relied on `remove_signal_handler`, which uvloop ignores while the loop is stopped. The signal stayed on uvloop's dispatcher with nothing behind it, swallowed for good, while the log said it was "back at its default". | When the removal does nothing and our handler is still installed, the default is set as uvloop's removal would have set it. | `test_on_uvloop_release_signals_outside_the_loop_really_restores_the_default` |
+| medium | ✔ | A worker forked while engines ran inherited the parent's routes, on a loop that is not closed, so its engine never took a signal. A SIGTERM sent to the worker reached the parent's self-pipe and stopped the parent's engines while the worker's traded on; with a guard, it killed the worker mid-entry. It predates v1.9. | A route records the process that took it; a forked child drops the parent's routes and takes its own. | `test_a_forked_worker_takes_its_own_stop_signals` |
+| low | ✔ | `release_signals(loop)` from another thread dropped SIGINT's route, then failed in the hand-back: Ctrl-C was swallowed for the rest of the process, and a main-thread retry could not repair it. | Off the main thread, with something to hand back, it raises `ValueError` before anything changes. | `test_release_signals_from_another_thread_refuses_before_changing_anything` |
+| low | ✔ | The v1.9 warning for a signal handed back ignored was skipped on the plain-handler path (a loop that cannot own signals, as on Windows), where restoring the saved handler swallows the signal too. | The same warning there. | `test_without_loop_signal_handlers_an_engine_that_ends_inside_the_ignore_says_what_to_restore` |
+| low | ✔ | The reclaim was a task. Released after `run_until_complete`, or abandoned by a loop that stopped inside the guard, it was never really cancelled, and asyncio logged "Task was destroyed but it is pending!". | The reclaim is a self-rescheduling timer handle: cancelling it takes effect at once, and one left behind is dropped silently. | `test_a_reclaim_left_pending_by_a_loop_that_stopped_inside_the_guard_is_dropped_silently` |
+
+### Tests and docs
+
+| Sev | Verdict | v1.9 defect | v1.10 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ◐ | R10-DATA-DOCS-1: the README said an untraded name's first traded bar is kept whole; not when it falls in the join's own bucket, which began before the feed was watching. Overstated: v1.7 did the same, so it is not an R9-LT-2 regression. | Documented (README and the v1.9 row). The finder's code alternative was rejected (see above). | documentation |
+| low | ✔ | R10-DATA-DOCS-2: two parts of R9-LT-1 (the blind bucket from feed time, the 2 s bound on joining the open bar) had no test; removing either passed every test. | Pinned. | `test_a_zeroed_rebaselining_print_joined_to_the_open_bar_blinds_the_bucket_of_its_feed_time`, `test_a_zeroed_print_past_the_grace_does_not_join_a_bar_the_bar_clock_has_not_closed_yet` |
+| low | ✔ | R10-DATA-DOCS-3: the Ctrl-C CLI test still slept a fixed 5 s and failed under heavy load; the CHANGELOG said no fixed-delay signal test remained. | It waits for the paper fill. | `test_ctrl_c_runs_the_orderly_shutdown_and_prints_the_halt_report` |
+| low | ✔ | R10-DATA-DOCS-4: four more hand-back tests ignored `main()`'s result and passed with their fixes reverted when the engine exited early. | They assert it. | `test_handlers_the_engine_replaced_are_restored_afterwards`, `test_a_hosts_own_loop_signal_handlers_survive_the_engine`, `test_handing_a_signal_back_keeps_its_sa_restart_flag`, `test_a_live_plain_handler_beside_a_stale_loop_entry_comes_back_too` |
+| low | ✔ | R10-DATA-DOCS-5: on asyncio a plain handler the host had before the run comes back without `SA_RESTART`; the README said the host gets back exactly what it had. | Documented (README signals section and Known limitations). The flag cannot be read back in Python. | documentation |
+| low | ✔ | R10-DATA-DOCS-6: "within 50 ms" is not a bound: while the host blocks its event loop after lifting the guard, stops keep missing the engines. | Documented: at the next check, every 50 ms while the event loop is free. | documentation |
+| low | ✔ | R10-DATA-DOCS-7: the Quick start still said 312 tests. | Corrected. | documentation |
+
 ## v1.9 (2026-09-27)
 
 v1.8 went through a ninth adversarial review on a frozen snapshot
@@ -56,14 +135,14 @@ Existing tests changed:
 
 | Sev | Verdict | v1.8 defect | v1.9 fix | Pinned by |
 | --- | --- | --- | --- | --- |
-| low | ✔ | R8-TD-9's fix filed every zeroed-stamp print 2 s early, whether or not a bar was open for the grace to protect. Received just after a bucket boundary, such a print did three things v1.7 did not. It marked the previous bucket blind when it re-baselined the counter, so the new bar was kept short (wrong Open and Volume). It opened a bar for a bucket in which nothing traded. And received just after 09:15:00, it was dropped as pre-open, so the opening bar lost its Open and High (which feed the ATR). The skeptic added a fourth: just after a bar opened, it was dropped as out of order. | A zeroed stamp is filed at feed time. Only if that falls within the bar clock's 2 s grace after the end of a bar that is still open does it join that bar, which keeps R8-TD-9's guarantee. A counter it re-baselines blinds the bucket of its feed time. | `test_a_zeroed_first_print_after_a_join_blinds_its_own_bucket_not_the_previous_one`, `test_a_zeroed_trade_with_no_bar_open_makes_no_bar_for_the_bucket_before_it`, `test_a_zeroed_opening_print_is_not_dropped_as_pre_open`, `test_a_zeroed_print_just_after_a_bar_opened_joins_it`; `test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen` still holds |
-| low | ◐ | Since R8, a zero counter is never adopted after a blind spot. So a name that had not traded today, after a late join, reconnect or far-ahead drop, re-baselined on its first trade: its first traded bar was discarded and back-filled, and a breakout on it was never evaluated. v1.7 signalled. Overstated: the rule was documented (its cost was not), the trigger needs an illiquid name, and a missed signal is fail-safe. | A zero counter is adopted when the packet itself proves the name has not traded today (a real `last_trade_time` from an earlier day) *and* no bar of today is known (forming, closed or in the synced history). Then no bucket is blind. The residual case (first trades during an outage, then a stale snapshot) is listed under Known limitations. | `test_a_name_not_traded_today_keeps_its_first_traded_bar_after_a_join`, `test_only_a_zero_counter_with_an_earlier_days_last_trade_marks_a_name_untraded`, `test_a_zero_counter_is_adopted_only_when_nothing_says_the_name_traded_today` (control) |
+| low | ✔ | R8-TD-9's fix filed every zeroed-stamp print 2 s early, whether or not a bar was open for the grace to protect. Received just after a bucket boundary, such a print did three things v1.7 did not (v1.7 did them too, but only within about a second of the lag: corrected in v1.10, R10-FEED-2). It marked the previous bucket blind when it re-baselined the counter, so the new bar was kept short (wrong Open and Volume). It opened a bar for a bucket in which nothing traded. And received just after 09:15:00, it was dropped as pre-open, so the opening bar lost its Open and High (which feed the ATR). The skeptic added a fourth: just after a bar opened, it was dropped as out of order. | A zeroed stamp is filed at feed time. Only if that falls within the bar clock's 2 s grace after the end of a bar that is still open does it join that bar, which keeps R8-TD-9's guarantee. A counter it re-baselines blinds the bucket of its feed time. | `test_a_zeroed_first_print_after_a_join_blinds_its_own_bucket_not_the_previous_one`, `test_a_zeroed_trade_with_no_bar_open_makes_no_bar_for_the_bucket_before_it`, `test_a_zeroed_opening_print_is_not_dropped_as_pre_open`, `test_a_zeroed_print_just_after_a_bar_opened_joins_it`; `test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen` still holds |
+| low | ◐ | Since R8, a zero counter is never adopted after a blind spot. So a name that had not traded today, after a late join, reconnect or far-ahead drop, re-baselined on its first trade: its first traded bar was discarded and back-filled, and a breakout on it was never evaluated. v1.7 signalled. Overstated: the rule was documented (its cost was not), the trigger needs an illiquid name, and a missed signal is fail-safe. | A zero counter is adopted when the packet itself proves the name has not traded today (a real `last_trade_time` from an earlier day) *and* no bar of today is known (forming, closed or in the synced history). Then no bucket is blind, except the join's own bucket, which began before the feed was watching (corrected in v1.10, R10-DATA-DOCS-1). The residual case (first trades during an outage, then a stale snapshot) is listed under Known limitations. | `test_a_name_not_traded_today_keeps_its_first_traded_bar_after_a_join`, `test_only_a_zero_counter_with_an_earlier_days_last_trade_marks_a_name_untraded`, `test_a_zero_counter_is_adopted_only_when_nothing_says_the_name_traded_today` (control) |
 
 ### Lifecycle
 
 | Sev | Verdict | v1.8 defect | v1.9 fix | Pinned by |
 | --- | --- | --- | --- | --- |
-| medium | ◐ | v1.8's fix for an engine that starts under a host's `SIG_IGN` guard joins the route that exists. But that route no longer received the signal if the host had re-registered or removed its own callback mid-run (both supported). Once the guard was lifted, a supervisor's stop went to the host's callback, or killed the process, with the engine's entry in flight. Overstated: the finder's third case (a guard after a held run the host had taken back) is the documented `nohup` rule. | An engine that joins under `SIG_IGN` starts a reclaim task. Once the host lifts the ignore, whatever it restores, the engines take the signal back within 50 ms (`RECLAIM_POLL`) if it no longer reaches them. The skeptic's refinement: only while an engine still runs on the route. | `test_an_engine_that_joins_under_sig_ign_a_route_the_host_took_back_still_gets_the_signal` (re-register and remove, asyncio and uvloop), `test_a_route_left_to_held_runs_is_not_taken_back_from_the_host_after_its_guard` (control) |
+| medium | ◐ | v1.8's fix for an engine that starts under a host's `SIG_IGN` guard joins the route that exists. But that route no longer received the signal if the host had re-registered or removed its own callback mid-run (both supported). Once the guard was lifted, a supervisor's stop went to the host's callback, or killed the process, with the engine's entry in flight. Overstated: the finder's third case (a guard after a held run the host had taken back) is the documented `nohup` rule. | An engine that joins under `SIG_IGN` starts a reclaim task. Once the host lifts the ignore, whatever it restores, the engines take the signal back within 50 ms (`RECLAIM_POLL`), while the event loop is free (corrected in v1.10, R10-DATA-DOCS-6), if it no longer reaches them. The skeptic's refinement: only while an engine still runs on the route. | `test_an_engine_that_joins_under_sig_ign_a_route_the_host_took_back_still_gets_the_signal` (re-register and remove, asyncio and uvloop), `test_a_route_left_to_held_runs_is_not_taken_back_from_the_host_after_its_guard` (control) |
 | low | ✔ | On asyncio, `main(hold_signals=True)` could not be released as its docstring said ("until the caller restores them"). The handler a host with its own loop callback saves is asyncio's one shared `_sighandler_noop`, so restoring it changed nothing. The held run kept the signal, the host's callback was never re-armed, and every later stop was "ignored". | `engine.release_signals(loop=None)` hands back what finished held runs still hold. Engines still running keep the signal, and the last one out hands back as usual. main()'s docstring and the README point to it. | `test_release_signals_hands_back_what_a_held_run_kept` |
 | low | ◐ | If the last engine ended while the host ignored a signal, the signal was handed back ignored. The handler the host had saved when it set `SIG_IGN` was the engine's, and restoring it swallowed every later SIGTERM, and on 3.11 Ctrl-C even after `asyncio.run` returned. Overstated: v1.7 did the same, the hand-back follows the documented rule, and no engine is at risk. | A warning says the signal is handed back ignored and names what to restore (what was there before the engine started). The hand-back is unchanged: keeping the table entry would let asyncio's `loop.close()` reset the host's `SIG_IGN` (the R8-SR-4 concern). The README says the same. | `test_an_engine_that_ends_inside_the_hosts_ignore_says_what_to_restore` (asyncio and uvloop) |
 
@@ -76,7 +155,7 @@ Existing tests changed:
 | low | ✔ | R9-TD-3: the rule that turns on `wall_gain` off Linux (a default `time.monotonic`) was unpinned on every platform; forcing it off passed every test. | Pinned with the platform's own default. | `test_the_default_steady_clock_consults_the_wall_clock_where_the_monotonic_clock_misses_a_suspend` |
 | low | ✔ | R9-TD-4: the uvloop "lost" carry on a re-take and the asyncio wakeup-fd reset were unpinned. Without the reset, a later signal wrote its byte into whatever file reused the closed self-pipe's fd. | Pinned. | `test_on_uvloop_a_re_take_keeps_the_warning_that_the_hosts_callback_was_lost`, `test_a_plain_handler_or_ignore_the_host_sets_during_a_run_is_kept[asyncio]` |
 | low | ✔ | R9-TD-5: two v1.8 pins passed with their fixes reverted when the engine exited before hooking, since `hooked()` returned silently and the pins discarded `main()`'s result. | `hooked()` fails the test on an early exit, and both pins assert their results. | `test_a_plain_handler_set_mid_run_keeps_its_flags`, `test_a_held_engine_is_not_carried_into_a_later_run_once_the_host_restores_its_handler` |
-| low | ✔ | R9-TD-6: four statements in the v1.8 CHANGELOG about test changes were wrong (see the note there). | Corrected. The two remaining fixed-delay signal tests now wait for the hook. | documentation |
+| low | ✔ | R9-TD-6: four statements in the v1.8 CHANGELOG about test changes were wrong (see the note there). | Corrected. The two remaining fixed-delay signal tests now wait for the hook (one more, the Ctrl-C CLI test, still slept 5 s: converted in v1.10, R10-DATA-DOCS-3). | documentation |
 
 ## v1.8 (2026-09-27)
 

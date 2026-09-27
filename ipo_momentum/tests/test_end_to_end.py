@@ -132,12 +132,11 @@ def test_the_offline_demo_does_not_depend_on_the_wall_clock(monkeypatch, caplog)
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
 def test_ctrl_c_runs_the_orderly_shutdown_and_prints_the_halt_report():
-    proc = subprocess.Popen([sys.executable, engine.__file__, "--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "0"],
-                            stderr=subprocess.PIPE, text=True)
-    time.sleep(5)                                                         # the paper fill lands at ~3.3 s
-    proc.send_signal(signal.SIGINT)
-    _, err = proc.communicate(timeout=60)
-    assert proc.returncode == 130, err
+    child = Child("", "--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "0")
+    child.wait_for("PAPER FILL")                                          # a fixed sleep races start-up under load
+    child.proc.send_signal(signal.SIGINT)
+    code, err = child.finish()
+    assert code == 130, err
     assert "PAPER FILL" in err and "=== SYSTEM HALT ===" in err and "Open SWIGGY: 2884 @ 289.83" in err
 
 
@@ -340,7 +339,7 @@ def test_handlers_the_engine_replaced_are_restored_afterwards():
     try:
         signal.signal(signal.SIGTERM, host_handler)
         signal.signal(signal.SIGHUP, host_handler)
-        asyncio.run(engine.main(["--source", "csv", "--csv", str(FIXTURE), "--no-simulate", "--run-seconds", "0.2"]))
+        assert asyncio.run(engine.main(["--source", "csv", "--csv", str(FIXTURE), "--no-simulate", "--run-seconds", "0.2"])) == 0
         assert signal.getsignal(signal.SIGTERM) is host_handler and signal.getsignal(signal.SIGHUP) is host_handler
     finally:
         for s, previous in saved.items():
@@ -418,7 +417,7 @@ def test_a_hosts_own_loop_signal_handlers_survive_the_engine():
         stopped = asyncio.Event()
         loop.add_signal_handler(signal.SIGTERM, stopped.set)
         try:
-            await engine.main(["--source", "csv", "--csv", str(FIXTURE), "--no-simulate", "--run-seconds", "0.2"])
+            assert await engine.main(["--source", "csv", "--csv", str(FIXTURE), "--no-simulate", "--run-seconds", "0.2"]) == 0
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(stopped.wait(), 3)
             return True
@@ -605,11 +604,10 @@ def test_handing_a_signal_back_keeps_its_sa_restart_flag():
 
         loop.add_signal_handler(signal.SIGTERM, got.append, "host")
         before = restart()
-        await engine.main(ARGS + ["0.2"])
-        print("SA_RESTART", before, restart(), flush=True)
+        print("main", await engine.main(ARGS + ["0.2"]), "SA_RESTART", before, restart(), flush=True)
     """)
     assert code == 0, err
-    assert "SA_RESTART True True" in out, out + err
+    assert "main 0 SA_RESTART True True" in out, out + err
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
@@ -689,13 +687,13 @@ def test_a_live_plain_handler_beside_a_stale_loop_entry_comes_back_too():
         await asyncio.sleep(0.5)
         before = sorted(got)
         got.clear()
-        await engine.main(ARGS + ["0.3"])
+        main = await engine.main(ARGS + ["0.3"])
         os.kill(os.getpid(), signal.SIGTERM)
         await asyncio.sleep(0.5)
-        print("before", before, "after", sorted(got), flush=True)
+        print("main", main, "before", before, "after", sorted(got), flush=True)
     """)
     assert code == 0, err
-    assert "before ['loop entry', 'plain handler'] after ['loop entry', 'plain handler']" in out, out + err
+    assert "main 0 before ['loop entry', 'plain handler'] after ['loop entry', 'plain handler']" in out, out + err
 
 
 def test_when_both_the_lookback_and_the_vendor_cut_the_listing_the_message_names_both(caplog):
@@ -1009,3 +1007,157 @@ def test_on_uvloop_a_re_take_keeps_the_warning_that_the_hosts_callback_was_lost(
     assert code == 0, out + err
     assert "engines 0 0 after ['P plain']" in out, out + err
     assert "cannot be read back, so the signal is left as the host set it mid-run" in err, out + err
+
+
+# ---------------------------------------------------------------- round 10: hosts that drive their own loop, fork, or thread
+SCRIPT = """
+import asyncio, gc, os, signal, sys
+sys.path.insert(0, {engine_dir!r})
+import engine
+ARGS = ["--source", "csv", "--csv", {csv!r}, "--no-simulate", "--run-seconds"]
+engine.configure_logging()
+
+
+async def until_hooked(n, signum=signal.SIGTERM):
+    while len(engine._STOP_ROUTES.routes.get(signum, {{}}).get("callbacks", ())) < n:
+        await asyncio.sleep(0.01)
+
+
+{body}
+"""
+
+
+def run_script(body):
+    """``body`` runs as a module-level script (its own loop handling) in a fresh interpreter."""
+    code = SCRIPT.format(engine_dir=str(Path(engine.__file__).parent), csv=str(FIXTURE), body=textwrap.dedent(body))
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=90)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_on_uvloop_release_signals_outside_the_loop_really_restores_the_default():
+    # uvloop's remove_signal_handler does nothing while the loop is not running. v1.9 relied on it, so a held run
+    # released after run_until_complete left SIGTERM on uvloop's dispatcher with nothing behind it (swallowed for good),
+    # while the log said the signal was "back at its default".
+    pytest.importorskip("uvloop")
+    code, out, err = run_script("""
+        import uvloop
+        loop = uvloop.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.add_signal_handler(signal.SIGTERM, print, "host")
+        print("main", loop.run_until_complete(engine.main(ARGS + ["0.3"], hold_signals=True)), flush=True)
+        engine.release_signals(loop)
+        print("default", signal.getsignal(signal.SIGTERM) == signal.SIG_DFL, flush=True)
+    """)
+    assert code == 0, out + err
+    assert "main 0" in out and "default True" in out, out + err
+    assert "cannot be read back, so the signal is back at its default" in err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="multiprocessing's fork start method")
+def test_a_forked_worker_takes_its_own_stop_signals():
+    # The child inherited the parent's routes, on a loop that is not closed, so its engine never hooked a signal: a
+    # SIGTERM sent to the worker reached the parent's self-pipe and stopped the PARENT's engine, and the worker's engine
+    # traded on.
+    code, out, err = run_host("""
+        import multiprocessing
+
+        def worker(ready):
+            async def run():
+                t = asyncio.create_task(engine.main(ARGS + ["5"]))
+                while not ((r := engine._STOP_ROUTES.routes.get(signal.SIGTERM)) and r["loop"] is asyncio.get_running_loop()):
+                    if t.done():
+                        break
+                    await asyncio.sleep(0.01)
+                os.write(ready, b"x")
+                return await t
+            sys.exit(asyncio.run(run()))
+
+        a = asyncio.create_task(engine.main(ARGS + ["8"]))
+        await hooked(1, a)
+        r, w = os.pipe()
+        p = multiprocessing.get_context("fork").Process(target=worker, args=(w,))
+        p.start()
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(p.pid, signal.SIGTERM)                               # stop the worker only
+        done, _ = await asyncio.wait({a}, timeout=1.5)
+        print("parent", "running" if not done else a.result(), flush=True)
+        await loop.run_in_executor(None, p.join, 30)
+        print("worker", p.exitcode, "a", await a, flush=True)
+    """)
+    assert code == 0, out + err
+    assert "parent running" in out and "worker 143 a 0" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_release_signals_from_another_thread_refuses_before_changing_anything():
+    # Only the main thread can hand a signal back. v1.9 dropped SIGINT's route, then failed in the hand-back: Ctrl-C
+    # was swallowed for the rest of the process, and a later release from the main thread could not repair it.
+    code, out, err = run_host("""
+        loop.add_signal_handler(signal.SIGTERM, got.append, "X host")
+        held = await engine.main(ARGS + ["0.3"], hold_signals=True)
+        errors = []
+
+        def off_main():
+            try:
+                engine.release_signals(loop)
+            except ValueError as e:
+                errors.append(type(e).__name__)
+
+        await loop.run_in_executor(None, off_main)
+        print("held", held, "errors", errors, "routes", sorted(map(int, engine._STOP_ROUTES.routes)), flush=True)
+        engine.release_signals()
+        sigint = getattr(signal.getsignal(signal.SIGINT), "__name__", None)
+        print("after", await delivered(signal.SIGTERM), "routes", sorted(map(int, engine._STOP_ROUTES.routes)),
+              "sigint", loop_callback(loop, signal.SIGINT), sigint != "_sighandler_noop", flush=True)
+    """)
+    assert code == 0, out + err
+    assert "held 0 errors ['ValueError'] routes [1, 2, 15]" in out, out + err
+    assert "after ['X host'] routes [] sigint None True" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_without_loop_signal_handlers_an_engine_that_ends_inside_the_ignore_says_what_to_restore():
+    # The plain-handler path (a loop that cannot own signals, as on Windows) skipped v1.9's warning.
+    code, out, err = run_host("""
+        def refuse(*args, **kwargs):
+            raise NotImplementedError
+
+        loop.add_signal_handler = refuse
+        a = asyncio.create_task(engine.main(ARGS + ["0.3"]))
+        await hooked(1, a)
+        old = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        print("a", await a, "ignored", signal.getsignal(signal.SIGTERM) == signal.SIG_IGN, flush=True)
+    """)
+    assert code == 0, out + err
+    assert "a 0 ignored True" in out, out + err
+    assert ("Signal 15 is handed back ignored, as the host set it while the engine ran. The handler saved then was the "
+            "engine's and would now swallow the signal: to lift the ignore, restore what was there before the engine "
+            "started (<Handlers.SIG_DFL: 0>).") in err, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_reclaim_left_pending_by_a_loop_that_stopped_inside_the_guard_is_dropped_silently():
+    # v1.9's reclaim was a task: released (or abandoned) after run_until_complete, it was never cancelled for real
+    # and asyncio logged "Task was destroyed but it is pending!" when the closed loop let it go.
+    code, out, err = run_script("""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def host():
+            a = asyncio.create_task(engine.main(ARGS + ["0.5"], hold_signals=True))
+            await until_hooked(1)
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)                 # a guard the host never lifts
+            b = asyncio.create_task(engine.main(ARGS + ["0.5"], hold_signals=True))
+            await until_hooked(2)
+            return await a, await b
+
+        print("engines", loop.run_until_complete(host()), flush=True)
+        engine.release_signals(loop)
+        loop.close()
+        gc.collect()
+        print("closed", flush=True)
+    """)
+    assert code == 0, out + err
+    assert "engines (0, 0)" in out and "closed" in out, out + err
+    assert "Task was destroyed but it is pending" not in err, err

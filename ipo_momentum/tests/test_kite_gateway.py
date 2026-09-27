@@ -1,6 +1,7 @@
 """KiteOrderGateway driven through the real kiteconnect SDK, with only its HTTP transport scripted."""
 import asyncio
 import json
+import logging
 import re
 import threading
 
@@ -828,3 +829,68 @@ def test_a_transient_error_while_polling_for_a_lost_reply_gtt_still_extends_the_
     fill = asyncio.run(gw.execute(kite_plan()))
     assert fill.exit_order_id is None and reads["n"] >= 15 and kite.gtt_places == 1
     assert len(gw.alerts) == 1 and "GTT STATE UNKNOWN for 2941 shares" in gw.alerts[0]
+
+
+# ---------------------------------------------------------------- round 10: an unknown GTT state is reported as unknown
+TOKEN = KE.TokenException("Incorrect `api_key` or `access_token`.", code=403)
+
+
+def lost_reply_then_expired(order_states):
+    """place_gtt answers 504 but the broker books the GTT anyway; every later book read answers 403."""
+    kite = StubKite(order_states, gtt_results=[KE.NetworkException("Gateway timed out", code=504)],
+                    gtt_created_before_error=True)
+    expiring_book(kite, 1, TOKEN)
+    return kite
+
+
+def test_a_fill_whose_gtt_state_is_unknown_is_reported_as_unknown_not_as_unprotected(caplog):
+    # v1.9 returned the same Fill for "a GTT may exist" as for "no GTT": the halt report said "exits: NONE" next to
+    # the alert telling the operator a GTT may exist (here one does), inviting a manual second exit.
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    kite = lost_reply_then_expired([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}])
+    gw = fast_gateway(kite)
+    r = run_router(router(gateway=gw), [sig()])
+    assert [(f.exit_order_id, f.exits_unknown) for f in r.fills] == [(None, True)] and len(kite.created_gtts) == 1
+    ticker = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None)
+    assert engine._halt_report(r, gw, ticker, exit_code=0, stop_signal=None) == 1
+    assert "exits: UNKNOWN)" in caplog.text and "exits: NONE" not in caplog.text
+
+
+def test_an_unconfirmed_cancel_says_the_bought_shares_gtt_state_is_unknown():
+    kite = lost_reply_then_expired([{"status": "OPEN", "filled_quantity": 800, "average_price": 290.2}])
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert "800 shares already bought are of UNKNOWN GTT state (a GTT may exist: CHECK THE GTT BOOK)" in r.unresolved[0]
+    assert "NOT covered" not in r.unresolved[0]
+
+
+def test_a_fill_during_shutdown_whose_gtt_state_is_unknown_says_so(caplog):
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    gw = fast_gateway(StubKite([OPEN]))
+
+    async def settled():
+        return engine.Fill("SWIGGY", 2941, 290.1, "260928000000001", None, exits_unknown=True)
+
+    async def scenario():
+        task = asyncio.ensure_future(settled())
+        await task
+        gw._report_late("SWIGGY", task)
+
+    asyncio.run(scenario())
+    assert gw.alerts == ["[SWIGGY] Entry 260928000000001 filled 2941 while shutting down; exits UNKNOWN (a GTT may "
+                         "exist: CHECK THE GTT BOOK)."]
+    ticker = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None)
+    engine._halt_report(router(gateway=gw), gw, ticker, exit_code=0, stop_signal=None)
+    assert "Open SWIGGY: 2941 @ 290.10 | filled during shutdown | exits: UNKNOWN" in caplog.text
+
+
+def test_a_position_that_surely_has_no_gtt_still_reports_none(caplog):
+    # Control: a refusal (no request can have created a GTT) is still "NONE", not "UNKNOWN".
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_error=KE.InputException("Trigger too close to LTP", code=400))
+    gw = fast_gateway(kite)
+    r = run_router(router(gateway=gw), [sig()])
+    assert [f.exit_order_id for f in r.fills] == [None]
+    ticker = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None)
+    engine._halt_report(r, gw, ticker, exit_code=0, stop_signal=None)
+    assert "exits: NONE)" in caplog.text and "UNKNOWN" not in caplog.text

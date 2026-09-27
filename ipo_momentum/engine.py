@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.9)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.10)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -30,13 +30,14 @@ import math
 import os
 import signal
 import sys
+import threading
 import time
 import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from datetime import time as dtime
 from pathlib import Path
@@ -93,6 +94,7 @@ class Tick:
     received: Optional[datetime] = None         # receive time, when `timestamp` is the exchange's own
     unstamped: bool = False                     # the exchange time was zeroed: `timestamp` is feed time
     untraded_today: bool = False                # a zero day volume whose last trade is from an earlier day
+    arrived: Optional[datetime] = None          # receive time of an unstamped print
 
 @dataclass
 class Signal:
@@ -118,6 +120,7 @@ class Fill:
     average_price: float
     order_id: str
     exit_order_id: Optional[str] = None         # Kite GTT trigger id protecting the position
+    exits_unknown: bool = field(default=False, compare=False)   # no GTT confirmed, but one may exist
 
 @dataclass
 class Position:
@@ -829,10 +832,13 @@ class LiveTickAdapter:
         ts = t.get('exchange_timestamp') or t.get('timestamp')
         ts = to_ist(ts) if ts is not None else None
         unstamped = ts is None or ts.year < 2000
+        arrived = None
         if unstamped:
             # Feed time, as bars are closed (on_tick keeps it out of the next bucket while the bar clock's grace
-            # still holds the previous bar open). A float read is thread-safe.
-            ts = self.clock() - timedelta(seconds=self.feed_lag)
+            # still holds the previous bar open, and retakes it with the lag of every print received before it).
+            # A float read is thread-safe.
+            arrived = self.clock()
+            ts = arrived - timedelta(seconds=self.feed_lag)
         cumulative = t.get('volume_traded')
         volume = t.get('last_traded_quantity', t.get('volume', 0)) if cumulative is None else 0
         # A zero day volume is proof that nothing traded today only if the last trade is a real, earlier day's.
@@ -841,7 +847,7 @@ class LiveTickAdapter:
         untraded = cumulative == 0 and last_trade is not None and last_trade.date() < ts.date()
         return Tick(symbol=symbol, price=float(price), volume=int(volume or 0), timestamp=ts,
                     cumulative_volume=None if cumulative is None else int(cumulative),
-                    unstamped=unstamped, untraded_today=untraded)
+                    unstamped=unstamped, untraded_today=untraded, arrived=arrived)
 
     def broker_on_ticks(self, ws, ticks: list):
         """Websocket Callback. Accepts Kite payloads (instrument_token, last_price, volume_traded,
@@ -974,12 +980,14 @@ class LiveTickAdapter:
             skew = min(skew, (tick.received - tick.timestamp).total_seconds())
         return self._feed_since - timedelta(seconds=skew)
 
-    def _open_bar(self, sym: str, bucket: datetime, price: float, volume: int, tick: Optional[Tick] = None) -> None:
+    def _open_bar(self, sym: str, bucket: datetime, price: float, volume: int, tick: Optional[Tick] = None,
+                  provisional: bool = False) -> None:
         # A bucket that began before we were watching, or whose head went into a re-baselined counter,
         # has an unknown open and volume.
         partial = self._watching_since(tick) > bucket or self._blind_bucket.get(sym) == bucket
         self.current_bars[sym] = {'timestamp': bucket, 'Open': price, 'High': price, 'Low': price,
-                                  'Close': price, 'Volume': volume, 'partial': partial}
+                                  'Close': price, 'Volume': volume, 'partial': partial, 'provisional': provisional,
+                                  'ambiguous': provisional}
 
     def on_tick(self, tick: Tick) -> None:
         sym = tick.symbol
@@ -1017,14 +1025,26 @@ class LiveTickAdapter:
             return
         if tick.received is not None:
             self._ahead_run = None                                   # stamps are believable again
+        latest = None
+        if tick.unstamped and tick.arrived is not None:
+            # Prints queued ahead of this one may have raised the lag since the broker thread read it.
+            tick.timestamp = tick.arrived - timedelta(seconds=self.feed_lag)
+            # Feed time errs early (the lag includes the stamps' truncation); the latest it can have traded is
+            # its receive time on the exchange's clock.
+            latest = tick.arrived - timedelta(seconds=self.clock_skew)
         feed_time = tick.timestamp
         if tick.unstamped and (open_bar := self.current_bars.get(sym)) is not None:
             # Feed time just past the open bar's end, while the bar clock's grace still holds it open: the print
             # joins that bar, so it cannot close the bar before the bar clock would, even if latency has just
-            # risen. With no bar open there is nothing to protect, and it stays in its own bucket.
+            # risen. With no bar open, a bar it opens just past a boundary is provisional (below).
             end = open_bar['timestamp'] + timedelta(minutes=self.bar_minutes)
             if end <= tick.timestamp < end + BAR_CLOSE_GRACE:
                 tick.timestamp = end - timedelta(microseconds=1)
+            elif tick.timestamp < open_bar['timestamp']:
+                tick.timestamp = open_bar['timestamp']              # received after the print that opened it
+        if latest is not None and tick.timestamp.time() < SESSION_OPEN <= latest.time() \
+                and tick.timestamp.date() == latest.date():
+            tick.timestamp = datetime.combine(latest.date(), SESSION_OPEN, tzinfo=IST)   # received in session
         # Floor the timestamp to the current 5-minute block
         boundary = bar_floor(tick.timestamp, self.bar_minutes)
         if not SESSION_OPEN <= boundary.time() < SESSION_CLOSE:
@@ -1033,6 +1053,16 @@ class LiveTickAdapter:
             self.dropped_ticks += 1
             return
         active = self.current_bars.get(sym)
+        width = timedelta(minutes=self.bar_minutes)
+        if active is not None and active.get('provisional') and not tick.unstamped \
+                and boundary == active['timestamp'] - width \
+                and not (sym in self.last_closed and boundary <= self.last_closed[sym]):
+            # The unstamped print that opened this bar just after its start was received after this print of the
+            # bucket before it, so it traded then: the bar is that bucket's.
+            active['timestamp'] = boundary
+            active['partial'] = active['partial'] or self._watching_since(tick) > boundary \
+                or self._blind_bucket.get(sym) == boundary
+            active['provisional'] = active['ambiguous'] = False
         if (sym in self.last_closed and boundary <= self.last_closed[sym]) or \
                 (active is not None and boundary < active['timestamp']):
             # A late print for a closed bar, or out of order: dropped before it can move the volume
@@ -1041,7 +1071,7 @@ class LiveTickAdapter:
             return
         if self.market_time is None or tick.timestamp > self.market_time:
             self.market_time = tick.timestamp
-        volume, rebaselined = self._traded_quantity(tick, feed_time)
+        volume, rebaselined = self._traded_quantity(tick, max(feed_time, latest or feed_time))
         if tick.received is not None:
             # A trade dates the feed, and so does any newer exchange update once the symbol has traded in
             # this connection. A (re)subscribe snapshot of a quiet name carries its last exchange time,
@@ -1061,12 +1091,17 @@ class LiveTickAdapter:
             if active is not None and boundary > active['timestamp']:
                 self.close_bar(sym)
             return
+        # With no bar open, an unstamped print just past a boundary may be the bucket before's (latency rose).
+        provisional = tick.unstamped and active is None and boundary.time() != SESSION_OPEN \
+            and tick.timestamp - boundary < BAR_CLOSE_GRACE
         if active is None:
-            self._open_bar(sym, boundary, tick.price, volume, tick)
+            self._open_bar(sym, boundary, tick.price, volume, tick, provisional)
         elif boundary > active['timestamp']:
             self.close_bar(sym)
             self._open_bar(sym, boundary, tick.price, volume, tick)
         else:
+            if not tick.unstamped or tick.timestamp - boundary >= BAR_CLOSE_GRACE:
+                active['provisional'] = False
             active['High'] = max(active['High'], tick.price)
             active['Low'] = min(active['Low'], tick.price)
             active['Close'] = tick.price
@@ -1134,14 +1169,16 @@ class LiveTickAdapter:
                 logger.warning(f"[{sym}] Bars {self._span(hole_start, idx)} are missing; the {idx:%H:%M} bar is not evaluated.")
                 self._notify(sym, idx, row.iloc[0])
                 return
-            task = asyncio.get_running_loop().create_task(self._backfill_then_evaluate(sym, hole_start, idx, row.iloc[0]))
+            task = asyncio.get_running_loop().create_task(self._backfill_then_evaluate(sym, hole_start, idx, row.iloc[0],
+                                                                                    bar.get('ambiguous', False)))
             self._backfills.add(task)
             task.add_done_callback(self._backfills.discard)
             return
         self._notify(sym, idx, row.iloc[0])
         self._evaluate(sym, history, idx)
 
-    async def _backfill_then_evaluate(self, sym: str, start: datetime, idx: datetime, live_bar: pd.Series) -> None:
+    async def _backfill_then_evaluate(self, sym: str, start: datetime, idx: datetime, live_bar: pd.Series,
+                                      ambiguous: bool = False) -> None:
         try:
             fetched = await self.backfill(sym, start, idx)
             fetched = fetched[(fetched.index >= pd.Timestamp(start)) & (fetched.index < pd.Timestamp(idx))]
@@ -1158,6 +1195,13 @@ class LiveTickAdapter:
         for ts, bar in fetched.iterrows():
             self._notify(sym, ts, bar)
         self._notify(sym, idx, live_bar)
+        before = pd.Timestamp(idx - timedelta(minutes=self.bar_minutes))
+        if ambiguous and before in fetched.index and fetched.loc[before, 'Volume'] > 0:
+            # The print with no exchange time that opened this bar may have traded in the bucket before it, which
+            # the broker says traded: its shares may be counted twice.
+            logger.warning(f"[{sym}] The {idx:%H:%M} bar opened on a print with no exchange time that may belong to "
+                           f"the {before:%H:%M} bar; it is not evaluated.")
+            return
         self._evaluate(sym, history.loc[:idx], idx)
 
     async def cancel_backfills(self) -> None:
@@ -1547,13 +1591,13 @@ class KiteOrderGateway(OrderGateway):
                         self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing "
                                     f"failed ({e!r}) and the GTT book could not be read ({book_error!r}). "
                                     f"CHECK THE GTT BOOK.")
-                        return Fill(sym, filled, avg, order_id, None)
+                        return Fill(sym, filled, avg, order_id, None, exits_unknown=True)
             # A GTT created by an ambiguous request: adopt it rather than arm a second one.
             if known is None:
                 self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing failed "
                             f"({error!r}); GTT {found[0]} matches this position, but the book was unreadable before "
                             f"arming, so it may be an earlier one. CHECK THE GTT BOOK.")
-                return Fill(sym, filled, avg, order_id, None)
+                return Fill(sym, filled, avg, order_id, None, exits_unknown=True)
             trigger_id, status = found
             if status == 'triggered':
                 self._alert(f"[{sym}] GTT {trigger_id} for {filled} shares (order {order_id}) had already TRIGGERED "
@@ -1569,7 +1613,7 @@ class KiteOrderGateway(OrderGateway):
         elif trigger_id is None:
             self._alert(f"[{sym}] POSITION OPEN WITHOUT EXITS: {filled} shares bought (order {order_id}) but no GTT "
                         f"could be placed (last: {error!r}).")
-        return Fill(sym, filled, avg, order_id, trigger_id)
+        return Fill(sym, filled, avg, order_id, trigger_id, exits_unknown=trigger_id is None and ambiguous)
 
     async def _enter_and_protect(self, plan: OrderPlan, tag: str, known: Optional[set]) -> Optional[Fill]:
         k, sym = self.kite, plan.signal.symbol
@@ -1595,7 +1639,9 @@ class KiteOrderGateway(OrderGateway):
             fill = await self._protect(plan, order_id, last, known) if last and int(last.get('filled_quantity') or 0) > 0 else None
             known = ""
             if fill is not None:
-                cover = f"covered by GTT {fill.exit_order_id}" if fill.exit_order_id else "NOT covered by a GTT"
+                cover = (f"covered by GTT {fill.exit_order_id}" if fill.exit_order_id else
+                         "of UNKNOWN GTT state (a GTT may exist: CHECK THE GTT BOOK)" if fill.exits_unknown else
+                         "NOT covered by a GTT")
                 known = f"; {fill.quantity} shares already bought are {cover}"
             raise OrderStateUnknown(sym, order_id, f"not terminal {self.cancel_grace:.0f}s after cancelling{known}; "
                                                    f"the remainder may still be working", fill=fill)
@@ -1616,7 +1662,8 @@ class KiteOrderGateway(OrderGateway):
         else:
             fill = task.result()
             self.late_fills.append(fill)
-            cover = f"exits armed (GTT {fill.exit_order_id})" if fill.exit_order_id else "exits NOT armed"
+            cover = (f"exits armed (GTT {fill.exit_order_id})" if fill.exit_order_id else
+                     "exits UNKNOWN (a GTT may exist: CHECK THE GTT BOOK)" if fill.exits_unknown else "exits NOT armed")
             msg = f"[{sym}] Entry {fill.order_id} filled {fill.quantity} while shutting down; {cover}."
         logger.critical(msg)
         self.alerts.append(msg)
@@ -2012,7 +2059,7 @@ def exchange_clock(get_ticker: Callable[[], "LiveTickAdapter"]) -> Callable[[], 
     return now
 
 STOP_SIGNALS = [s for s in (getattr(signal, n, None) for n in ("SIGINT", "SIGTERM", "SIGHUP")) if s is not None]
-RECLAIM_POLL = 0.05             # seconds: how soon an engine that joined under SIG_IGN takes the signal back
+RECLAIM_POLL = 0.05             # seconds between an ignored route's checks (while the event loop is free)
 
 def _deliver_signal(loop: asyncio.AbstractEventLoop, callback: Callable[[int], None], signum: int, frame) -> None:
     """A plain signal handler (where the loop cannot own signals) that hands over thread-safely."""
@@ -2037,6 +2084,7 @@ class _StopRoutes:
       once the host lifts the ignore the signal is taken back if it no longer reaches the route. If the
       last engine ends while it is ignored, it is handed back ignored, with a warning.
     * A finished main(hold_signals=True) keeps its signals until release_signals() (or a re-take).
+    * Routes belong to the process that took them: a forked worker takes its own.
     * uvloop's callbacks cannot be read back. A host callback it held is lost with a warning, and the
       signal is back at its default: never left routed to a loop entry that no longer exists.
     * A loop that cannot own signals (Windows) gets a plain handler that hands the signal over
@@ -2070,7 +2118,8 @@ class _StopRoutes:
         handlers = getattr(loop, "_signal_handlers", None)
         route = {'loop': loop, 'callbacks': [], 'previous': previous, 'handler': None, 'installed': None,
                  'lost': False, 'handlers': handlers if isinstance(handlers, dict) else None,
-                 'prior': handlers.get(signum) if isinstance(handlers, dict) else None, 'reclaim': None}
+                 'prior': handlers.get(signum) if isinstance(handlers, dict) else None, 'reclaim': None,
+                 'pid': os.getpid()}
         try:
             loop.add_signal_handler(signum, self._dispatch, signum)
             route['installed'] = signal.getsignal(signum)
@@ -2098,25 +2147,29 @@ class _StopRoutes:
         self.routes[signum] = fresh
         return fresh
 
-    async def _reclaim(self, loop: asyncio.AbstractEventLoop, signum: int, route: dict) -> None:
+    def _reclaim(self, loop: asyncio.AbstractEventLoop, signum: int, route: dict) -> None:
         """An engine joined ``route`` while the host ignored the signal. Once the host lifts the ignore, whatever it
         restores, take the signal back if it no longer reaches the route (the host had displaced or removed it, or
-        restored something else), as long as an engine is still running on it."""
-        while self.routes.get(signum) is route:
-            if signal.getsignal(signum) != signal.SIG_IGN:    # no event marks a signal.signal() call: poll
-                if not self._owned(route, signum) and any(not getattr(c, 'held', False) for c in route['callbacks']):
-                    self._retake(loop, signum, route)
-                return
-            await asyncio.sleep(RECLAIM_POLL)
+        restored something else), as long as an engine is still running on it. No event marks a signal.signal()
+        call, so this polls, on a timer rather than a task: cancelling it takes effect at once, and one left behind
+        by a closed loop is dropped silently."""
+        route['reclaim'] = None
+        if self.routes.get(signum) is not route:
+            return
+        if signal.getsignal(signum) != signal.SIG_IGN:
+            if not self._owned(route, signum) and any(not getattr(c, 'held', False) for c in route['callbacks']):
+                self._retake(loop, signum, route)
+            return
+        route['reclaim'] = loop.call_later(RECLAIM_POLL, self._reclaim, loop, signum, route)
 
     def hook(self, loop: asyncio.AbstractEventLoop, callback: Callable[[int], None]) -> List[int]:
         """Route every stop signal this loop can take to ``callback``; returns the signals hooked."""
         hooked = []
         for signum in STOP_SIGNALS:
             route = self.routes.get(signum)
-            if route is not None and route['loop'].is_closed():
-                del self.routes[signum]                       # a loop that ended without handing back
-                route = None
+            if route is not None and (route['loop'].is_closed() or route['pid'] != os.getpid()):
+                del self.routes[signum]                       # a loop that ended without handing back, or the
+                route = None                                  # parent's, inherited by a forked child
             if route is not None and route['loop'] is not loop:
                 continue                                      # another live loop owns this signal
             if route is None or not self._owned(route, signum):
@@ -2128,10 +2181,10 @@ class _StopRoutes:
                     if route is not None and route['reclaim'] is not None:
                         route['reclaim'].cancel()             # that route is gone
                     route = fresh
-                elif route['reclaim'] is None or route['reclaim'].done():
+                elif route['reclaim'] is None:
                     # Ignored for now (SIG_IGN set mid-run): join, and take the signal back once the host lifts the
                     # ignore. The route joined may no longer receive it (the host displaced or removed it first).
-                    route['reclaim'] = loop.create_task(self._reclaim(loop, signum, route))
+                    route['reclaim'] = loop.call_soon(self._reclaim, loop, signum, route)
             route['callbacks'].append(callback)
             hooked.append(signum)
         return hooked
@@ -2159,6 +2212,8 @@ class _StopRoutes:
             if route['handler'] is not None:                  # a plain handler (no loop support)
                 if signal.getsignal(signum) is route['handler'] and previous is not None:
                     signal.signal(signum, previous)
+                elif signal.getsignal(signum) == signal.SIG_IGN:
+                    self._warn_ignored(signum, f"{previous!r}")
                 continue
             current = signal.getsignal(signum)
             handlers = route['handlers']
@@ -2172,12 +2227,7 @@ class _StopRoutes:
             unreadable = handlers is None and getattr(previous, "__self__", None) is loop   # uvloop
             lost = unreadable or route['lost']
             if current == signal.SIG_IGN and prior is None:
-                # The last engine ended while the host ignored the signal. The handler the host saved when it set
-                # SIG_IGN was the engine's, which has nothing behind it once the engine is gone.
-                before = "its own loop callback, re-registered" if lost else f"{previous!r}"
-                logger.warning(f"Signal {signum} is handed back ignored, as the host set it while the engine ran. The "
-                               f"handler saved then was the engine's and would now swallow the signal: to lift the "
-                               f"ignore, restore what was there before the engine started ({before}).")
+                self._warn_ignored(signum, "its own loop callback, re-registered" if lost else f"{previous!r}")
             if current is not route['installed'] and handlers is not None:
                 # asyncio, and the host set a plain handler (or SIG_IGN) mid-run: only our table entry is under
                 # it, so that is all that changes. The handler stays exactly as set, flags included.
@@ -2190,8 +2240,10 @@ class _StopRoutes:
             else:
                 if prior is not None:                         # re-armed with its wakeup fd
                     loop.add_signal_handler(signum, prior._callback, *prior._args)
-                else:
-                    loop.remove_signal_handler(signum)
+                elif not loop.remove_signal_handler(signum) and signal.getsignal(signum) is route['installed']:
+                    # uvloop between runs (release_signals() outside the loop) removes nothing: set the default its
+                    # removal would have set, or the signal stays on its dispatcher with nothing behind it.
+                    signal.signal(signum, signal.default_int_handler if signum == signal.SIGINT else signal.SIG_DFL)
                 if current is not route['installed']:
                     # uvloop: its table cannot be read, so our entry is removed and the host's mid-run handler
                     # put back (a stale entry would make a later loop.remove_signal_handler reset it).
@@ -2205,6 +2257,14 @@ class _StopRoutes:
                 logger.warning(f"Signal {signum}: the host's own {type(loop).__name__} callback for it cannot be "
                                f"read back, so the signal is {where}. Re-register it after main().")
 
+    @staticmethod
+    def _warn_ignored(signum: int, before: str) -> None:
+        # The last engine ended while the host ignored the signal. The handler the host saved when it set SIG_IGN
+        # was the engine's, which has nothing behind it once the engine is gone.
+        logger.warning(f"Signal {signum} is handed back ignored, as the host set it while the engine ran. The "
+                       f"handler saved then was the engine's and would now swallow the signal: to lift the "
+                       f"ignore, restore what was there before the engine started ({before}).")
+
     def release(self, loop: asyncio.AbstractEventLoop) -> None:
         """Forget a closed loop's routes (its handlers went with it)."""
         for signum in [s for s, r in self.routes.items() if r['loop'] is loop]:
@@ -2216,8 +2276,15 @@ def release_signals(loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
     """Hand back the stop signals that finished main(hold_signals=True) calls still hold on ``loop`` (the
     running loop by default): once no engine runs, each goes back to what the host had, as after main().
     Restoring a handler saved from signal.getsignal() does not release them on asyncio, whose handler is one
-    shared function for every callback."""
-    _STOP_ROUTES.release_held(loop or asyncio.get_running_loop())
+    shared function for every callback. Signals can only be handed back from the main thread: called from
+    another thread with something to hand back, it raises ValueError before anything changes."""
+    loop = loop or asyncio.get_running_loop()
+    if threading.current_thread() is not threading.main_thread() and any(
+            route['loop'] is loop and any(getattr(c, 'held', False) for c in route['callbacks'])
+            for route in list(_STOP_ROUTES.routes.values())):
+        raise ValueError("release_signals() must run in the main thread, which alone can hand signals back: use "
+                         "loop.call_soon_threadsafe(engine.release_signals, loop)")
+    _STOP_ROUTES.release_held(loop)
 
 async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> int:
     """The engine. With ``hold_signals`` (run() does this), stop signals stay routed to the
@@ -2371,7 +2438,7 @@ def _halt_report(oms: "ExecutionRouter", gateway: OrderGateway, ticker: LiveTick
     logger.info("=== SYSTEM HALT ===")
     logger.info(f"Final Inventory State: {oms.active_inventory or '{}'}")
     for f in oms.fills + gateway.late_fills:
-        exits = f.exit_order_id or ("simulated OCO" if gateway.simulates_exits else "NONE")
+        exits = f.exit_order_id or ("UNKNOWN" if f.exits_unknown else "simulated OCO" if gateway.simulates_exits else "NONE")
         logger.info(f"   Fill {f.symbol}: {f.quantity} @ {f.average_price:.2f} (order {f.order_id}, exits: {exits})")
     for pos in oms.positions.values():
         state = " | STOP TRIGGERED, LIMIT UNFILLED" if pos.stop_triggered else ""
@@ -2379,7 +2446,7 @@ def _halt_report(oms: "ExecutionRouter", gateway: OrderGateway, ticker: LiveTick
                     f"target {pos.target:.2f}{state}")
     for f in gateway.late_fills:
         logger.info(f"   Open {f.symbol}: {f.quantity} @ {f.average_price:.2f} | filled during shutdown | "
-                    f"exits: {f.exit_order_id or 'NONE'}")
+                    f"exits: {f.exit_order_id or ('UNKNOWN' if f.exits_unknown else 'NONE')}")
     for pos in oms.closed_positions:
         logger.info(f"   Closed {pos.symbol}: {pos.exit_reason} @ {pos.exit_price:.2f} | P&L ₹{pos.pnl:,.0f}")
     if ticker.dropped_ticks:
