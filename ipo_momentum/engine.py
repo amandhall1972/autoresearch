@@ -295,8 +295,9 @@ async def verify_hardware_ip(expected_static_ip: str, min_agreeing: int = 2) -> 
 class TokenBucketRateLimiter:
     """Sliding-window limiter: at most ``max_calls`` acquisitions in any ``period`` seconds.
 
-    Callers reserve start times in arrival order (asyncio.Lock is FIFO), so no waiter can
-    be starved by later arrivals.
+    Callers are served in arrival order: asyncio.Lock is FIFO, and each caller waits for its
+    reserved start while still holding it, so a later arrival can neither take an earlier
+    slot nor wake first. Reserved starts never decrease, so this costs no throughput.
     """
     def __init__(self, max_calls: int, period: float):
         self.max_calls = max_calls
@@ -312,8 +313,8 @@ class TokenBucketRateLimiter:
             if len(self.calls) >= self.max_calls:
                 start = max(start, self.calls[-self.max_calls] + self.period)
             self.calls.append(start)
-        if start > now:
-            await asyncio.sleep(start - now)
+            if start > now:
+                await asyncio.sleep(start - now)
 
 class BrokerAdapter(ABC):
     async def boot(self) -> None:

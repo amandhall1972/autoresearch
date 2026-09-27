@@ -39,7 +39,7 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 cd ipo_momentum
 uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 225 tests, ~95 s, fully offline
+uv run pytest                       # 226 tests, ~95 s, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
@@ -508,7 +508,7 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 225 tests run offline in about 95 s. The slowest are real CLI runs that
+The 226 tests run offline in about 95 s. The slowest are real CLI runs that
 deliver SIGINT, SIGTERM and SIGHUP mid-entry and during exit, and a shutdown
 that must outlast v1.1's 10 s drain. They pass in seven configurations:
 - Python 3.10 with pandas 2.2 and numpy 1.26
@@ -526,5 +526,5 @@ Pandas `FutureWarning`s raised from engine code fail the suite.
 | `test_alpha.py` | Breakout conditions and crossing semantics, the exact stop/target math, true-range ATR, RVOL baselines and modes, session-defined bases, look-ahead freedom (including inside the base), the pinned real signal |
 | `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints, feed liveness in feed time, feed lag, the silent-socket watchdog, strict hole back-fill, thread safety, loop survival |
 | `test_execution.py` | Sizing caps, tick rounding, duplicates, future and stale signals, paper OCO mechanics incl. gaps, and the Kite gateway on the real SDK: lost and late-booked replies, requests that never left, broker refusals classified by HTTP status, transient errors, cancels that don't land, partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs, the halt report |
-| `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter, the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads and bad timestamps, the session's last 30m/60m bar and special sessions, retry policy, strict back-fill, midnight lookback clamps, listing dates in any zone, orchestrator anchoring and error containment, collecting the suite without the Kite extra |
+| `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter (incl. wake-up order under clock jitter), the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads and bad timestamps, the session's last 30m/60m bar and special sessions, retry policy, strict back-fill, midnight lookback clamps, listing dates in any zone, orchestrator anchoring and error containment, collecting the suite without the Kite extra |
 | `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days`, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers |

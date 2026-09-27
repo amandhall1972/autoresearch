@@ -3,6 +3,7 @@ import asyncio
 import importlib.util
 import inspect
 import io
+import itertools
 import json
 import os
 import subprocess
@@ -312,6 +313,37 @@ def test_limiter_serves_waiters_in_arrival_order():
         return order
 
     assert asyncio.run(scenario()) == list(range(8))
+
+
+def test_limiter_wakes_waiters_in_order_even_when_their_sleeps_differ(monkeypatch):
+    # A late clock read (scheduling jitter under load) gave waiter 2 a longer sleep than waiter 3,
+    # and v1.4, which slept after releasing its lock, then served 3 first (a flaky matrix run).
+    reads = itertools.count()
+
+    class JitteryClock:
+        @staticmethod
+        def monotonic():
+            now = time.monotonic()
+            return now - 0.03 if next(reads) == 2 else now
+
+    monkeypatch.setattr(engine, "time", JitteryClock)
+
+    async def scenario():
+        limiter = engine.TokenBucketRateLimiter(max_calls=2, period=0.05)
+        order = []
+
+        async def call(i):
+            await limiter.wait_for_capacity()
+            order.append(i)
+
+        tasks = []
+        for i in range(4):
+            tasks.append(asyncio.create_task(call(i)))
+            await asyncio.sleep(0)
+        await asyncio.gather(*tasks)
+        return order
+
+    assert asyncio.run(scenario()) == [0, 1, 2, 3]
 
 
 def test_kite_permanent_errors_are_not_retried(fast_sleep, caplog):

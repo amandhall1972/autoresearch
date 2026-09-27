@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.5 (in progress)
+
+Found by the v1.4 test matrix, before round 5 reported. One run on Python
+3.10 / pandas 2.2 failed `test_limiter_serves_waiters_in_arrival_order`. That
+was not noise: under CPU load, the limiter served waiters out of order in 1–2
+of 300 runs, on both Python lines.
+
+| Sev | v1.4 defect | Fix | Pinned by |
+| --- | --- | --- | --- |
+| low | `TokenBucketRateLimiter` reserved start times in arrival order under its FIFO lock, but slept after releasing it. A waiter whose clock read came slightly late (scheduling jitter) could compute a longer sleep than the next waiter and be served after it, breaking the documented FIFO guarantee. The rate limit itself always held. | Each caller waits for its reserved start while still holding the lock. Reserved starts never decrease, so throughput is unchanged. Under the same load: 0 of 1,000 runs out of order. | `test_limiter_wakes_waiters_in_order_even_when_their_sleeps_differ` (deterministic: injects the late clock read; fails on v1.4) |
+
 ## v1.4 (2026-09-27)
 
 v1.3 went through a fourth adversarial review on a frozen snapshot (`af8816f`),
