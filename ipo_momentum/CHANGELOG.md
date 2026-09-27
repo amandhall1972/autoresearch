@@ -1,5 +1,90 @@
 # Changelog
 
+## v1.11 (2026-09-27)
+
+v1.10 went through an eleventh adversarial review on a frozen snapshot
+(`8a5cb18`), with the same four areas. The run was interrupted by a container
+restart and resumed from its journal; every finder and skeptic completed. 12
+findings, one duplicate across areas (the data/docs reviewer's R11-DATA-DOCS-1
+is R11-LIFECYCLE-1), which leaves 11 defects. None refuted: 11 confirmed, 1
+with part of the claim overstated. 1 high, 1 medium, 9 low. The skeptics'
+refinements replaced the finder's fix four times:
+- R11-FEED-3: the finder bounded a print's latest time by the lowest lag
+  sample. One forward-stamped packet (the 30 s rule accepts up to 30 s) then
+  dragged it up to 30 s late and blinded the wrong bucket. The bound is never
+  more than 1 s below the upper median.
+- R11-FEED-4: the finder let any stamp of the bucket prove an unstamped
+  print's bucket. A quote stamped 15 s ahead then "proved" it, the late print
+  of the bucket before was dropped, and R10's fake breakout returned. A stamp
+  proves the bucket only if it is no later than the print could have traded.
+- R11-FEED-2: `ambiguous` is decoupled from the 2 s window, but only together
+  with R11-FEED-4's guarded proof. On a feed whose packets mostly lack exchange
+  time, it can now skip a genuine first bar after a reconnect: a missed
+  signal, never a fake one.
+- R11-DATA-DOCS-1: the at-fork reset maps a handler the host had that runs
+  through a loop (its own loop callback, or a stale dispatcher bound to any
+  loop, such as a closed uvloop loop's) to the default: restored in the child,
+  it would swallow every stop.
+
+Every v1.11 regression test fails on the v1.10 snapshot and passes here
+(`test_the_fast_modules_pass_without_the_kite_extra` fails there too, because
+it runs the fast modules). The exceptions are these controls:
+- `test_a_504_before_a_refused_tunnel_still_leaves_the_gtt_state_unknown` and
+  `test_a_duplicate_that_had_fired_marks_the_fill[active]`: a request that
+  may have reached Kite is still UNKNOWN, and an active duplicate marks nothing;
+- `test_a_stamp_ahead_of_an_unstamped_prints_latest_time_proves_nothing` and
+  `test_one_forward_stamp_does_not_drag_a_prints_latest_time_late`: the
+  skeptics' guards. Each fails with the finder's version of its fix;
+- `test_a_host_guard_is_left_alone_in_a_forked_worker`: a host's `SIG_IGN`
+  around the fork stays the host's choice in the child;
+- the pins for v1.10 rules that no test covered (R11-ORDERS-3,
+  R11-DATA-DOCS-3): `test_a_never_sent_window_that_expires_after_an_ambiguous_attempt_reports_the_gtt_state_unknown`,
+  the `exits_unknown` assertions added to
+  `test_when_every_gtt_request_fails_ambiguously_the_alert_says_one_may_exist`,
+  `test_a_permanent_error_while_rechecking_the_book_ends_the_loop_and_is_named`
+  and `test_a_lost_gtt_reply_after_an_unreadable_snapshot_is_reported_not_guessed`,
+  and `test_a_provisional_bar_a_stamped_print_of_its_own_bucket_joined_is_not_moved`,
+  `test_a_provisional_bar_moved_into_a_bucket_the_feed_did_not_watch_whole_is_discarded`,
+  `test_a_provisional_bar_is_not_moved_into_a_bucket_that_already_closed`.
+  Each fails on the mutation that removes its rule.
+
+Existing tests changed:
+- The blind-bucket assertions check membership in the blinded span, through a
+  helper that also reads earlier versions' single bucket; the R9 pin also
+  asserts the bucket before is not blinded.
+- The release-from-a-thread test checks the new message.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.10 defect | v1.11 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ◐ | A GTT that had already fired (adopted TRIGGERED after a lost reply, or a TRIGGERED duplicate) was reported as the position's armed protection: "exits armed (GTT 700)" and "covered by GTT 700" next to the alert that it had fired; for a fired duplicate, the fill named the GTT the alert said to DELETE. Overstated: the halt line only names the GTT, the TRIGGERED alert is always printed too, and it predates v1.10. | A `Fill` carries `exits_fired`. Every report that names the position's exits adds "(a GTT for these shares has already TRIGGERED: CHECK ORDERS AND HOLDINGS)", and a late fill says "exits: GTT n (…)" instead of "exits armed". | `test_a_gtt_that_had_already_fired_is_not_reported_as_the_positions_armed_exit`, `test_an_unconfirmed_cancel_does_not_call_a_fired_gtt_cover`, `test_a_fill_during_shutdown_whose_gtt_had_fired_is_not_reported_as_exits_armed`, `test_a_duplicate_that_had_fired_marks_the_fill` (triggered, and an active control) |
+| low | ✔ | A GTT request the proxy refused at the tunnel carried nothing to Kite, yet when only those failed, v1.10 reported "GTT STATE UNKNOWN" and `exits: UNKNOWN` (v1.9's halt line said `NONE`), contradicting "a position that surely has no GTT still says NONE". | A refused tunnel is still retried as ambiguous (the proxy-outage coverage is unchanged), but only an attempt that may have reached Kite makes a GTT possible. Refused tunnels alone end as `POSITION OPEN WITHOUT EXITS`, exits `NONE`. | `test_gtt_requests_refused_only_at_the_proxys_tunnel_leave_a_position_known_to_have_no_gtt` (book readable and not), `test_a_504_before_a_refused_tunnel_still_leaves_the_gtt_state_unknown` (control) |
+| low | ✔ | R11-ORDERS-3: two of v1.10's three `exits_unknown` sites (a match adopted while the pre-arming book was unreadable; every request ambiguous) had no test: setting either to False passed every test. | Pinned. | `test_a_lost_gtt_reply_after_an_unreadable_snapshot_is_reported_not_guessed`, `test_when_every_gtt_request_fails_ambiguously_the_alert_says_one_may_exist`, `test_a_permanent_error_while_rechecking_the_book_ends_the_loop_and_is_named`, `test_a_never_sent_window_that_expires_after_an_ambiguous_attempt_reports_the_gtt_state_unknown` |
+
+### Live feed
+
+| Sev | Verdict | v1.10 defect | v1.11 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | A stamped quote of bucket N closed the N-1 bar; an unstamped trade received just after it had feed time in N-1 and was dropped as late. Its shares rode into a later bar while the back-fill of N counted them again: a fake RVOL breakout. It predates v1.10, but contradicts v1.10's documentation ("not counted twice"). | A print received after the symbol's last bar closed, whose latest possible time is past that bar's end, is filed after it: its bar is then provisional/ambiguous as any other. | `test_an_unstamped_trade_received_after_a_stamped_quote_closed_the_bar_is_not_dropped_as_late` |
+| low | ✔ | R10-FEED-1's guard covered only feed times within 2 s of the boundary. An unmeasured latency rise past that brought back the double count and the fake breakout. | Any bar an unstamped print opens is ambiguous (not evaluated if the back-filled bucket before it traded), unless a stamp proves its bucket (below). The reclaim keeps its 2 s window. | `test_a_bar_an_unstamped_print_opened_long_after_a_boundary_is_still_not_evaluated_if_the_bucket_before_traded` |
+| low | ✔ | A print's latest possible time came from the median lag sample, which the latency hides a host's offset in: for a host even 0.5 s behind, the opening print was dropped as pre-open and a re-baseline blinded the previous bucket. | The lowest sample bounds the offset, never more than 1 s below the upper median (the skeptic's refinement). | `test_on_a_host_behind_the_exchange_a_rebaselining_print_still_blinds_the_bucket_it_can_belong_to`, `test_one_forward_stamp_does_not_drag_a_prints_latest_time_late` (control) |
+| low | ✔ | A bar was marked ambiguous (and not evaluated) even when a stamped update of its own bucket, received before its unstamped opener, proved the bucket: a genuine breakout missed. | Such a stamp proves the bucket, if it is no later than the print's latest possible time (the skeptic's guard against forward stamps). | `test_a_stamp_of_its_own_bucket_received_first_proves_an_unstamped_prints_bar`, `test_a_stamp_ahead_of_an_unstamped_prints_latest_time_proves_nothing` (control) |
+
+### Lifecycle
+
+| Sev | Verdict | v1.10 defect | v1.11 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ✔ | v1.10's fork fix dropped the parent's routes only when the worker's own engine hooked. Before that (a worker's kite start-up takes seconds) and after its engine ended, the worker kept the parent engines' dispatcher and (on 3.10/3.11 asyncio, which has no at-fork reset) the parent loop's wakeup fd. A stop sent to the worker stopped the PARENT's engines or was swallowed, and the worker traded on; a helper that ran no engine did the same. The data/docs reviewer found the same defect (R11-DATA-DOCS-1) plus the case of a host with its own loop callback. | At fork time, in the child, the parent's routes are dropped and each signal still on an engine dispatcher goes back to what the host had before any engine ran (the default where that was a loop's callback); the wakeup fd is cleared. A signal the host set itself (a `SIG_IGN` guard) is left alone. The pid check stays as a backstop. | `test_a_forked_worker_takes_its_own_stop_signals_before_and_after_its_engine` (asyncio and uvloop), `test_a_forked_helper_that_runs_no_engine_is_stopped_by_its_own_stop` (with and without a host loop callback), `test_a_forked_helper_does_not_inherit_a_stale_loop_dispatcher_the_host_had`, `test_a_host_guard_is_left_alone_in_a_forked_worker` (control) |
+
+### Tests and docs
+
+| Sev | Verdict | v1.10 defect | v1.11 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | R11-DATA-DOCS-2: a re-baselining unstamped print blinded one bucket (v1.9 the earliest it could belong to, v1.10 the latest), so each version kept a short bar in the other case; on a host well behind, even the latest estimate fell before the trade. | Every bucket it can belong to is blinded, from its feed time's to its latest possible time's, which is at least a stamp's truncation past its feed time. Both only discard more bars (back-filled). | `test_a_rebaselining_unstamped_print_that_traded_before_the_boundary_blinds_that_bucket_too`, `test_on_a_host_well_behind_a_rebaselining_unstamped_print_still_blinds_the_bucket_it_can_belong_to`, `test_on_a_host_well_behind_an_unstamped_opening_print_is_not_dropped_as_pre_open` (2 s and 5 s) |
+| low | ✔ | R11-DATA-DOCS-3: three rules of the provisional-bar move (not into a closed bucket; settled once a stamped print joins; partial recomputed) and two `exits_unknown` sites had no test. | Pinned (the GTT ones under R11-ORDERS-3). | `test_a_provisional_bar_is_not_moved_into_a_bucket_that_already_closed`, `test_a_provisional_bar_a_stamped_print_of_its_own_bucket_joined_is_not_moved`, `test_a_provisional_bar_moved_into_a_bucket_the_feed_did_not_watch_whole_is_discarded` |
+| low | ✔ | R11-DATA-DOCS-4: `release_signals()`'s error advised deferring the release to the loop, which the R10 skeptic had rejected: a loop closed first leaves the signals held (on uvloop, swallowed). | The message says when that works. A held run whose loop closed unreleased is reported when the next engine starts. | `test_release_signals_from_another_thread_refuses_before_changing_anything`, `test_a_held_run_whose_loop_closed_unreleased_is_reported_when_the_next_engine_starts` |
+
 ## v1.10 (2026-09-27)
 
 v1.9 went through a tenth adversarial review on a frozen snapshot

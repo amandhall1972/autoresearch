@@ -340,6 +340,7 @@ def test_a_lost_gtt_reply_after_an_unreadable_snapshot_is_reported_not_guessed()
     gw = fast_gateway(kite)
     fill = asyncio.run(gw.execute(kite_plan()))
     assert fill.exit_order_id is None and len(kite.created_gtts) == 1     # no second GTT either
+    assert fill.exits_unknown is True                                     # GTT 700 exists: never "exits: NONE"
     assert "GTT 700 matches this position" in gw.alerts[0] and "CHECK THE GTT BOOK" in gw.alerts[0]
 
 
@@ -440,7 +441,7 @@ def test_when_every_gtt_request_fails_ambiguously_the_alert_says_one_may_exist()
                     gtt_results=[KE.NetworkException("Gateway timed out", code=504)])
     gw = fast_gateway(kite)
     fill = asyncio.run(gw.execute(kite_plan()))
-    assert fill.exit_order_id is None and kite.routes().count("gtt.place") == 3
+    assert fill.exit_order_id is None and kite.routes().count("gtt.place") == 3 and fill.exits_unknown is True
     assert "GTT STATE UNKNOWN for 2941 shares" in gw.alerts[0] and "may still have been created" in gw.alerts[0]
 
 
@@ -772,7 +773,7 @@ def test_a_permanent_error_while_rechecking_the_book_ends_the_loop_and_is_named(
     kite._request = request
     gw = fast_gateway(kite, cancel_grace=1.0, poll_interval=0.05)
     fill = asyncio.run(gw.execute(kite_plan()))
-    assert fill.exit_order_id is None and reads["n"] == 1 and kite.gtt_places == 2
+    assert fill.exit_order_id is None and reads["n"] == 1 and kite.gtt_places == 2 and fill.exits_unknown is True
     assert "GTT STATE UNKNOWN" in gw.alerts[-1] and "TokenException" in gw.alerts[-1]
 
 
@@ -894,3 +895,93 @@ def test_a_position_that_surely_has_no_gtt_still_reports_none(caplog):
     ticker = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None)
     engine._halt_report(r, gw, ticker, exit_code=0, stop_signal=None)
     assert "exits: NONE)" in caplog.text and "UNKNOWN" not in caplog.text
+
+
+# ---------------------------------------------------------------- round 11: what the reports say a GTT is
+def test_a_never_sent_window_that_expires_after_an_ambiguous_attempt_reports_the_gtt_state_unknown():
+    # The 504 may have created a GTT that the refused retries never saw: its state is unknown, not "NONE".
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Gateway timed out", code=504), refused_connection()])
+    gw = fast_gateway(kite, cancel_grace=0.2, poll_interval=0.02)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id is None and fill.exits_unknown is True
+    assert "GTT STATE UNKNOWN" in gw.alerts[-1]
+
+
+@pytest.mark.parametrize("book_readable", [True, False])
+def test_gtt_requests_refused_only_at_the_proxys_tunnel_leave_a_position_known_to_have_no_gtt(book_readable, caplog):
+    # A refused tunnel is retried as ambiguous (a longer proxy outage is ridden out), but it carried nothing to Kite.
+    # v1.10 reported "GTT STATE UNKNOWN" and "exits: UNKNOWN" although no GTT can exist.
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    tunnel = refused_tunnel()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[tunnel], gtt_book=None if book_readable else tunnel)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    r = run_router(router(gateway=gw), [sig()])
+    assert [(f.exit_order_id, f.exits_unknown) for f in r.fills] == [(None, False)] and kite.created_gtts == []
+    assert kite.gtt_places == (3 if book_readable else 1)                  # the retry coverage is unchanged
+    assert "POSITION OPEN WITHOUT EXITS" in gw.alerts[-1] and not any("GTT STATE UNKNOWN" in a for a in gw.alerts)
+    ticker = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None)
+    engine._halt_report(r, gw, ticker, exit_code=0, stop_signal=None)
+    assert "exits: NONE)" in caplog.text
+
+
+def test_a_504_before_a_refused_tunnel_still_leaves_the_gtt_state_unknown():
+    # Control: the 504 may have reached Kite.
+    tunnel = refused_tunnel()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Gateway timed out", code=504), tunnel], gtt_book=tunnel)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id is None and fill.exits_unknown is True and "GTT STATE UNKNOWN" in gw.alerts[-1]
+
+
+def triggered_lost_reply(order_states, **kw):
+    return StubKite(order_states, gtt_results=[requests.exceptions.ReadTimeout("read timed out"), {"trigger_id": 999}],
+                    gtt_created_before_error=True, gtt_created_status="triggered", **kw)
+
+
+def test_a_gtt_that_had_already_fired_is_not_reported_as_the_positions_armed_exit(caplog):
+    # v1.10 said "exits: 700" next to the alert that GTT 700 had already TRIGGERED.
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    kite = triggered_lost_reply([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}])
+    gw = fast_gateway(kite)
+    r = run_router(router(gateway=gw), [sig()])
+    assert [(f.exit_order_id, f.exits_fired) for f in r.fills] == [("700", True)]
+    ticker = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None)
+    engine._halt_report(r, gw, ticker, exit_code=0, stop_signal=None)
+    assert f"exits: 700 ({engine.FIRED_NOTE}))" in caplog.text
+
+
+def test_an_unconfirmed_cancel_does_not_call_a_fired_gtt_cover():
+    kite = triggered_lost_reply([{"status": "OPEN", "filled_quantity": 800, "average_price": 290.2}])
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert f"800 shares already bought are covered by GTT 700 ({engine.FIRED_NOTE})" in r.unresolved[0]
+
+
+def test_a_fill_during_shutdown_whose_gtt_had_fired_is_not_reported_as_exits_armed():
+    gw = fast_gateway(StubKite([OPEN]))
+
+    async def settled():
+        return engine.Fill("SWIGGY", 2941, 290.1, "260928000000001", "700", exits_fired=True)
+
+    async def scenario():
+        task = asyncio.ensure_future(settled())
+        await task
+        gw._report_late("SWIGGY", task)
+
+    asyncio.run(scenario())
+    assert gw.alerts == [f"[SWIGGY] Entry 260928000000001 filled 2941 while shutting down; exits: GTT 700 "
+                         f"({engine.FIRED_NOTE})."]
+
+
+@pytest.mark.parametrize("status", ["triggered", "active"])
+def test_a_duplicate_that_had_fired_marks_the_fill(status):
+    # The duplicate watch's TRIGGERED duplicate (whose alert says DELETE the armed GTT) marks the fill; an active one
+    # does not.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[requests.exceptions.ReadTimeout("read timed out"), {"trigger_id": 999}],
+                    gtt_created_before_error=True, gtt_lands_on_next_place=True, gtt_created_status=status)
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, getattr(fill, "exits_fired", False)) == ("999", status == "triggered")

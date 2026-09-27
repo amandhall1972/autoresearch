@@ -1102,7 +1102,7 @@ def test_release_signals_from_another_thread_refuses_before_changing_anything():
             try:
                 engine.release_signals(loop)
             except ValueError as e:
-                errors.append(type(e).__name__)
+                errors.append(type(e).__name__ + (" (between runs)" if "between runs" in str(e) else ""))
 
         await loop.run_in_executor(None, off_main)
         print("held", held, "errors", errors, "routes", sorted(map(int, engine._STOP_ROUTES.routes)), flush=True)
@@ -1112,7 +1112,7 @@ def test_release_signals_from_another_thread_refuses_before_changing_anything():
               "sigint", loop_callback(loop, signal.SIGINT), sigint != "_sighandler_noop", flush=True)
     """)
     assert code == 0, out + err
-    assert "held 0 errors ['ValueError'] routes [1, 2, 15]" in out, out + err
+    assert "held 0 errors ['ValueError (between runs)'] routes [1, 2, 15]" in out, out + err
     assert "after ['X host'] routes [] sigint None True" in out, out + err
 
 
@@ -1161,3 +1161,143 @@ def test_a_reclaim_left_pending_by_a_loop_that_stopped_inside_the_guard_is_dropp
     assert code == 0, out + err
     assert "engines (0, 0)" in out and "closed" in out, out + err
     assert "Task was destroyed but it is pending" not in err, err
+
+
+# ---------------------------------------------------------------- round 11: a forked worker, before and after its engine
+@pytest.mark.skipif(sys.platform != "linux", reason="multiprocessing's fork start method")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("window", ["before its engine hooks", "after its engine ended"])
+def test_a_forked_worker_takes_its_own_stop_signals_before_and_after_its_engine(loop_kind, window):
+    # v1.10 dropped the parent's routes only when the worker's own engine hooked. Before that (a worker's kite
+    # start-up takes seconds) and after its engine ended, the worker kept the parent engine's dispatcher and wakeup
+    # fd: a stop sent to the worker stopped the PARENT's engines (or was swallowed), and the worker traded on.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host(f"""
+        import multiprocessing, time
+
+        def worker(ready):
+            if {window!r} == "after its engine ended":
+                asyncio.run(engine.main(ARGS + ["0.3"]))
+            os.write(ready, b"x")
+            time.sleep(5)                                            # start-up (a network fetch), or life after
+            sys.exit(7)
+
+        a = asyncio.create_task(engine.main(ARGS + ["8"]))
+        await hooked(1, a)
+        r, w = os.pipe()
+        p = multiprocessing.get_context("fork").Process(target=worker, args=(w,))
+        p.start()
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(p.pid, signal.SIGTERM)                               # stop the worker only
+        done, _ = await asyncio.wait({{a}}, timeout=1.5)
+        print("parent", "running" if not done else a.result(), flush=True)
+        await loop.run_in_executor(None, p.join, 30)
+        os.kill(os.getpid(), signal.SIGTERM)
+        print("worker", p.exitcode, "a", await a, flush=True)
+    """, uvloop=(loop_kind == "uvloop"))
+    assert code == 0, out + err
+    assert "parent running" in out and "worker -15 a 143" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+@pytest.mark.parametrize("host_callback", [False, True])
+def test_a_forked_helper_that_runs_no_engine_is_stopped_by_its_own_stop(host_callback):
+    # A plain os.fork() helper forwarded any stop it received to the parent's engines and ignored it itself. With a
+    # host loop callback before the engine, the saved handler is asyncio's shared no-op: the child gets the default.
+    code, out, err = run_host(f"""
+        import time
+        if {host_callback!r}:
+            loop.add_signal_handler(signal.SIGTERM, got.append, "host")
+        a = asyncio.create_task(engine.main(ARGS + ["8"]))
+        await hooked(1, a)
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.write(w, b"x")
+            time.sleep(5)
+            os._exit(7)
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(pid, signal.SIGTERM)
+        done, _ = await asyncio.wait({{a}}, timeout=1.5)
+        _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+        print("parent", "running" if not done else a.result(), "helper", os.waitstatus_to_exitcode(status), flush=True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        print("a", await a, flush=True)
+    """)
+    assert code == 0, out + err
+    assert "parent running helper -15" in out and "a 143" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="multiprocessing's fork start method")
+def test_a_host_guard_is_left_alone_in_a_forked_worker():
+    # Control: a SIG_IGN the host set around the fork is the host's choice, in the child too.
+    code, out, err = run_host("""
+        import multiprocessing
+
+        def worker(conn):
+            conn.send(signal.getsignal(signal.SIGTERM) == signal.SIG_IGN)
+
+        a = asyncio.create_task(engine.main(ARGS + ["2"]))
+        await hooked(1, a)
+        old = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        parent_end, child_end = multiprocessing.Pipe()
+        p = multiprocessing.get_context("fork").Process(target=worker, args=(child_end,))
+        p.start()
+        ignored = await loop.run_in_executor(None, parent_end.recv)
+        signal.signal(signal.SIGTERM, old)
+        await loop.run_in_executor(None, p.join, 30)
+        print("ignored in the child", ignored, "a", await a, flush=True)
+    """)
+    assert code == 0, out + err
+    assert "ignored in the child True a 0" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_held_run_whose_loop_closed_unreleased_is_reported_when_the_next_engine_starts():
+    # A release lost with a closed loop (the host's release never ran) was silent.
+    code, out, err = run_script("""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        print("held", loop.run_until_complete(engine.main(ARGS + ["0.3"], hold_signals=True)), flush=True)
+        loop.close()
+        print("next", asyncio.run(engine.main(ARGS + ["0.3"])), flush=True)
+    """)
+    assert code == 0, out + err
+    assert "held 0" in out and "next 0" in out, out + err
+    assert "was still held by a finished main(hold_signals=True) when its loop closed" in err, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+def test_a_forked_helper_does_not_inherit_a_stale_loop_dispatcher_the_host_had():
+    # The host left a closed uvloop loop's dispatcher installed before the engine ran. Restored in a forked child, it
+    # would swallow every stop sent to the child: a dispatcher bound to any loop goes back to the default there.
+    pytest.importorskip("uvloop")
+    code, out, err = run_script("""
+        import time, uvloop
+        other = uvloop.new_event_loop()
+        other.run_until_complete(asyncio.sleep(0))
+        other.add_signal_handler(signal.SIGTERM, print, "other")
+        other.close()
+
+        async def host():
+            loop = asyncio.get_running_loop()
+            a = asyncio.create_task(engine.main(ARGS + ["6"]))
+            await until_hooked(1)
+            r, w = os.pipe()
+            pid = os.fork()
+            if pid == 0:
+                os.write(w, b"x")
+                time.sleep(4)
+                os._exit(7)
+            await loop.run_in_executor(None, os.read, r, 1)
+            os.kill(pid, signal.SIGTERM)
+            _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+            print("helper", os.waitstatus_to_exitcode(status), flush=True)
+            os.kill(os.getpid(), signal.SIGTERM)
+            print("a", await a, flush=True)
+
+        asyncio.run(host())
+    """)
+    assert code == 0, out + err
+    assert "helper -15" in out and "a 143" in out, out + err
