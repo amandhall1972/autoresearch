@@ -1,5 +1,82 @@
 # Changelog
 
+## v1.3 (2026-09-27)
+
+v1.2 went through a third adversarial review on a frozen snapshot (`6af258c`).
+Four reviewers took one area each (orders, live feed, lifecycle, alpha and
+docs) and had to reproduce every finding against the snapshot. They found 24,
+which reduce to the 23 defects below (R3-MAIN-5 and R3A-5 are the same bug).
+As in round 2, several are defects in the previous round's own fixes.
+
+Only the orders skeptic ran; the other three hit the review's spend limit. Each
+of their 17 findings was therefore reproduced again, behaviorally, against the
+frozen v1.2 snapshot, the signal cases under both Python 3.10 and 3.11. A test
+that fails only because a new API is missing did not count as a reproduction.
+
+Every v1.3 regression test fails on the v1.2 snapshot and passes here, except
+seven controls that pin error classifications v1.2 already had right (the
+`InputException`, `TokenException`, 429, 504, `DataException`, 500 and
+`ReadTimeout` cases of `test_broker_refusals_are_permanent_and_outages_are_not`).
+
+Verdict: ✔ confirmed by the independent skeptic, ◐ confirmed with part of the
+claim overstated, ● skeptic did not run; reproduced against the v1.2 snapshot
+before fixing. Severity is the skeptic's rating for ✔/◐ and the finder's for ●.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.2 defect | v1.3 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ✔ | A GTT retry after a lost reply (a read timeout or 504, which may still have created the GTT) armed a **second OCO GTT for the whole position**. The engine knew only the second one and raised no alert. When triggered, both sell. v1.2's own test pinned the blind retry. | GTT placement is idempotent. The GTT book's ids are read before arming. After an ambiguous failure the book is checked and a matching GTT created since then is adopted. An identical GTT from an earlier run is never adopted. An unreadable book stops the retries with a `GTT STATE UNKNOWN` alert. | `test_a_lost_gtt_reply_adopts_the_existing_gtt_instead_of_arming_a_second`, `test_an_identical_gtt_from_an_earlier_run_is_never_adopted`, `test_an_unreadable_gtt_book_stops_the_retries_and_raises_an_alert`, `test_a_lost_gtt_reply_after_an_unreadable_snapshot_is_reported_not_guessed`, `test_a_gtt_that_was_never_created_is_retried` |
+| high | ✔ | After a lost `place_order` reply, one immediate `orders()` snapshot was taken as proof that the entry never reached the exchange, and the symbol was released. The broker can book an order moments later. | The tag is polled in the order book for `cancel_grace` (15 s). If it never shows, or the book cannot be read, `OrderStateUnknown` keeps the symbol blocked. Only a connect timeout (never sent) or a broker refusal releases it at once. | `test_an_order_booked_after_the_lost_reply_is_found_by_polling_the_book`, `test_an_ambiguous_failure_whose_order_never_shows_keeps_the_symbol_blocked`, `test_a_request_that_never_left_the_machine_releases_the_symbol_without_a_lookup`, `test_an_unverifiable_place_order_failure_keeps_the_symbol_blocked` |
+| medium | ◐ | Cancelling the router during `place_gtt` could not stop its worker thread, and the abort path then placed another GTT. End to end through `main()` this gave three GTTs for one position. Overstated: it needs a degraded API during an entry at shutdown. | Everything from `place_order` to the GTT runs as one shielded task that cancellation never interrupts. There is no separate abort path to duplicate it. | `test_a_shutdown_during_a_slow_gtt_placement_arms_exactly_one_gtt`, `test_an_entry_interrupted_by_shutdown_still_settles_and_its_fill_is_protected_once` |
+| medium | ◐ | (v1.2 regression) A partial fill the engine had already seen got **no GTT** when the cancel of the remainder could not be confirmed. | The known filled quantity is protected. `OrderStateUnknown` then carries the fill, so the router records the position and keeps the symbol blocked. | `test_a_partial_fill_whose_cancel_is_unconfirmed_is_still_protected_and_recorded` |
+| medium | ✔ | `settle_timeout` was not an upper bound on an entry: it ignored the SDK's 7 s per call. `main()` then interrupted healthy settlements, and the abort path restarted them. | The budget counts every SDK call at its client timeout. Exceeding it no longer interrupts anything: shutdown waits for the shielded entry on its own deadlines and exits 1. | `test_a_failed_shutdown_exits_1_even_when_a_signal_started_it`, `test_an_entry_interrupted_by_shutdown_still_settles_and_its_fill_is_protected_once` |
+| low | ✔ | The abort path raced a `place_order` still in flight, and could report that the entry "never reached the exchange". | The same shielded task: the in-flight call's own result is used. | `test_a_shutdown_during_place_order_still_settles_the_entry` |
+| low | ✔ | Kite delivers `MarginException`, `HoldingException`, `UserException` and the like as `GeneralException` with HTTP 400, and `OrderException` was treated as transient. Refusals were handled as if the order might exist. | Kite errors are classified by HTTP status (4xx other than 429 is permanent), and `OrderException` is permanent. | `test_broker_refusals_are_permanent_and_outages_are_not` (10 cases, 7 controls) |
+
+### Real-money safety: lifecycle
+
+| Sev | Verdict | v1.2 defect | v1.3 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ● | SIGTERM and SIGHUP (`kill`, `systemctl`/`docker stop`, a closed SSH session) killed the process mid-entry: no cancel, no GTT, no report. Reproduced: exit −15, no fill, no report. | SIGINT, SIGTERM and SIGHUP all take the orderly shutdown and exit `128 + N`. | `test_kill_and_hangup_settle_the_entry_in_flight_like_ctrl_c` (2 cases) |
+| medium | ● | Where the loop cannot own signals (Windows), Ctrl-C relied on `asyncio.run`. Python 3.10 cancelled every task, the entry in flight included; 3.11 lost the halt report to a second Ctrl-C. Reproduced on both with the loop handler disabled. | A plain signal handler hands the signal to the loop thread-safely. Further signals during shutdown are logged and ignored. | `test_without_loop_signal_handlers_ctrl_c_still_settles_and_a_second_one_is_ignored` |
+| medium | ● | The listing check compared dates only, and both lookback clamps (Kite's 180 days, Yahoo's 59) kept the time of day. A clamp landing inside the listing session was accepted with the listing morning, usually the heaviest bars, missing from the base and AVWAP. A listing date in another time zone shifted by a day. | Clamps start at the next 00:00 IST, and a clamped start after the listing excludes the symbol. A listing date is its own calendar date in any zone. | `test_a_lookback_clamp_never_starts_inside_the_listing_session`, `test_yahoos_window_clamp_snaps_to_the_next_midnight`, `test_a_listing_date_means_its_own_calendar_date_in_any_zone` (2 cases) |
+| low | ● | A signal during a failing shutdown turned exit 1 into 130. Reproduced: 130. | Failures outrank signals. | `test_a_failed_shutdown_exits_1_even_when_a_signal_started_it` |
+| low | ● | `--run-seconds nan` passed validation and ran forever. Negative risk, cap and reward, and a NaN RVOL threshold, ran, rejected or never fired every signal, and exited 0. | Numeric flags must be finite and > 0 (≥ 0 for `--run-seconds`), else exit 2. | `test_numeric_arguments_must_be_finite_and_in_range` (6 cases) |
+
+### Live feed
+
+| Sev | Verdict | v1.2 defect | v1.3 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ● | When an outage crossed a bucket end, the bar clock closed the bar the websocket drop had cut short as complete. That bar was evaluated and could trade. Only a reconnect marked bars incomplete. | `on_close` marks every forming bar incomplete, and nothing opened before the reconnect is kept. With a live feed, a bar closed by the clock also needs a feed message after its bucket's end. | `test_a_feed_drop_discards_the_bar_it_cut_short_and_every_bar_until_the_reconnect`, `test_a_live_bar_closed_by_the_clock_needs_the_feed_alive_to_its_end` |
+| medium | ● | A failed Kite back-fill returned an empty frame, which reads as "nothing traded in the hole", so the bar after the hole was evaluated across it. | `BrokerAdapter.backfill` must raise when the fetch fails. Kite's is a strict fetch (raises after its retries, or for an unknown symbol), and `main()` wires it. | `test_a_kite_backfill_raises_instead_of_returning_nothing` (2 cases), `test_a_failed_kite_backfill_leaves_the_bar_unevaluated`, `test_sources_without_a_live_feed_refuse_to_backfill` |
+| medium | ● | A half-open websocket was never detected. KiteTicker's ping loop never sends a ping, so no close, reconnect or give-up ever fires, and the engine ran blind. | Every message, heartbeats included, stamps liveness. A watchdog stops the run (exit 1) after 15 s of silence during the session. | `test_a_silent_websocket_during_the_session_stops_the_engine`, `test_the_feed_watchdog_tolerates_quiet_evenings_and_fresh_heartbeats` |
+| medium | ● | A counter that went backwards became the new baseline, so the next print re-counted the dip. A zeroed packet would credit the whole day's volume to one bar. v1.2's own test pinned the over-count. | The baseline is invalidated and re-set by the next print, so nothing is counted twice. | `test_a_counter_going_backwards_is_rebaselined_not_reset_to_zero` (corrected) |
+| low | ● | After a (re)connect, the re-baselining print opened a bar even when nothing traded, giving flat zero-volume bars. | Only a verified positive volume delta opens a bar. | `test_a_rebaselining_print_after_a_reconnect_opens_no_bar` |
+
+### Data, CLI and documentation
+
+| Sev | Verdict | v1.2 defect | v1.3 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ● | The v1.2 notes claimed every v1.2 behavior test fails on v1.1. Six pass, and the pin cited for the critical shutdown fix could not detect it: its fill landed inside v1.1's 10 s drain. | The pin's fill now lands after 10 s and fails on v1.1. Both documents name the controls. | `test_shutdown_waits_for_the_order_in_flight` |
+| low | ● | Four malformed Yahoo shapes raised instead of giving an empty frame: a non-list `timestamp`, a list `indicators`, a dict `quote`, and non-numeric stamps. | Types are validated. A bad timestamp drops only its own row. | `test_malformed_yahoo_payloads_give_an_empty_frame` (4 new cases), `test_a_bad_yahoo_timestamp_drops_only_its_own_row` |
+| low | ● | The session's last 30m/60m bar (15:15–15:30) was treated as forming until 15:45/16:15, and dropped. | A bar ends at the 15:30 close if that comes first. | `test_the_sessions_last_bar_is_complete_at_the_close` (2 cases) |
+| low | ● | The CSV symbol check was a prefix match, so NTPCGREEN's file replayed as NTPC unflagged. | The file name's first `_`-separated token must equal the symbol. | `test_a_csv_whose_name_merely_starts_with_the_symbol_is_flagged` |
+| low | ● | README's headline real-orders command omitted the required `--listing-date`, so it exited 2 as written. | Corrected. | — |
+| low | ● | `data/README.md` said zero-volume bars depress the indicators. v1.2 leaves them out of RVOL, and they carry no AVWAP weight. | Corrected, and checked on the bundled data. | — |
+
+Found while fixing: two new tests first passed on v1.2 for the wrong reason,
+because `pytest.raises(Exception)` accepted the `TypeError` of an unknown
+keyword. Main's back-fill became a named adapter method (`backfill`), and both
+tests now assert the exact exception and the wiring `main()` uses.
+
+Renamed or replaced from v1.2:
+`test_an_entry_interrupted_by_shutdown_is_cancelled_and_its_fill_protected` →
+`test_an_entry_interrupted_by_shutdown_still_settles_and_its_fill_is_protected_once`,
+`test_a_place_order_failure_that_never_reached_the_exchange_releases_the_symbol` →
+`test_a_request_that_never_left_the_machine_releases_the_symbol_without_a_lookup`,
+`test_a_transient_gtt_failure_is_retried` → `test_a_gtt_that_was_never_created_is_retried`.
+
 ## v1.2 (2026-09-26)
 
 v1.1 went through the same adversarial review as v1.0, run on a frozen snapshot
@@ -7,7 +84,14 @@ v1.1 went through the same adversarial review as v1.0, run on a frozen snapshot
 skeptics then tried to refute each one. The 35 raw findings reduce to the 24
 defects below, because several reviewers independently found the same problem.
 Several are defects in v1.1's own fixes. Every behavior test added for v1.2
-fails on the v1.1 snapshot and passes here.
+fails on the v1.1 snapshot and passes here, except six controls that pin
+behavior v1.1 already had: `test_a_breakout_is_a_cross_so_consecutive_closes_above_fire_once`,
+`test_a_re_cross_after_falling_back_into_the_base_counts_again`,
+`test_paper_stop_gapped_through_fills_at_the_open_when_above_the_stop_limit`,
+`test_orchestrator_needs_the_listing_session_itself[listing0-True]`, and
+`test_malformed_yahoo_payloads_give_an_empty_frame[payload0]` and `[payload1]`.
+(Corrected in v1.3. This sentence first claimed no exceptions, and the shutdown
+pin could not detect its defect until v1.3 moved its fill past v1.1's drain.)
 
 Verdict: ✔ confirmed, ◐ confirmed with part of the claim overstated. All 35
 findings were reproduced by their skeptic; none was refuted. Severity is the

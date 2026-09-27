@@ -4,6 +4,7 @@ import threading
 from datetime import datetime, timedelta
 
 import pandas as pd
+import pytest
 
 import engine
 from conftest import ist, make_bars
@@ -268,7 +269,9 @@ def test_a_counter_going_backwards_is_rebaselined_not_reset_to_zero():
     a = adapter(started_at=ist(2026, 9, 25, 9, 0))
     assert a._traded_quantity(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0))) == (1_000_000, False)
     assert a._traded_quantity(cum_tick(100.0, 999_990, ist(2026, 9, 25, 10, 1))) == (0, True)   # v1.1: 999,990
-    assert a._traded_quantity(cum_tick(100.0, 1_000_500, ist(2026, 9, 25, 10, 2))) == (510, False)
+    # v1.2 adopted the glitch value as the baseline and re-counted the dip on the next print (510).
+    assert a._traded_quantity(cum_tick(100.0, 1_000_500, ist(2026, 9, 25, 10, 2))) == (0, True)
+    assert a._traded_quantity(cum_tick(100.0, 1_000_800, ist(2026, 9, 25, 10, 3))) == (300, False)
 
 
 def test_quote_updates_without_a_trade_do_not_create_bars():
@@ -358,3 +361,112 @@ def test_a_reconnect_marks_the_forming_bar_incomplete():
     a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 10, 0, 10)))
     a.mark_feed_reset(at=ist(2026, 9, 25, 10, 3))
     assert a.current_bars["SWIGGY"]["partial"] is True
+
+
+def test_a_feed_drop_discards_the_bar_it_cut_short_and_every_bar_until_the_reconnect():
+    # v1.2 only learned of an outage at the reconnect, so a bar cut short that closed before then was kept.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 10, 0, 10)))
+    a.mark_feed_down()                                                    # the websocket closed at ~10:01
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 3))
+    a.on_tick(tick(100.2, 10, ist(2026, 9, 25, 10, 6, 0)))               # queued before the close was seen
+    a.flush_due_bars(ist(2026, 9, 25, 10, 10, 3))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 12))
+    a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 10, 15, 5)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 20, 3))
+    df = a.market_state["SWIGGY"]
+    assert df[df.index >= pd.Timestamp(ist(2026, 9, 25))].index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 15))]
+
+
+def test_a_live_bar_closed_by_the_clock_needs_the_feed_alive_to_its_end():
+    """No tick in a bucket's tail is normal for an illiquid name; no message at all (heartbeats
+    included) means the feed may have missed trades, so that bar cannot be trusted."""
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), require_feed_liveness=True)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 59))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 10, 0, 10)))
+    a.note_feed_alive(at=ist(2026, 9, 25, 10, 3))                         # then silence
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 3))
+    a.on_tick(tick(100.2, 10, ist(2026, 9, 25, 10, 5, 10)))
+    a.note_feed_alive(at=ist(2026, 9, 25, 10, 10, 1))                     # heartbeats past the bucket's end
+    a.flush_due_bars(ist(2026, 9, 25, 10, 10, 3))
+    df = a.market_state["SWIGGY"]
+    assert df[df.index >= pd.Timestamp(ist(2026, 9, 25))].index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 5))]
+
+
+def test_a_failed_kite_backfill_leaves_the_bar_unevaluated(fast_sleep, caplog):
+    class FailingKite:
+        def instruments(self, exchange=None):
+            return [{"tradingsymbol": "SWIGGY", "instrument_token": 1234, "tick_size": 0.05}]
+
+        def historical_data(self, **kwargs):
+            raise ConnectionError("gateway timeout")
+
+    kite = engine.ZerodhaKiteAdapter("k", "t", kite=FailingKite())
+    history = pd.concat([session_history(24), make_bars([100.0] * 9, start=ist(2026, 9, 25, 9, 15))])
+
+    async def scenario():
+        await kite.boot()
+        alpha = RecordingAlpha()
+        a = engine.LiveTickAdapter({"SWIGGY": history}, alpha, asyncio.Queue(), asyncio.get_running_loop(),
+                                   started_at=ist(2026, 9, 25, 10, 2, 40), backfill=kite.backfill)   # as main() wires it
+        a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 10, 2, 45)))
+        a.on_tick(tick(100.6, 10, ist(2026, 9, 25, 10, 5, 1)))
+        a.on_tick(tick(100.7, 10, ist(2026, 9, 25, 10, 10, 1)))            # closes 10:05 -> hole at 10:00
+        await asyncio.gather(*a._backfills)
+        return alpha
+
+    alpha = asyncio.run(scenario())
+    assert alpha.evaluated == [] and "Back-fill of 10:00-10:05 failed" in caplog.text   # v1.2 evaluated it
+
+
+def test_a_rebaselining_print_after_a_reconnect_opens_no_bar():
+    # v1.2 opened a flat zero-volume bar on it, and depth updates kept that bar alive.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 0))
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 0, 5)))        # re-baselines only
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 6, 0)))        # depth update
+    a.on_tick(cum_tick(100.3, 500_100, ist(2026, 9, 25, 10, 7, 0)))        # a trade
+    a.flush_due_bars(ist(2026, 9, 25, 10, 20))
+    df = a.market_state["SWIGGY"]
+    today = df[df.index >= pd.Timestamp(ist(2026, 9, 25))]
+    assert today.index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 5))] and today["Volume"].tolist() == [100.0]
+
+
+class SessionClock(datetime):
+    """Wall clock inside Monday's session."""
+    FIXED = datetime(2026, 9, 28, 11, 0, tzinfo=engine.IST)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.FIXED.astimezone(tz) if tz else cls.FIXED.replace(tzinfo=None)
+
+
+class EveningClock(SessionClock):
+    FIXED = datetime(2026, 9, 28, 18, 0, tzinfo=engine.IST)
+
+
+def test_a_silent_websocket_during_the_session_stops_the_engine(monkeypatch):
+    # KiteTicker's ping loop never sends a ping, so a half-open socket stays "connected" forever.
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    a = adapter(history=session_history(24))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 10, 59, 30)))
+    a.note_feed_alive(at=SessionClock.FIXED - timedelta(seconds=20))
+    with pytest.raises(RuntimeError, match="no market data"):
+        asyncio.run(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01))
+    assert a.current_bars["SWIGGY"]["partial"] is True
+
+
+def test_the_feed_watchdog_tolerates_quiet_evenings_and_fresh_heartbeats(monkeypatch):
+    async def watch_briefly(adapter_):
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(engine._watch_feed(asyncio.Event(), adapter_, stall_after=15, check_every=0.01), 0.1)
+
+    monkeypatch.setattr(engine, "datetime", EveningClock)
+    evening = adapter(history=session_history(24))
+    evening.note_feed_alive(at=EveningClock.FIXED - timedelta(hours=2))
+    asyncio.run(watch_briefly(evening))                                   # the exchange is closed: silence is fine
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    busy = adapter(history=session_history(24))
+    busy.note_feed_alive(at=SessionClock.FIXED - timedelta(seconds=1))
+    asyncio.run(watch_briefly(busy))

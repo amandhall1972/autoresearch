@@ -1,13 +1,17 @@
 """The whole pipeline through the real CLI entry points."""
 import asyncio
 import logging
+import queue
 import signal
 import subprocess
 import sys
+import textwrap
+import threading
 import time
 import types
 import urllib.error
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -67,6 +71,16 @@ def test_kite_requires_the_real_listing_date():
 def test_malformed_arguments_exit_2(flag, value):
     proc = cli("--source", "csv", flag, value)
     assert proc.returncode == 2 and "error" in proc.stderr
+
+
+@pytest.mark.parametrize("flag,value", [("--run-seconds", "nan"), ("--run-seconds", "inf"),
+                                        ("--risk-per-trade", "-15000"), ("--max-position-value", "0"),
+                                        ("--rvol-threshold", "nan"), ("--risk-reward", "-3")])
+def test_numeric_arguments_must_be_finite_and_in_range(flag, value, capsys):
+    # v1.2: `--run-seconds nan` ran forever; negative risk settings ran, rejected every signal, and exited 0.
+    with pytest.raises(SystemExit) as stop:
+        engine.build_arg_parser().parse_args([flag, value])
+    assert stop.value.code == 2 and "error" in capsys.readouterr().err
 
 
 def test_kite_source_requires_credentials(monkeypatch):
@@ -138,7 +152,13 @@ class FixtureAsKite(engine.CsvReplayAdapter):
         return self.load(FIXTURE)
 
 
+class KiteDayClock(FarFuture):
+    """Wall clock pinned within Kite's 180-day lookback of the 2026-09-08 listing (a Saturday)."""
+    FIXED = datetime(2026, 9, 26, 12, 0, tzinfo=engine.IST)
+
+
 def kite_env(monkeypatch, feed):
+    monkeypatch.setattr(engine, "datetime", KiteDayClock)                # no time bomb once 2026-09-08 is > 180 days old
     monkeypatch.setenv("KITE_API_KEY", "key")
     monkeypatch.setenv("KITE_ACCESS_TOKEN", "token")
     monkeypatch.setattr(engine, "ZerodhaKiteAdapter", FixtureAsKite)
@@ -162,13 +182,111 @@ def test_a_dead_websocket_stops_the_engine_and_a_live_feed_never_runs_the_synthe
 
 
 def test_shutdown_waits_for_the_order_in_flight(monkeypatch, caplog):
-    """v1.1 cancelled the router 10 s into shutdown, stranding a live entry that can take 30 s to settle."""
+    """v1.1 cancelled the router 10 s into shutdown, stranding a live entry that can take 30 s to settle.
+
+    The fill lands ~10.5 s into the shutdown, after v1.1's fixed 10 s drain.
+    """
     caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
 
     class SlowFill(engine.PaperGateway):
         def __init__(self):
-            super().__init__(latency=3.0)                                 # dispatched at ~3.0 s, fills at ~6.0 s
+            super().__init__(latency=11.0)                                # dispatched at ~3 s, fills at ~14 s
 
     monkeypatch.setattr(engine, "PaperGateway", SlowFill)
     assert asyncio.run(engine.main(["--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "3.5"])) == 0
     assert "PAPER FILL" in caplog.text and "Fill SWIGGY: 2884 @ 289.83" in caplog.text
+
+
+# ---------------------------------------------------------------- signals, in a real interpreter
+class Child:
+    """engine.run(args) in a fresh interpreter after ``prelude``; stderr is read line by line."""
+
+    def __init__(self, prelude, *args):
+        code = "\n".join(["import sys", f"sys.path.insert(0, {str(Path(engine.__file__).parent)!r})", "import engine",
+                          textwrap.dedent(prelude), f"sys.exit(engine.run({list(args)!r}))"])
+        self.proc = subprocess.Popen([sys.executable, "-c", code], stderr=subprocess.PIPE, text=True)
+        self.lines, self.log = queue.Queue(), []
+        threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self):
+        for line in self.proc.stderr:
+            self.lines.put(line)
+        self.lines.put(None)
+
+    def wait_for(self, needle, timeout=30.0):
+        deadline = time.monotonic() + timeout
+        while (left := deadline - time.monotonic()) > 0:
+            try:
+                line = self.lines.get(timeout=left)
+            except queue.Empty:
+                break
+            if line is None:
+                break
+            self.log.append(line)
+            if needle in line:
+                return
+        self.proc.kill()
+        raise AssertionError(f"{needle!r} was never logged:\n{''.join(self.log)}")
+
+    def finish(self, timeout=60.0):
+        code = self.proc.wait(timeout=timeout)
+        while (line := self.lines.get(timeout=10)) is not None:
+            self.log.append(line)
+        return code, "".join(self.log)
+
+
+SLOW_PAPER = """
+class SlowPaper(engine.PaperGateway):
+    def __init__(self):
+        super().__init__(latency={latency})
+engine.PaperGateway = SlowPaper
+"""
+DEMO = ["--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "0"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
+@pytest.mark.parametrize("signame", ["SIGTERM", "SIGHUP"])
+def test_kill_and_hangup_settle_the_entry_in_flight_like_ctrl_c(signame):
+    # v1.2 handled only SIGINT: `kill`, `docker stop` or a closed terminal ended it mid-entry, unreported.
+    child = Child(SLOW_PAPER.format(latency=3.0), *DEMO)
+    child.wait_for("[OMS DISPATCH]")
+    child.proc.send_signal(getattr(signal, signame))
+    code, err = child.finish()
+    assert code == 128 + getattr(signal, signame), err
+    assert "shutting down in order" in err and "PAPER FILL" in err
+    assert "=== SYSTEM HALT ===" in err and "Open SWIGGY: 2884 @ 289.83" in err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
+def test_without_loop_signal_handlers_ctrl_c_still_settles_and_a_second_one_is_ignored():
+    # As on Windows: the loop cannot own signals. v1.2 relied on asyncio.run's handling, which on 3.10
+    # cancelled the entry in flight and on 3.11 lost the halt report to a second Ctrl-C.
+    prelude = SLOW_PAPER.format(latency=3.0) + """
+import asyncio
+def refuse(self, *args, **kwargs):
+    raise NotImplementedError
+asyncio.SelectorEventLoop.add_signal_handler = refuse
+"""
+    child = Child(prelude, *DEMO)
+    child.wait_for("[OMS DISPATCH]")
+    child.proc.send_signal(signal.SIGINT)
+    child.wait_for("shutting down in order")
+    child.proc.send_signal(signal.SIGINT)
+    code, err = child.finish()
+    assert code == 130, err
+    assert "shutdown already in progress" in err and "PAPER FILL" in err
+    assert "=== SYSTEM HALT ===" in err and "Open SWIGGY: 2884 @ 289.83" in err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
+def test_a_failed_shutdown_exits_1_even_when_a_signal_started_it():
+    # v1.2 returned 130 whenever Ctrl-C was pressed, hiding the failure from a supervisor keyed on exit 1.
+    prelude = SLOW_PAPER.format(latency=30.0) + """
+engine.ExecutionRouter.settle_timeout = property(lambda self: 0.5)
+"""
+    child = Child(prelude, *DEMO)
+    child.wait_for("[OMS DISPATCH]")
+    child.proc.send_signal(signal.SIGINT)
+    code, err = child.finish()
+    assert code == 1, err
+    assert "did not settle within" in err and "=== SYSTEM HALT ===" in err

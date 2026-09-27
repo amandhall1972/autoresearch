@@ -164,6 +164,22 @@ def test_kite_partial_history_failure_fails_closed_and_says_so(fast_sleep, caplo
     assert "attempt 3/3 failed" in caplog.text and "discarding 3 partial bars" in caplog.text
 
 
+@pytest.mark.parametrize("fails,symbol,error", [(True, "SWIGGY", ConnectionError), (False, "NOPE", LookupError)])
+def test_a_kite_backfill_raises_instead_of_returning_nothing(fast_sleep, fails, symbol, error):
+    # The live back-fill must not read "the fetch failed" as "nothing traded in the hole" (v1.2 did).
+    ad = engine.ZerodhaKiteAdapter("k", "t", kite=FakeKite(fail_after_first_chunk=fails))
+    asyncio.run(ad.boot())
+    end = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
+    assert asyncio.run(ad.fetch_historical_bars(symbol, end - timedelta(days=200), end)).empty   # history: fail soft
+    with pytest.raises(error):
+        asyncio.run(ad.backfill(symbol, end - timedelta(days=200), end))
+
+
+def test_sources_without_a_live_feed_refuse_to_backfill():
+    with pytest.raises(NotImplementedError):
+        asyncio.run(engine.CsvReplayAdapter({"SWIGGY": FIXTURE}).backfill("SWIGGY", ist(2026, 9, 8), ist(2026, 9, 9)))
+
+
 def test_kite_unknown_symbol_is_reported(caplog):
     ad = engine.ZerodhaKiteAdapter("k", "t", kite=FakeKite())
     asyncio.run(ad.boot())
@@ -353,6 +369,11 @@ def test_a_csv_that_looks_like_another_symbol_is_flagged(caplog):
 @pytest.mark.parametrize("payload", [
     [], {"chart": None}, {"chart": {"result": [None]}}, {"chart": {"result": [{"timestamp": [1], "indicators": {"quote": []}}]}},
     {"chart": {"result": [{"timestamp": [1, 2, 3], "indicators": {"quote": [{"close": [1.0, 2.0]}]}}]}},
+    # v1.2 raised on these four (TypeError, AttributeError, KeyError, DateParseError):
+    {"chart": {"result": [{"timestamp": 5, "indicators": {"quote": [{"close": [1.0]}]}}]}},
+    {"chart": {"result": [{"timestamp": [1], "indicators": [{"quote": [{"close": [1.0]}]}]}]}},
+    {"chart": {"result": [{"timestamp": [1], "indicators": {"quote": {"0": {"close": [1.0]}}}}]}},
+    {"chart": {"result": [{"timestamp": ["abc", 1e20], "indicators": {"quote": [{"close": [1.0, 2.0]}]}}]}},
 ])
 def test_malformed_yahoo_payloads_give_an_empty_frame(monkeypatch, fast_sleep, payload, caplog):
     monkeypatch.setattr(engine.urllib.request, "urlopen", lambda req, timeout: FakeResponse(json.dumps(payload).encode()))
@@ -395,3 +416,75 @@ def test_thirty_minute_bars_are_anchored_at_the_open(monkeypatch, fast_sleep):
     assert len(df) == 3                                                     # v1.1 kept none (hour-aligned grid)
     assert engine.bar_floor(ist(2026, 9, 25, 9, 50), 30) == ist(2026, 9, 25, 9, 45)
     assert engine.bar_floor(ist(2026, 9, 25, 9, 50), 5) == ist(2026, 9, 25, 9, 50)
+
+
+def test_a_bad_yahoo_timestamp_drops_only_its_own_row(monkeypatch, fast_sleep, caplog):
+    rows = [ist(2026, 9, 25, 9, 15), ist(2026, 9, 25, 9, 20)]
+    payload = yahoo_payload([int(t.timestamp()) for t in rows], [100.0, 101.0])
+    payload["chart"]["result"][0]["timestamp"][0] = "abc"
+    monkeypatch.setattr(engine.urllib.request, "urlopen", lambda req, timeout: FakeResponse(json.dumps(payload).encode()))
+    df = asyncio.run(engine.PublicExchangeAdapter().fetch_historical_bars("SWIGGY", ist(2026, 9, 24), ist(2026, 9, 25, 16)))
+    assert df.index.tolist() == [pd.Timestamp(rows[1])] and "were not epoch seconds" in caplog.text
+
+
+@pytest.mark.parametrize("interval,minutes", [("30m", 30), ("60m", 60)])
+def test_the_sessions_last_bar_is_complete_at_the_close(monkeypatch, fast_sleep, interval, minutes):
+    # 375 minutes is not a multiple of 30 or 60: the 15:15 bar ends at 15:30, not 15:45 / 16:15.
+    starts = pd.date_range(ist(2026, 9, 25, 9, 15), ist(2026, 9, 25, 15, 15), freq=f"{minutes}min")
+    payload = yahoo_payload([int(t.timestamp()) for t in starts], [100.0 + i for i in range(len(starts))])
+    monkeypatch.setattr(engine.urllib.request, "urlopen", lambda req, timeout: FakeResponse(json.dumps(payload).encode()))
+    df = asyncio.run(engine.PublicExchangeAdapter().fetch_historical_bars(
+        "SWIGGY", ist(2026, 9, 24), ist(2026, 9, 25, 15, 40), interval=interval))
+    assert df.index[-1] == pd.Timestamp(ist(2026, 9, 25, 15, 15)) and len(df) == len(starts)   # v1.2 dropped it
+    forming = engine.drop_incomplete_bars(df, ist(2026, 9, 25, 15, 29), minutes)
+    assert forming.index[-1] < pd.Timestamp(ist(2026, 9, 25, 15, 15))    # still forming before the close
+
+
+def test_a_csv_whose_name_merely_starts_with_the_symbol_is_flagged(tmp_path, caplog):
+    other = tmp_path / "NTPCGREEN_5m_2026-09-08_2026-09-25.csv"
+    other.write_bytes(FIXTURE.read_bytes())
+    asyncio.run(engine.CsvReplayAdapter({"NTPC": other}).fetch_historical_bars("NTPC", ist(2026, 9, 1), ist(2026, 9, 30)))
+    assert "does not look like NTPC data" in caplog.text                  # v1.2 used a prefix match
+    caplog.clear()
+    asyncio.run(engine.CsvReplayAdapter({"SWIGGY": FIXTURE}).fetch_historical_bars("SWIGGY", ist(2026, 9, 1), ist(2026, 9, 30)))
+    assert "does not look like" not in caplog.text
+
+
+class ClockAt(datetime):
+    """Wall clock pinned to 2026-09-28 12:00 IST, the middle of a session."""
+    FIXED = datetime(2026, 9, 28, 12, 0, tzinfo=engine.IST)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.FIXED.astimezone(tz) if tz else cls.FIXED.replace(tzinfo=None)
+
+
+def test_a_lookback_clamp_never_starts_inside_the_listing_session(caplog):
+    # 18 days before 2026-09-26 12:00 is 2026-09-08 12:00, mid-way through the listing session.
+    # v1.2 fetched from there and accepted a history missing the listing morning as "anchored".
+    ad = engine.CsvReplayAdapter({"SWIGGY": FIXTURE})
+    orch = engine.ProductionOrchestrator({"SWIGGY": ist(2026, 9, 8)}, ad, as_of=ist(2026, 9, 26, 12, 0), max_lookback_days=18)
+    assert asyncio.run(orch.build_the_ground()) is False
+    assert "after the 2026-09-08 listing" in caplog.text and "symbol excluded" in caplog.text
+
+
+def test_yahoos_window_clamp_snaps_to_the_next_midnight(monkeypatch, fast_sleep):
+    seen = {}
+
+    def fake_urlopen(req, timeout):
+        seen["url"] = req.full_url
+        return FakeResponse(json.dumps({"chart": {"result": None}}).encode())
+
+    monkeypatch.setattr(engine.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(engine, "datetime", ClockAt)
+    asyncio.run(engine.PublicExchangeAdapter().fetch_historical_bars("NEWIPO", ist(2026, 7, 31), ClockAt.FIXED))
+    assert f"period1={int(ist(2026, 8, 1).timestamp())}&" in seen["url"]  # v1.2: 2026-07-31 12:00, mid-session
+
+
+@pytest.mark.parametrize("zone", ["America/New_York", "Asia/Tokyo"])
+def test_a_listing_date_means_its_own_calendar_date_in_any_zone(zone):
+    ad = engine.CsvReplayAdapter({"SWIGGY": FIXTURE})
+    listing = datetime(2026, 9, 8, tzinfo=zoneinfo.ZoneInfo(zone))
+    orch = engine.ProductionOrchestrator({"SWIGGY": listing}, ad, as_of=ist(2026, 9, 26))
+    assert asyncio.run(orch.build_the_ground())                          # v1.2 excluded the Tokyo date
+    assert orch.market_state["SWIGGY"].index[0] == pd.Timestamp(ist(2026, 9, 8, 9, 15))   # v1.2 (New York): 09:30

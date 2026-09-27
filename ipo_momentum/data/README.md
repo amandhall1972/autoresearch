@@ -30,8 +30,9 @@ edited by hand. The 145 bars present in both responses matched on every field
   15:20 and 15:25 bars are absent (sessions have 72–73 bars instead of 75).
 * 5 bars carry `volume == 0` despite a non-zero range:
   2026-09-08 09:20, 2026-09-09 09:55, 2026-09-21 09:45 and 09:50, 2026-09-25 15:15.
-  The engine treats them like any other bar. They slightly depress the
-  volume-weighted and volume-average indicators around those times.
+  The engine leaves them out of the RVOL baseline, and with zero volume they
+  carry no weight in AVWAP. Their prices still count in High/Low, ATR and the
+  base.
 
 These artifacts are why this file is a **test and demo fixture**. Use it to
 exercise the pipeline deterministically, not as a research-grade dataset.
