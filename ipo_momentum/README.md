@@ -467,13 +467,14 @@ uv run pytest            # or: pytest (from this directory)
 
 The 193 tests run offline in about 65 s. The slowest are real CLI runs that
 deliver SIGINT, SIGTERM and SIGHUP mid-entry, and a shutdown that must outlast
-v1.1's 10 s drain. They pass in five configurations:
+v1.1's 10 s drain. They pass in seven configurations:
 - Python 3.10 with pandas 2.2 and numpy 1.26
 - Python 3.10 with pandas 2.3 and numpy 2.2 (the `uv.lock` resolution)
 - Python 3.11 with pandas 3.0 and numpy 2.4
-- the whole suite with the wall clock shifted to 2027
-- the whole suite with the wall clock shifted to inside the window where v1.1's
-  demo would have broken
+- the whole suite with the wall clock shifted to 2027 and to 2031
+- the whole suite with the wall clock shifted to a Saturday
+- the whole suite with the wall clock shifted to inside a session, in the
+  window where v1.1's demo would have broken
 
 Pandas `FutureWarning`s raised from engine code fail the suite.
 
