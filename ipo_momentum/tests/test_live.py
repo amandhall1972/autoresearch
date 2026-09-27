@@ -787,7 +787,7 @@ def test_a_live_feed_runs_on_a_steady_clock(monkeypatch):
     from test_end_to_end import kite_env
     kite_env(monkeypatch, feed)
     asyncio.run(engine.main(["--source", "kite", "--listing-date", "2026-09-08", "--live-feed", "--run-seconds", "30"]))
-    assert clocks == ["steady_clock.<locals>.<lambda>"]
+    assert clocks == ["steady_clock.<locals>.now"]
 
 
 def test_one_late_packet_does_not_move_the_router_clock():
@@ -969,11 +969,17 @@ def test_a_late_print_that_slips_past_the_rule_is_not_credited_with_the_day():
 
 
 @pytest.mark.skipif(not hasattr(time, "CLOCK_BOOTTIME"), reason="Linux only")
-def test_the_steady_clock_keeps_counting_through_a_suspend():
+def test_the_steady_clock_keeps_counting_through_a_suspend(monkeypatch):
     # CLOCK_MONOTONIC stops while the host is suspended: after a laptop sleep, v1.6's live clock stayed
-    # behind by the sleep, every tick was dropped as far ahead and the run went on trading nothing.
-    assert engine.steady_clock.__defaults__[1] is engine._uptime
-    assert abs(engine._uptime() - time.clock_gettime(time.CLOCK_BOOTTIME)) < 1.0
+    # behind by the sleep, every tick was dropped as far ahead and the run went on trading nothing. A host
+    # that never slept cannot tell the clocks apart, so the suspend is simulated.
+    slept, real = [0.0], time.clock_gettime
+    monkeypatch.setattr(time, "clock_gettime",
+                        lambda which: real(which) + (slept[0] if which == time.CLOCK_BOOTTIME else 0.0))
+    clock = engine.steady_clock()
+    before = clock()
+    slept[0] = 3600.0                                                     # an hour asleep
+    assert (clock() - before).total_seconds() >= 3600
 
 
 def test_a_run_whose_every_tick_is_far_ahead_stops_instead_of_running_blind():
@@ -982,7 +988,7 @@ def test_a_run_whose_every_tick_is_far_ahead_stops_instead_of_running_blind():
         a.on_tick(stamped(100.0, 1_000_000 + second, ist(2026, 9, 25, 10, 1, second), 40.0))
     assert a.blind_for == 20.0
     with pytest.raises(RuntimeError, match="stamped more than 30s ahead of this run's clock"):
-        asyncio.run(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01))
+        asyncio.run(asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 2))
 
 
 def test_one_corrupt_stamp_does_not_stop_the_run(monkeypatch):
@@ -1031,3 +1037,139 @@ def test_a_tick_handled_after_the_feed_went_down_is_not_a_crash():
     a.mark_feed_down()
     a.on_tick(stamped(101.0, 5_000, ist(2026, 9, 25, 10, 0, 30), 19.7))
     assert "SWIGGY" not in a.current_bars or a.current_bars["SWIGGY"]["partial"] is True
+
+
+# ---------------------------------------------------------------- round 8: edges of the 30 s rule
+def test_a_host_straddling_the_30s_limit_stops_instead_of_discarding_every_bar():
+    # Whole-second stamps put a host ~30.3 s behind on both sides of the limit. v1.7 discarded every bar that
+    # held a dropped print while the prints that passed reset the blind run: a session of no bars, no stop.
+    now = ist(2026, 9, 25, 10, 4, 20)
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), clock=lambda: now)
+    for i, ahead in enumerate([29.8, 30.2, 29.9, 30.1, 29.7]):
+        a.on_tick(stamped(100.0, 1_000_000 + 1_000 * i, ist(2026, 9, 25, 10, 4, 5 * i), ahead))
+    assert a.blind_for == 0.0 and a.dropped_ticks == 2
+    with pytest.raises(RuntimeError, match="within 1.5s of the 30s limit"):
+        asyncio.run(asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 2))
+
+
+def test_a_host_just_inside_the_limit_is_not_stopped_by_one_corrupt_stamp(monkeypatch):
+    # Only drops just over the limit mean the stamps straddle it; a far-off corrupt stamp does not.
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 28, 9, 0))
+    for second in (0, 10, 20):
+        a.on_tick(stamped(100.0, 1_000 + second, ist(2026, 9, 28, 10, 59, second), 29.5))   # 29.5 s behind: fine
+    a.on_tick(stamped(100.0, 2_000, ist(2026, 9, 28, 11, 9, 30), 600.0))                    # one corrupt stamp
+    a.note_feed_alive(at=SessionClock.FIXED)
+
+    async def watch_briefly():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 0.1)
+
+    asyncio.run(watch_briefly())
+
+
+def test_on_a_clock_that_misses_a_suspend_a_signal_is_aged_by_the_time_it_missed():
+    # Where the monotonic clock stops during a suspend (not Linux), v1.7's router judged a 20-minute-old signal
+    # on the frozen clock as 1 s old and traded it before the watchdog stopped the run.
+    wall, mono = [ist(2026, 9, 28, 9, 25, 1)], [0.0]
+    clock = engine.steady_clock(wall=lambda: wall[0], monotonic=lambda: mono[0], counts_suspend=False)
+    ticker = types.SimpleNamespace(clock=clock, clock_skew=0.0)
+    r = engine.ExecutionRouter(asyncio.Queue(), risk_per_trade=15_000.0, gateway=engine.PaperGateway(latency=0),
+                               clock=engine.exchange_clock(lambda: ticker))
+    signal = engine.Signal("SWIGGY", 289.83, 286.2, 300.72, "IPO_BASE_BREAKOUT", ist(2026, 9, 28, 9, 20))
+    assert r.signal_problem(signal) is None                              # 1 s after its bar closed
+    wall[0] += timedelta(seconds=1200)                                    # asleep: only the wall clock moved
+    assert "it is stale" in r.signal_problem(signal)
+
+
+def test_on_a_clock_that_counts_a_suspend_the_wall_clock_is_never_consulted():
+    wall, mono = [ist(2026, 9, 28, 9, 25, 1)], [0.0]
+    clock = engine.steady_clock(wall=lambda: wall[0], monotonic=lambda: mono[0])
+    wall[0] += timedelta(seconds=1200)                                    # an NTP step, not a suspend
+    assert getattr(clock, "wall_gain", lambda: 0.0)() == 0.0              # only a clock that misses suspends asks
+    if hasattr(time, "CLOCK_BOOTTIME"):
+        assert getattr(engine.steady_clock(), "wall_gain", lambda: 0.0)() == 0.0
+
+
+def test_a_corrupt_stamp_before_the_open_does_not_cost_the_opening_bar():
+    # Off-session prints never move the counter, yet v1.7 re-baselined it for a pre-open drop, so the day's
+    # first print took the blind path and the 09:15 bar (auction volume included) was discarded.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 8, 50))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 8, 50))
+    a.on_tick(stamped(100.0, 900_000, ist(2026, 9, 25, 9, 10), 600.0))   # received 09:00: dropped
+    a.on_tick(stamped(100.5, 950_000, ist(2026, 9, 25, 9, 15, 5), 0.3))
+    a.on_tick(stamped(100.6, 951_000, ist(2026, 9, 25, 9, 20, 1), 0.3))
+    assert a.market_state["SWIGGY"].loc[pd.Timestamp(ist(2026, 9, 25, 9, 15)), "Volume"] == 950_000
+
+
+@pytest.mark.parametrize("corrupt_first", [True, False])
+def test_a_zeroed_packet_is_never_adopted_as_a_blind_baseline(corrupt_first):
+    # A zero high-water mark let a zeroed packet become the baseline after a late join (or a far-ahead drop),
+    # and the next print was credited with the whole day: a fake 42x RVOL.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 11, 0))                       # a late join
+    if corrupt_first:
+        a.on_tick(stamped(100.0, 4_200_000, ist(2026, 9, 25, 11, 1), 600.0))
+    a.on_tick(stamped(100.0, 0, ist(2026, 9, 25, 11, 4, 59), 0.3))       # a zeroed packet
+    a.on_tick(stamped(100.2, 4_203_000, ist(2026, 9, 25, 11, 5, 1), 0.3))
+    a.on_tick(stamped(100.3, 4_204_000, ist(2026, 9, 25, 11, 10, 1), 0.3))
+    assert pd.Timestamp(ist(2026, 9, 25, 11, 5)) not in a.market_state["SWIGGY"].index
+
+
+def test_a_host_just_past_the_limit_still_loses_the_opening_bar_whose_first_print_was_dropped():
+    # A host 30.4 s behind receives the 09:15:00 print at 09:14:29.6 by its own clock: dropped. The bar it began
+    # must not be kept from the prints that got through.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 8, 50))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 8, 50))
+    a.on_tick(stamped(99.0, 900_000, ist(2026, 9, 25, 9, 15), 30.4))      # the opening print: dropped
+    a.on_tick(stamped(101.0, 950_000, ist(2026, 9, 25, 9, 15, 5), 29.8))
+    a.on_tick(stamped(101.2, 951_000, ist(2026, 9, 25, 9, 20, 1), 29.8))
+    assert pd.Timestamp(ist(2026, 9, 25, 9, 15)) not in a.market_state["SWIGGY"].index
+
+
+def test_a_corrupt_stamp_dated_another_day_does_not_credit_the_day_to_one_bar():
+    # A corrupt stamp can carry any date, so the counter is re-baselined under the day the print was received.
+    # Keyed to the stamp's date, the next genuine print looked like the day's first while the feed had watched
+    # since the open, and one bar was credited with the whole day's counter (a fake 70x RVOL).
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 7_000_000, ist(2026, 9, 25, 10, 0, 5), 0.3))
+    a.on_tick(stamped(100.1, 7_000_500, ist(2026, 9, 25, 10, 2), 0.3))
+    corrupt = stamped(100.0, 7_001_000, ist(2026, 9, 26, 10, 0, 30), 0.0)
+    corrupt.received = ist(2026, 9, 25, 10, 0, 30)                        # stamped tomorrow, received today
+    a.on_tick(corrupt)
+    for minute, cum in [(6, 7_005_000), (7, 7_010_000), (11, 7_011_000)]:
+        a.on_tick(stamped(100.2, cum, ist(2026, 9, 25, 10, minute), 0.3))
+    today = a.market_state["SWIGGY"][a.market_state["SWIGGY"].index >= pd.Timestamp(ist(2026, 9, 25, 9, 15))]
+    assert (today["Volume"].max() if len(today) else 0) <= 100_000
+    assert all(bar["partial"] or bar["Volume"] <= 100_000 for bar in a.current_bars.values())
+
+
+def test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen(monkeypatch):
+    # Latency 0.3 s, then 1.5 s at the bucket boundary: a zeroed print stamped only by the lag of the last
+    # minute landed in the new bucket, closed the 10:00 bar at once and its last genuine print was dropped.
+    monkeypatch.setattr(engine, "datetime", WallClock)
+
+    def receive(a, packet, at):
+        WallClock.FIXED = at
+        a.broker_on_ticks(None, [packet])
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"},
+                                   started_at=ist(2026, 9, 25, 9, 0))
+        receive(a, kite_packet(1_000, ist(2026, 9, 25, 9, 59, 50)), ist(2026, 9, 25, 9, 59, 50, 300000))
+        receive(a, kite_packet(21_000, ist(2026, 9, 25, 10, 1), 100.0), ist(2026, 9, 25, 10, 1, 0, 300000))
+        zeroed = {"instrument_token": 1234, "last_price": 100.0, "volume_traded": 21_100,
+                  "exchange_timestamp": datetime.fromtimestamp(0)}  # noqa: DTZ006 (as KiteTicker)
+        receive(a, zeroed, ist(2026, 9, 25, 10, 5, 1))                    # sent 10:04:59.5, 1.5 s late
+        receive(a, kite_packet(31_100, ist(2026, 9, 25, 10, 4, 59), 95.0), ist(2026, 9, 25, 10, 5, 1, 100000))
+        await asyncio.sleep(0)
+        while not a.tick_queue.empty():
+            a.on_tick(a.tick_queue.get_nowait())
+        return a
+
+    a = asyncio.run(scenario())
+    bar = a.current_bars["SWIGGY"]
+    assert bar["timestamp"] == ist(2026, 9, 25, 10, 0) and bar["Low"] == 95.0 and a.dropped_ticks == 0

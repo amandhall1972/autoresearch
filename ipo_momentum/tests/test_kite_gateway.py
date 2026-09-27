@@ -749,3 +749,27 @@ def test_an_outage_after_an_ambiguous_attempt_whose_gtt_never_lands_still_arms_o
     gw = fast_gateway(kite, cancel_grace=0.3, poll_interval=0.01)
     fill = asyncio.run(gw.execute(kite_plan()))
     assert fill.exit_order_id == "902" and [g["id"] for g in kite.created_gtts] == [902] and gw.alerts == []
+
+
+def test_a_permanent_error_while_rechecking_the_book_ends_the_loop_and_is_named():
+    # v1.7 kept reading a book that answered 403 (an expired session) until the window ended, then blamed
+    # the earlier refused connection in the alert.
+    refused = refused_connection()
+    token = KE.TokenException("Incorrect `api_key` or `access_token`.", code=403)
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Gateway timed out", code=504), refused, token],
+                    gtt_book_fail=None)
+    reads = {"n": 0}
+    original = kite._request
+
+    def request(route, method, *args, **kwargs):
+        if route == "gtt" and kite.gtt_places >= 2:                       # the session died after the blip
+            reads["n"] += 1
+            raise token
+        return original(route, method, *args, **kwargs)
+
+    kite._request = request
+    gw = fast_gateway(kite, cancel_grace=1.0, poll_interval=0.05)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id is None and reads["n"] == 1 and kite.gtt_places == 2
+    assert "GTT STATE UNKNOWN" in gw.alerts[-1] and "TokenException" in gw.alerts[-1]

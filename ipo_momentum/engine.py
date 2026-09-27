@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.7)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.8)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -171,14 +171,25 @@ except (AttributeError, OSError):
     _uptime = time.monotonic            # elsewhere a suspend is caught by the watchdog (every tick far ahead)
 
 
-def steady_clock(wall: Optional[Callable[[], datetime]] = None,
-                 monotonic: Callable[[], float] = _uptime) -> Callable[[], datetime]:
+def steady_clock(wall: Optional[Callable[[], datetime]] = None, monotonic: Callable[[], float] = _uptime,
+                 counts_suspend: Optional[bool] = None) -> Callable[[], datetime]:
     """The wall clock as read now, advanced by a monotonic clock from then on, so it never steps. A live
     feed stamps and judges everything with it: an NTP correction mid-session (a step of the host clock)
     then cannot shift feed time, liveness or signal ages. Any offset it started with is measured as
     clock skew, like any other. On Linux it keeps counting through a suspend (CLOCK_BOOTTIME)."""
-    start, ticks = to_ist((wall or (lambda: datetime.now(IST)))()), monotonic()
-    return lambda: start + timedelta(seconds=monotonic() - ticks)
+    read_wall = wall or (lambda: datetime.now(IST))
+    start, ticks = to_ist(read_wall()), monotonic()
+
+    def now() -> datetime:
+        return start + timedelta(seconds=monotonic() - ticks)
+
+    # Where the monotonic clock stops during a suspend (not Linux), the wall clock's lead over this clock is
+    # time the run did not see. The router adds it to signal ages, which can only refuse more signals.
+    if counts_suspend is None:
+        counts_suspend = monotonic is not time.monotonic
+    now.wall_gain = (lambda: 0.0) if counts_suspend else \
+        (lambda: max(0.0, (to_ist(read_wall()) - now()).total_seconds()))
+    return now
 
 
 def next_session_open(ts: datetime) -> datetime:
@@ -796,6 +807,7 @@ class LiveTickAdapter:
         self._lag_warned: Optional[datetime] = None
         self._ahead_warned: Optional[datetime] = None
         self._ahead_run: Optional[Tuple[datetime, datetime]] = None  # first and last far-ahead drop in a row
+        self._ahead_last: Optional[datetime] = None                  # the latest drop just over the limit
         self._last_update: Dict[str, Tuple[int, datetime]] = {}      # symbol -> (feed epoch, newest exchange time)
         self._glitch_warned: set = set()                             # (symbol, day) already reported
         # A bucket in which the volume counter was re-baselined lost its head to the baseline.
@@ -814,9 +826,10 @@ class LiveTickAdapter:
         ts = t.get('exchange_timestamp') or t.get('timestamp')
         ts = to_ist(ts) if ts is not None else None
         if ts is None or ts.year < 2000:
-            # Feed time, as bars are closed: this errs early, so such a print can never cut a bar short
-            # (a late one is dropped and its shares carry forward). A float read is thread-safe.
-            ts = self.clock() - timedelta(seconds=self.feed_lag)
+            # Feed time, as bars are closed, with the bar clock's own 2 s grace: such a print cannot close a bar
+            # before the bar clock would, even if latency has just risen (it errs early: a late one is dropped and
+            # its shares carry forward). A float read is thread-safe.
+            ts = self.clock() - timedelta(seconds=self.feed_lag + 2)
         cumulative = t.get('volume_traded')
         volume = t.get('last_traded_quantity', t.get('volume', 0)) if cumulative is None else 0
         return Tick(symbol=symbol, price=float(price), volume=int(volume or 0), timestamp=ts,
@@ -925,6 +938,9 @@ class LiveTickAdapter:
             return cum, False
         # The new baseline also swallowed whatever traded earlier in this print's bucket: that bar is blind.
         self._blind_bucket[tick.symbol] = bar_floor(tick.timestamp, self.bar_minutes)
+        if cum == 0:
+            # A zeroed packet is no baseline (the day has traded): the next print re-baselines again.
+            self._cum_volume[tick.symbol] = (day, 0, -1)
         return 0, True
 
     def _watching_since(self, tick: Optional[Tick] = None) -> datetime:
@@ -963,11 +979,17 @@ class LiveTickAdapter:
             # through and no later bar is credited with the dropped shares.
             self.dropped_ticks += 1
             self._ahead_run = (self._ahead_run[0] if self._ahead_run else tick.received, tick.received)
+            if ahead < self.max_stamp_ahead + 2:                     # just over: whole-second stamps straddle it
+                self._ahead_last = tick.received
             if (bar := self.current_bars.get(sym)) is not None:
                 bar['partial'] = True
             counter, day = self._cum_volume.get(sym), tick.received.date()    # the stamp's own date is not trusted
-            self._cum_volume[sym] = (counter[0], counter[1], -1) if counter is not None and counter[0] == day \
-                else (day, 0, -1)
+            # Only a drop that could hold session shares re-baselines (pre-open prints never count). The margin is
+            # twice the limit: a host just past it receives the opening print well before 09:15 by its own clock.
+            open_at = datetime.combine(day, SESSION_OPEN, tzinfo=IST) - timedelta(seconds=2 * self.max_stamp_ahead)
+            if tick.received >= open_at:
+                self._cum_volume[sym] = (counter[0], counter[1], -1) if counter is not None and counter[0] == day \
+                    else (day, 0, -1)
             if self._ahead_warned is None or abs(tick.received - self._ahead_warned) >= timedelta(seconds=60):
                 self._ahead_warned = tick.received
                 logger.critical(f"[{sym}] Tick stamped {ahead:.0f}s ahead of the host clock dropped: a corrupt "
@@ -1449,7 +1471,8 @@ class KiteOrderGateway(OrderGateway):
                     gtts = await asyncio.to_thread(k.get_gtts)
                 except Exception as read_error:
                     logger.warning(f"[{sym}] GTT book read failed ({read_error!r}); not placing until it can be read.")
-                    if time.monotonic() >= never_sent_until:
+                    if is_permanent_error(read_error) or time.monotonic() >= never_sent_until:
+                        error = read_error                     # the alert names what ended the loop
                         break
                     await asyncio.sleep(self.poll_interval)
                     continue
@@ -1670,6 +1693,7 @@ class ExecutionRouter:
         age = to_ist(self.clock()) - bar_close
         if age < -timedelta(seconds=5):
             return f"its {to_ist(signal.bar_time):%Y-%m-%d %H:%M} bar has not closed yet"
+        age += timedelta(seconds=getattr(self.clock, "wall_gain", lambda: 0.0)())   # a suspend the clock missed
         if self.max_signal_age is not None and age > self.max_signal_age:
             return f"it is stale (the {to_ist(signal.bar_time):%Y-%m-%d %H:%M} bar closed {age.total_seconds():.0f}s ago)"
         return None
@@ -1861,6 +1885,15 @@ async def _watch_feed(feed_dead: asyncio.Event, tick_adapter: Optional[LiveTickA
             raise RuntimeError(f"every tick for {tick_adapter.blind_for:.0f}s was stamped more than "
                                f"{tick_adapter.max_stamp_ahead:.0f}s ahead of this run's clock (the host clock runs "
                                f"far behind, or the host was suspended); restart once the time sync is fixed")
+        last_drop, skew = tick_adapter._ahead_last, tick_adapter.clock_skew
+        if last_drop is not None and (clock() - last_drop).total_seconds() < 60 \
+                and skew < -(tick_adapter.max_stamp_ahead - 1.5):
+            # Whole-second stamps straddle the limit: some prints are dropped, each drop discards its bar, and the
+            # rest keep the run "alive" without a single usable bar. The clock is as untrustworthy as far behind.
+            tick_adapter.mark_feed_down()
+            raise RuntimeError(f"the host clock runs {-skew:.1f}s behind the exchange, within 1.5s of the "
+                               f"{tick_adapter.max_stamp_ahead:.0f}s limit, and prints keep being dropped; restart once "
+                               f"the time sync is fixed")
         now = clock()
         last = tick_adapter.last_alive or started
         in_session = now.weekday() < 5 and SESSION_OPEN <= now.time() < SESSION_CLOSE
@@ -1941,6 +1974,7 @@ def exchange_clock(get_ticker: Callable[[], "LiveTickAdapter"]) -> Callable[[], 
     def now() -> datetime:
         ticker = get_ticker()
         return ticker.clock() - timedelta(seconds=ticker.clock_skew)
+    now.wall_gain = lambda: getattr(get_ticker().clock, "wall_gain", lambda: 0.0)()
     return now
 
 STOP_SIGNALS = [s for s in (getattr(signal, n, None) for n in ("SIGINT", "SIGTERM", "SIGHUP")) if s is not None]
@@ -1964,7 +1998,8 @@ class _StopRoutes:
     * Stock asyncio exposes its loop callbacks, so the host's own ``loop.add_signal_handler`` callback
       is re-registered afterwards. Whatever the host set while engines ran (a loop callback, a plain
       handler, SIG_IGN) is what is handed back, and an engine that starts after such a change takes
-      the signal back for its own run.
+      the signal back for its own run (one the host set to SIG_IGN stays ignored: the engine joins and is
+      reached once the host restores it).
     * uvloop's callbacks cannot be read back. A host callback it held is lost with a warning, and the
       signal is back at its default: never left routed to a loop entry that no longer exists.
     * A loop that cannot own signals (Windows) gets a plain handler that hands the signal over
@@ -1997,7 +2032,7 @@ class _StopRoutes:
             return None
         handlers = getattr(loop, "_signal_handlers", None)
         route = {'loop': loop, 'callbacks': [], 'previous': previous, 'handler': None, 'installed': None,
-                 'handlers': handlers if isinstance(handlers, dict) else None,
+                 'lost': False, 'handlers': handlers if isinstance(handlers, dict) else None,
                  'prior': handlers.get(signum) if isinstance(handlers, dict) else None}
         try:
             loop.add_signal_handler(signum, self._dispatch, signum)
@@ -2024,11 +2059,18 @@ class _StopRoutes:
             if route is None or not self._owned(route, signum):
                 # New, or the host took it while engines ran: (re)take it. What the host set is handed back.
                 fresh = self._take(loop, signum)
-                if fresh is None:
+                if fresh is None and route is None:
                     continue
-                if route is not None:
-                    fresh['callbacks'] = route['callbacks']
-                self.routes[signum] = route = fresh
+                if fresh is not None:
+                    if route is not None:
+                        # Running engines carry over; one held after main() returned does not.
+                        fresh['callbacks'] = [c for c in route['callbacks'] if not getattr(c, 'held', False)]
+                        if fresh['prior'] is not None and fresh['prior']._callback == self._dispatch:
+                            fresh['prior'] = route['prior']      # only the process-level handler was changed
+                        fresh['lost'] = route['lost'] or (route['handlers'] is None and
+                                                          getattr(route['previous'], "__self__", None) is loop)
+                    self.routes[signum] = route = fresh
+                # else ignored for now (SIG_IGN set mid-run): join, so a hand-back or a later re-take reaches us
             route['callbacks'].append(callback)
             hooked.append(signum)
         return hooked
@@ -2057,18 +2099,32 @@ class _StopRoutes:
             elif current is not route['installed'] and getattr(current, "__self__", None) is loop:
                 continue                                      # uvloop: the host re-registered it
             prior = route['prior']
-            if prior is not None:                             # re-armed with its wakeup fd
-                loop.add_signal_handler(signum, prior._callback, *prior._args)
+            unreadable = handlers is None and getattr(previous, "__self__", None) is loop   # uvloop
+            lost = unreadable or route['lost']
+            if current is not route['installed'] and handlers is not None:
+                # asyncio, and the host set a plain handler (or SIG_IGN) mid-run: only our table entry is under
+                # it, so that is all that changes. The handler stays exactly as set, flags included.
+                if prior is not None:
+                    handlers[signum] = prior
+                else:
+                    del handlers[signum]
+                    if not handlers:
+                        signal.set_wakeup_fd(-1)
             else:
-                loop.remove_signal_handler(signum)
-            lost = handlers is None and getattr(previous, "__self__", None) is loop   # uvloop: unreadable
-            if current is not route['installed']:             # the host set a plain handler (or SIG_IGN) mid-run
-                if current is not None:
-                    signal.signal(signum, current)
-            elif not lost and previous is not None and previous is not signal.getsignal(signum):
-                signal.signal(signum, previous)               # a live plain handler beside a loop entry
+                if prior is not None:                         # re-armed with its wakeup fd
+                    loop.add_signal_handler(signum, prior._callback, *prior._args)
+                else:
+                    loop.remove_signal_handler(signum)
+                if current is not route['installed']:
+                    # uvloop: its table cannot be read, so our entry is removed and the host's mid-run handler
+                    # put back (a stale entry would make a later loop.remove_signal_handler reset it).
+                    if current is not None:
+                        signal.signal(signum, current)
+                elif not unreadable and previous is not None and previous is not signal.getsignal(signum):
+                    signal.signal(signum, previous)           # a live plain handler beside a loop entry
             if lost:
-                where = "back at its default" if current is route['installed'] else "left as the host set it mid-run"
+                where = "back at its default" if current is route['installed'] and unreadable else \
+                    "left as the host set it mid-run"
                 logger.warning(f"Signal {signum}: the host's own {type(loop).__name__} callback for it cannot be "
                                f"read back, so the signal is {where}. Re-register it after main().")
 
@@ -2220,7 +2276,9 @@ async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> 
             await gateway.wait_inflight()
         return _halt_report(oms, gateway, ticker, exit_code, stop_signal)
     finally:
-        if not hold_signals:
+        if hold_signals:
+            on_stop_signal.held = True        # still routed; dropped once the host takes the signal back
+        else:
             _STOP_ROUTES.unhook(loop, on_stop_signal, hooked)
 
 def _halt_report(oms: "ExecutionRouter", gateway: OrderGateway, ticker: LiveTickAdapter, exit_code: int,

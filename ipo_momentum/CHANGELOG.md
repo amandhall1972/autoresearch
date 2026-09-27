@@ -1,5 +1,87 @@
 # Changelog
 
+## v1.8 (2026-09-27)
+
+v1.7 went through an eighth adversarial review on a frozen snapshot
+(`06bbaef`), with the same four areas. 18 findings, 3 of them duplicates
+across areas (the data/docs reviewer's R8-TD-1, R8-TD-7 and R8-TD-8 are
+R8-LT-1, R8-LT-3 and R8-SR-1), which leaves the 15 defects below.
+- Orders, feed and lifecycle: each finding was reproduced by its skeptic, 7
+  confirmed and 2 with part of the claim overstated, none refuted.
+- Data/docs: the skeptic had not finished when this was committed, so those
+  six rows carry the finder's rating (and one row stays "pending").
+
+None is critical or high: 2 medium, 13 low. Three times the skeptic's
+refinement replaced the finder's fix:
+- R8-LT-1: only drops *just* over the limit count as straddling it, so one
+  far-corrupt stamp cannot stop a healthy host.
+- R8-LT-3: the pre-open margin is twice the limit.
+- R8-SR-4: uvloop keeps v1.7's hand-back path. The "do nothing" variant left
+  a stale entry, which made a host's later `loop.remove_signal_handler`
+  reset its handler.
+
+Every v1.8 regression test fails on the v1.7 snapshot and passes here, except
+these controls:
+- `test_a_host_just_inside_the_limit_is_not_stopped_by_one_corrupt_stamp` and
+  `test_a_host_just_past_the_limit_still_loses_the_opening_bar_whose_first_print_was_dropped`:
+  they pin the skeptics' refinements, and each fails with the finder's
+  version of its fix;
+- `test_on_a_clock_that_counts_a_suspend_the_wall_clock_is_never_consulted`:
+  the Linux clock must stay immune to NTP steps;
+- `test_the_steady_clock_keeps_counting_through_a_suspend` (rewritten,
+  R8-TD-2): it now simulates a suspend, and fails when `_uptime` falls back
+  to `CLOCK_MONOTONIC`;
+- `test_a_corrupt_stamp_dated_another_day_does_not_credit_the_day_to_one_bar`
+  (R8-TD-6): since R8-LT-3's guard, a stamp dated later fails the session
+  guard, so keying the counter to the stamp's date no longer brings the fake
+  bar back. The test keeps that property pinned.
+
+Existing tests changed:
+- The child-process signal tests now wait until the engine has hooked its
+  signals, instead of sleeping a fixed time (R8-TD-4).
+- The far-ahead watchdog test is bounded, so a regression fails instead of
+  hanging (R8-TD-3).
+- The steady-clock name pin reads `steady_clock.<locals>.now`.
+- The no-extra guard now rejects only skips for want of `kiteconnect`
+  (R8-TD-5).
+- v1.7's uvloop SA_RESTART and Y+P expectations were dropped: uvloop keeps
+  its documented limits (R8-SR-4).
+
+Verdict: ✔ confirmed by the independent skeptic, ◐ confirmed with part of the
+claim overstated. Severity is the skeptic's rating.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.7 defect | v1.8 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | After an ambiguous attempt, a book re-check that failed for good (an expired session: `TokenException`, 403) was retried until the window ended. The alert then blamed the earlier refused connection. v1.6 stopped at once and named the TokenException. | A permanent error ends the re-check loop at once, and the alert names it. | `test_a_permanent_error_while_rechecking_the_book_ends_the_loop_and_is_named` |
+
+### Live feed
+
+| Sev | Verdict | v1.7 defect | v1.8 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | A host 30.2–31 s behind straddled the 30 s limit (whole-second stamps). Almost every bar held a dropped print and was discarded, while the prints that passed kept resetting the blind run, so the new stop never fired: a whole session of no bars and no exit. | The watchdog also stops the run when prints keep landing *just* over the limit (under 32 s ahead) and the measured skew is within 1.5 s of it. The skeptic's refinement: a far-off corrupt stamp does not count, so a host 29.x s behind is not stopped by one. | `test_a_host_straddling_the_30s_limit_stops_instead_of_discarding_every_bar`, `test_a_host_just_inside_the_limit_is_not_stopped_by_one_corrupt_stamp` (control) |
+| low | ✔ | Where the monotonic clock stops during a suspend (not Linux), the bar a sleep interrupted was closed on wake and its 20-minute-old signal judged 1 s old, so a real order could go out before the watchdog stopped the run. The finder rated it medium; the skeptic rated it low for its tiny exposure. | On such a clock, the router adds the wall time the run's clock missed to every signal's age (`wall_gain`). This can only refuse more signals. Linux (`CLOCK_BOOTTIME`) is unchanged. | `test_on_a_clock_that_misses_a_suspend_a_signal_is_aged_by_the_time_it_missed`, `test_on_a_clock_that_counts_a_suspend_the_wall_clock_is_never_consulted` (control) |
+| low | ✔ | A lone corrupt stamp could cost two bars, not the one documented. Received before the open, it cost the 09:15 opening bar, because it re-baselined a counter that off-session prints never move. | Only a drop that could hold session shares re-baselines. The margin is twice the limit, the skeptic's refinement, so a host just past it still loses an opening bar whose first print was dropped. The docs now say "its bar, and the next one too when...". | `test_a_corrupt_stamp_before_the_open_does_not_cost_the_opening_bar`, `test_a_host_just_past_the_limit_still_loses_the_opening_bar_whose_first_print_was_dropped` (control) |
+| low | ◐ | A zeroed packet (`volume_traded` 0) accepted after a drop or a late join became the baseline, and the next print was credited with the whole day (a fake 42x RVOL). Overstated: v1.6 did the same, so this predates v1.7. | A zeroed counter is never adopted as a blind baseline: the next print re-baselines again. | `test_a_zeroed_packet_is_never_adopted_as_a_blind_baseline` (after a drop, and after a late join) |
+
+### Lifecycle
+
+| Sev | Verdict | v1.7 defect | v1.8 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | An engine that started while the host had a stop signal at `SIG_IGN` (say, around spawning workers) was left out of the route. Once the host restored its handler, a supervisor's stop reached only the other engines, and the next one killed it mid-run. The skeptic added a worse variant: if the other engine ended inside the window, the stop was swallowed silently. | The engine joins the existing route while the signal is ignored (nohup is still honoured: nothing is taken). It is reached once the host restores the signal, and a later re-take carries it along. | `test_an_engine_that_starts_while_the_host_ignores_the_signal_still_gets_it_later` (asyncio and uvloop) |
+| low | ✔ | A re-take carried a finished `main(hold_signals=True)` callback along. After that, the host's restored handler was never handed back, and every later stop was "ignored". The finder rated it medium; the skeptic rated it low, since `run()` can never reach it. | A held callback is marked, and is not carried into a re-take. | `test_a_held_engine_is_not_carried_into_a_later_run_once_the_host_restores_its_handler` |
+| low | ✔ | A re-take after the host changed only its plain handler recorded the engine's own dispatcher as the host's loop callback. The host's callback was lost, the stale entry later reset the host's handler when the loop closed, and on uvloop the warning was lost. | The re-take keeps the pre-run loop callback and the uvloop "lost" flag the host did not change. | `test_a_re_take_keeps_the_hosts_pre_run_loop_callback` |
+| low | ◐ | Hand-back re-installed a plain handler the host set mid-run, clearing its `SA_RESTART`, and on uvloop it also removed a loop callback registered before it. Overstated: v1.6 was worse, and PEP 475 hides EINTR from Python code. | On asyncio only our table entry is changed, and the handler stays exactly as set, flags included. uvloop keeps v1.7's path and its documented limits. | `test_a_plain_handler_set_mid_run_keeps_its_flags` |
+
+### Tests and docs
+
+| Sev | Verdict | v1.7 defect | v1.8 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | — | See the controls above: the suspend pin passed with `CLOCK_MONOTONIC` (R8-TD-2); the far-ahead watchdog test hung instead of failing when reverted (R8-TD-3); the mid-run signal tests raced engine start-up under load (R8-TD-4); the no-extra guard failed wherever a platform-only skip ran (R8-TD-5); the receive-date keying was unpinned (R8-TD-6). | Rewritten, bounded, synchronised on the hook, narrowed, pinned. | as listed |
+| low | pending | A zeroed-stamp print stamped only by the last minute's largest lag could still close a bar early when latency rose at a bucket boundary (R8-TD-9). | The fallback also subtracts the bar clock's 2 s grace, so such a print cannot close a bar before the bar clock would. | `test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen` |
+| low | ✔ | README and CHANGELOG: "a lone corrupt stamp costs one bar" (R8-LT-3 / R8-TD-7), "takes the signal back" for `SIG_IGN` (R8-SR-1 / R8-TD-8). | Corrected. | documentation |
+
 ## v1.7 (2026-09-27)
 
 v1.6 went through a seventh adversarial review on a frozen snapshot

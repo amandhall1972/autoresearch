@@ -39,7 +39,7 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 cd ipo_momentum
 uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest, uvloop (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 295 tests, ~2 min, fully offline
+uv run pytest                       # 311 tests, ~2.5 min, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
@@ -213,8 +213,13 @@ last one ends:
   had, including callbacks registered with `loop.add_signal_handler` and a
   plain handler set beside one.
 - Whatever the host sets while engines run (a loop callback, a plain handler,
-  `SIG_IGN`) is what is handed back. An engine that starts after such a change
-  takes the signal back for its own run.
+  `SIG_IGN`) is what is handed back (on asyncio, a plain handler with its own
+  flags; see Known limitations for uvloop). An
+  engine that starts after such a change takes the signal back for its own run
+  (a signal the host set to `SIG_IGN` stays ignored, as under `nohup`: the
+  engine joins and gets it once the host restores it); what the host had
+  before the change is kept for the hand-back. An engine held by `main(hold_signals=True)` keeps the signal only
+  until the host takes it back.
 - uvloop's callbacks cannot be read back. A host callback it held for a stop
   signal before the run is therefore lost: the engine logs a warning, and the
   signal is back at its default (never silently swallowed). Re-register it
@@ -266,18 +271,22 @@ Trailing stays the default because it is the original strategy's definition.
   zeroed exchange time, which the SDK parses as 1970, also falls back to
   receive time (and is not a lag sample). KiteTicker's naive host-local
   datetimes are converted to IST. A zeroed stamp's receive time is taken in
-  feed time (corrected by the feed's lag), which errs early: such a print can
-  never cut a bar short, though before the new bucket's first genuine print it
-  can join the previous, still-open bar (within about the lag).
+  feed time (corrected by the feed's lag) less the bar clock's 2 s grace, which
+  errs early: such a print cannot close a bar before the bar clock would, even
+  when latency has just risen, though before the new bucket's first genuine
+  print it can join the previous, still-open bar (within about the lag + 2 s).
 * **The 30 s rule.** A tick stamped more than 30 s ahead of the host clock is
   dropped with a critical log before it moves the lag or the market time: the
   exchange cannot stamp a print in the future, so either the stamp is corrupt
   or the host clock is too far behind to trust. Like a stall, the drop blinds
   the symbol: the bar the print belonged to is discarded (and back-filled) and
   the counter re-baselined, so no bar is built from the prints that got
-  through. A lone corrupt stamp therefore costs one bar. If every stamped tick
-  is dropped this way for 15 s, the run stops (exit 1): its clock cannot be
-  trusted.
+  through. A lone corrupt stamp therefore costs its bar, and the next one too
+  when the next accepted print falls in the next bucket; one received long
+  before the open costs nothing. The run stops (exit 1), because its clock
+  cannot be trusted, if every stamped tick is dropped this way for 15 s, or if
+  the host runs within 1.5 s of the limit while prints keep landing just over
+  it (whole-second stamps straddle the limit there).
 * **Host clock.** A live feed keeps its own clock: the wall clock as read at
   start-up, advanced by a monotonic clock that on Linux keeps counting through
   a suspend (`CLOCK_BOOTTIME`). An NTP step mid-session therefore cannot shift
@@ -413,7 +422,9 @@ or duplicated:
      up to 15 s without using up an attempt. Each outage gets its own window,
      so a second outage after an ambiguous attempt is retried too; after an
      ambiguous attempt, every retry follows a successful read of the book, so
-     a GTT booked during the outage is adopted, not armed again. (A proxy that
+     a GTT booked during the outage is adopted, not armed again; a book read
+     that fails for good (an expired session) ends the loop at once, and the
+     alert names it. (A proxy that
      refused the tunnel stays on the ambiguous path here: attempts plus book
      polls ride out a longer proxy outage than one never-sent window.)
    - After any ambiguous attempt, the book is watched for another 15 s. A late
@@ -500,7 +511,7 @@ not evidence of an edge in either direction.
 
 ## How it was reviewed
 
-Seven adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
+Eight adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
 lists every finding with its severity, verdict, fix and the test that pins it.
 
 1. **v1.0, the original file.** Four reviewers, one per area (live path, alpha,
@@ -575,6 +586,16 @@ lists every finding with its severity, verdict, fix and the test that pins it.
    - Several pins did not fail when their fix was reverted.
 
    These became v1.7.
+8. **v1.7, the seventh fix.** All four skeptics ran. 18 findings (15
+   distinct), none refuted, none critical or high. Most were edges of the
+   rules v1.6 and v1.7 had added:
+   - A host just past the 30 s limit ran blind all session without stopping.
+   - An engine that started while the host ignored a stop signal never got
+     it back; a re-take dropped the host's pre-run state.
+   - Several pins could pass for the wrong reason, one hung when reverted,
+     and the signal tests raced engine start-up under load.
+
+   These became v1.8.
 
 ---
 
@@ -593,16 +614,20 @@ lists every finding with its severity, verdict, fix and the test that pins it.
   that is more than 2 s late.
 * **On uvloop, a host's own stop-signal callback is lost** after `main()`,
   because uvloop cannot hand it back. The engine warns, and the signal is at
-  its default; re-register the callback.
-* **A host clock more than 30 s behind the exchange** gets every tick dropped,
-  with a critical log, and the run stops (exit 1) after 15 s of it; a
-  supervisor restart keeps failing until the time sync is fixed. Within 30 s
+  its default; re-register the callback. For the same reason, a plain handler
+  the host sets mid-run is re-installed on hand-back (without `SA_RESTART`),
+  and a loop callback registered before it in the same run is removed.
+* **A host clock about 30 s or more behind the exchange** stops the run
+  (exit 1) within seconds: every tick is dropped, or the stamps straddle the
+  limit. A supervisor restart keeps failing until the time sync is fixed. Within 30 s
   the offset is measured and corrected. A live run keeps the clock it started
   with, so after NTP corrects the host mid-session, the run goes on correcting
   (and warning about) its start-up offset until it is restarted.
 * **A suspended host** (laptop sleep) is handled on Linux, whose clock keeps
-  counting. Elsewhere the run's clock falls behind by the sleep; if it is more
-  than 30 s, the run stops as above.
+  counting. Elsewhere the run's clock falls behind by the sleep: the router adds
+  the time it missed to every signal's age (so a signal from before the sleep
+  is refused as stale), and if it is more than 30 s the run stops as above.
+  There, a forward NTP step also ages signals, which can only refuse more.
 * **The last bars of a session that ends the run** are restored only by the
   next run's history sync: the in-run back-fill of a session's lost tail runs
   when the next session's first bar closes.
@@ -628,7 +653,7 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 295 tests run offline in about 2 minutes. The slowest are real CLI runs that
+The 311 tests run offline in about 2.5 minutes. The slowest are real CLI runs that
 deliver SIGINT, SIGTERM and SIGHUP mid-entry and during exit, and a shutdown
 that must outlast v1.1's 10 s drain. They pass in seven configurations:
 - Python 3.10 with pandas 2.2 and numpy 1.26
