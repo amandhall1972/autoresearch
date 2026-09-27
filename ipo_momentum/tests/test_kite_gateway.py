@@ -23,9 +23,10 @@ class StubKite(kiteconnect.KiteConnect):
                  orders_result=None, cancel_results=None, gtt_results=None, gtt_created_before_error=False,
                  gtt_book=None, gtt_book_failures=0, orders_script=None, gtt_book_fail_reads=(),
                  gtt_hidden_reads=0, gtt_lands_on_next_place=False, gtt_created_status="active",
-                 state_after_cancel=None, gtt_book_fail=None):
+                 state_after_cancel=None, gtt_book_fail=None, gtt_booked=None):
         super().__init__(api_key="test_key", access_token="test_token")
         self.gtt_created_before_error = gtt_created_before_error
+        self.gtt_booked = gtt_booked                  # per request: did a failed one still book its GTT?
         self.gtt_book = gtt_book                  # GTTs that predate this entry, or an Exception: unreadable
         self.gtt_book_fail_reads = set(range(gtt_book_failures)) | set(gtt_book_fail_reads)   # read #s that fail
         self.gtt_reads = 0
@@ -85,7 +86,8 @@ class StubKite(kiteconnect.KiteConnect):
                 self.created_gtts.extend(self.hidden_gtts)
                 self.hidden_gtts = []
             result = self.gtt_results.pop(0) if len(self.gtt_results) > 1 else self.gtt_results[0]
-            if isinstance(result, Exception) and not self.gtt_created_before_error:
+            booked = self.gtt_created_before_error if self.gtt_booked is None else self.gtt_booked[self.gtt_places - 1]
+            if isinstance(result, Exception) and not booked:
                 raise result
             gid = 700 + len(self.created_gtts) + len(self.hidden_gtts)
             if not isinstance(result, Exception):
@@ -690,7 +692,60 @@ def test_an_unreachable_proxy_releases_the_symbol_without_a_lookup():
     assert r.active_inventory == set() and r.unresolved == [] and "orders" not in kite.routes()
 
 
-def test_a_refused_tunnel_is_still_looked_up():
+def test_an_entry_refused_at_the_proxys_tunnel_releases_the_symbol():
+    # A proxy that refuses the CONNECT received only the CONNECT line: the order never left. v1.6 looked the
+    # tag up through the same failing proxy and blocked the symbol for the session.
     kite = StubKite([OPEN], place_error=refused_tunnel(), orders_result=[])
     r = run_router(router(gateway=fast_gateway(kite)), [sig()])
-    assert "orders" in kite.routes() and r.active_inventory == {"SWIGGY"} and len(r.unresolved) == 1
+    assert "orders" not in kite.routes() and r.active_inventory == set() and r.unresolved == []
+
+
+def test_a_gtt_refused_at_the_proxys_tunnel_stays_on_the_ambiguous_path():
+    # Attempts plus book polls ride out a longer proxy outage than a single never-sent window.
+    tunnel = refused_tunnel()
+    assert not engine.KiteOrderGateway._never_sent(tunnel)
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[tunnel, {"trigger_id": 777}])
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "777" and "gtt" in kite.routes()[kite.routes().index("gtt.place"):]
+
+
+@pytest.mark.parametrize("status", ["active", "triggered"])
+def test_a_gtt_booked_during_a_later_outage_is_adopted_not_armed_again(status):
+    # The 504's GTT is booked only after the 15 s poll, while the next request is refused. v1.6 retried
+    # through that outage without reading the book again and armed a second whole-position GTT.
+    refused = refused_connection()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused, KE.NetworkException("Gateway timed out", code=504), refused,
+                                 {"trigger_id": 902}],
+                    gtt_booked=[False, True, False, False], gtt_lands_on_next_place=True, gtt_created_status=status)
+    gw = fast_gateway(kite, cancel_grace=0.3, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "700" and [g["id"] for g in kite.created_gtts] == [700]
+    if status == "active":
+        assert gw.alerts == []
+    else:
+        assert len(gw.alerts) == 1 and "had already TRIGGERED" in gw.alerts[0]
+
+
+def test_after_an_ambiguous_attempt_nothing_is_placed_while_the_book_is_unreadable():
+    refused = refused_connection()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused, KE.NetworkException("Gateway timed out", code=504), refused,
+                                 {"trigger_id": 902}],
+                    gtt_booked=[False, True, False, False], gtt_lands_on_next_place=True,
+                    gtt_book_fail=lambda since, places: places == 3 and since < 3)    # the outage hides the book too
+    gw = fast_gateway(kite, cancel_grace=0.3, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "700" and kite.gtt_places == 3 and gw.alerts == []
+
+
+def test_an_outage_after_an_ambiguous_attempt_whose_gtt_never_lands_still_arms_one():
+    refused = refused_connection()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused, KE.NetworkException("Gateway timed out", code=504), refused,
+                                 {"trigger_id": 902}])
+    gw = fast_gateway(kite, cancel_grace=0.3, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "902" and [g["id"] for g in kite.created_gtts] == [902] and gw.alerts == []

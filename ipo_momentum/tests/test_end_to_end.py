@@ -11,7 +11,7 @@ import threading
 import time
 import types
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -470,6 +470,7 @@ def test_when_the_vendor_cuts_the_listing_the_message_does_not_blame_the_lookbac
     # --max-lookback-days, which cannot reach it.
     class ShortVendor(engine.CsvReplayAdapter):
         history_limit_days = 59
+        history_cutoff = engine.BrokerAdapter.history_cutoff              # a vendor's rolling window, not a file's
 
     ad = ShortVendor({"SWIGGY": FIXTURE})
     orch = engine.ProductionOrchestrator({"SWIGGY": datetime(2025, 12, 1, tzinfo=engine.IST)}, ad,
@@ -720,3 +721,79 @@ def test_the_live_router_judges_signal_ages_on_the_feeds_clock(monkeypatch):
     kite_env(monkeypatch, feed)
     asyncio.run(engine.main(["--source", "kite", "--listing-date", "2026-09-08", "--live-feed", "--run-seconds", "30"]))
     assert len(seen) == 1 and abs(seen[0] - 20.0) < 1.0
+
+
+def test_the_live_routers_clock_does_not_step_with_the_host_clock(monkeypatch):
+    # Signal ages are judged on the feed's steady clock: an NTP step of the host clock must not age or rejuvenate
+    # every pending signal at once.
+    moves = []
+
+    def feed(api_key, access_token, tokens, tick_adapter, feed_dead):
+        oms = tick_adapter.bar_listeners[0].__self__
+        before = oms.clock()
+        monkeypatch.setattr(KiteDayClock, "FIXED", KiteDayClock.FIXED + timedelta(seconds=20))   # the step
+        moves.append((oms.clock() - before).total_seconds())
+        tick_adapter.loop.call_later(0.1, feed_dead.set)
+        return types.SimpleNamespace(close=lambda: None)
+
+    kite_env(monkeypatch, feed)
+    asyncio.run(engine.main(["--source", "kite", "--listing-date", "2026-09-08", "--live-feed", "--run-seconds", "30"]))
+    assert len(moves) == 1 and abs(moves[0]) < 1.0
+
+
+# ---------------------------------------------------------------- round 7: a host that changes its handling mid-run
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("change", ["re-register", "remove"])
+def test_an_engine_that_starts_after_the_host_took_the_signal_back_owns_it(loop_kind, change):
+    # v1.6 appended a later engine to the existing route without checking that the route still received the
+    # signal: after the host re-registered (the README's own advice) or removed SIGTERM, a supervisor's stop
+    # went to the host's callback, or killed the process, with the later engine's entry in flight.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    take_back = ('loop.add_signal_handler(signal.SIGTERM, got.append, "host")' if change == "re-register"
+                 else "loop.remove_signal_handler(signal.SIGTERM)")
+    code, out, err = run_host(f"""
+        a = asyncio.create_task(engine.main(ARGS + ["5"]))
+        await asyncio.sleep(0.8)
+        {take_back}
+        b = asyncio.create_task(engine.main(ARGS + ["5"]))
+        await asyncio.sleep(0.8)
+        os.kill(os.getpid(), signal.SIGTERM)
+        print("engines", await a, await b, "host got", got, flush=True)
+    """, uvloop=loop_kind == "uvloop")
+    assert code == 0, out + err
+    assert "engines 143 143 host got []" in out, out + err
+    assert err.count("Signal 15 received: shutting down in order.") == 2
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+def test_a_plain_handler_or_ignore_the_host_sets_during_a_run_is_kept(loop_kind):
+    # v1.6 judged only asyncio's loop table: a SIG_IGN or plain handler set with signal.signal mid-run was
+    # replaced by the default afterwards, and the next SIGHUP killed a host that had chosen to ignore it.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host("""
+        run = asyncio.create_task(engine.main(ARGS + ["0.6"]))
+        await asyncio.sleep(0.3)
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, lambda signum, frame: got.append("plain"))
+        print("main", await run, flush=True)
+        print("after", signal.getsignal(signal.SIGHUP) == signal.SIG_IGN, await delivered(signal.SIGTERM), flush=True)
+    """, uvloop=loop_kind == "uvloop")
+    assert code == 0, out + err
+    assert "main 0" in out and "after True ['plain']" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_on_uvloop_a_callback_the_host_registers_during_a_run_is_kept():
+    pytest.importorskip("uvloop")
+    code, out, err = run_host("""
+        run = asyncio.create_task(engine.main(ARGS + ["0.6"]))
+        await asyncio.sleep(0.3)
+        loop.add_signal_handler(signal.SIGTERM, got.append, "host")
+        print("main", await run, "after", await delivered(signal.SIGTERM), flush=True)
+    """, uvloop=True)
+    assert code == 0, out + err
+    assert "main 0 after ['host']" in out, out + err

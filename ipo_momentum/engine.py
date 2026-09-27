@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.6)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.7)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -162,12 +162,21 @@ def next_ist_midnight(ts: datetime) -> datetime:
     return datetime.combine(to_ist(ts).date() + timedelta(days=1), dtime(0), tzinfo=IST)
 
 
+try:                                    # Linux: monotonic time that keeps counting while the host is suspended
+    time.clock_gettime(time.CLOCK_BOOTTIME)
+
+    def _uptime() -> float:
+        return time.clock_gettime(time.CLOCK_BOOTTIME)
+except (AttributeError, OSError):
+    _uptime = time.monotonic            # elsewhere a suspend is caught by the watchdog (every tick far ahead)
+
+
 def steady_clock(wall: Optional[Callable[[], datetime]] = None,
-                 monotonic: Callable[[], float] = time.monotonic) -> Callable[[], datetime]:
+                 monotonic: Callable[[], float] = _uptime) -> Callable[[], datetime]:
     """The wall clock as read now, advanced by a monotonic clock from then on, so it never steps. A live
     feed stamps and judges everything with it: an NTP correction mid-session (a step of the host clock)
     then cannot shift feed time, liveness or signal ages. Any offset it started with is measured as
-    clock skew, like any other."""
+    clock skew, like any other. On Linux it keeps counting through a suspend (CLOCK_BOOTTIME)."""
     start, ticks = to_ist((wall or (lambda: datetime.now(IST)))()), monotonic()
     return lambda: start + timedelta(seconds=monotonic() - ticks)
 
@@ -786,6 +795,7 @@ class LiveTickAdapter:
         self._lag_samples: collections.deque = collections.deque()
         self._lag_warned: Optional[datetime] = None
         self._ahead_warned: Optional[datetime] = None
+        self._ahead_run: Optional[Tuple[datetime, datetime]] = None  # first and last far-ahead drop in a row
         self._last_update: Dict[str, Tuple[int, datetime]] = {}      # symbol -> (feed epoch, newest exchange time)
         self._glitch_warned: set = set()                             # (symbol, day) already reported
         # A bucket in which the volume counter was re-baselined lost its head to the baseline.
@@ -804,7 +814,9 @@ class LiveTickAdapter:
         ts = t.get('exchange_timestamp') or t.get('timestamp')
         ts = to_ist(ts) if ts is not None else None
         if ts is None or ts.year < 2000:
-            ts = self.clock()
+            # Feed time, as bars are closed: this errs early, so such a print can never cut a bar short
+            # (a late one is dropped and its shares carry forward). A float read is thread-safe.
+            ts = self.clock() - timedelta(seconds=self.feed_lag)
         cumulative = t.get('volume_traded')
         volume = t.get('last_traded_quantity', t.get('volume', 0)) if cumulative is None else 0
         return Tick(symbol=symbol, price=float(price), volume=int(volume or 0), timestamp=ts,
@@ -835,11 +847,17 @@ class LiveTickAdapter:
         self.last_alive = to_ist(at or self.clock())
 
     @property
+    def blind_for(self) -> float:
+        """Seconds for which every exchange-stamped tick has been dropped as far ahead (0 if none is)."""
+        return (self._ahead_run[1] - self._ahead_run[0]).total_seconds() if self._ahead_run else 0.0
+
+    @property
     def clock_skew(self) -> float:
         """How far the host clock runs behind the exchange, in seconds (<= 0): the upper median of the
-        last minute's lag samples. Each sample is latency minus that offset; the median cannot be moved
-        by one late or corrupt packet, and a host that does not run behind reads 0. Latency is not part
-        of it: a late signal really is older."""
+        last minute's lag samples. Each sample is latency minus that offset. One late packet cannot move
+        it once the minute holds at least two other samples (with fewer, it follows the later one), and
+        being the upper median, a forward-stamped packet never can. A host that does not run behind reads
+        0. Latency is not part of it: a late signal really is older."""
         samples = sorted(sample for _, sample in self._lag_samples)
         return min(0.0, samples[len(samples) // 2]) if samples else 0.0
 
@@ -939,13 +957,24 @@ class LiveTickAdapter:
             return
         if tick.received is not None and (ahead := (tick.timestamp - tick.received).total_seconds()) > self.max_stamp_ahead:
             # The exchange cannot stamp a print in our future: a corrupt stamp, or a host clock so far behind
-            # that nothing measured against it can be trusted. Dropped before it can move any state.
+            # that nothing measured against it can be trusted. The print is dropped before it moves the lag
+            # or the market time, and like a stall it blinds the symbol: the bar it belonged to is discarded
+            # (and back-filled) and the counter re-baselined, so no bar is built from the prints that got
+            # through and no later bar is credited with the dropped shares.
             self.dropped_ticks += 1
+            self._ahead_run = (self._ahead_run[0] if self._ahead_run else tick.received, tick.received)
+            if (bar := self.current_bars.get(sym)) is not None:
+                bar['partial'] = True
+            counter, day = self._cum_volume.get(sym), tick.received.date()    # the stamp's own date is not trusted
+            self._cum_volume[sym] = (counter[0], counter[1], -1) if counter is not None and counter[0] == day \
+                else (day, 0, -1)
             if self._ahead_warned is None or abs(tick.received - self._ahead_warned) >= timedelta(seconds=60):
                 self._ahead_warned = tick.received
                 logger.critical(f"[{sym}] Tick stamped {ahead:.0f}s ahead of the host clock dropped: a corrupt "
                                 f"exchange time, or the host clock runs far behind. Fix the host's time sync and restart.")
             return
+        if tick.received is not None:
+            self._ahead_run = None                                   # stamps are believable again
         # Floor the timestamp to the current 5-minute block
         boundary = bar_floor(tick.timestamp, self.bar_minutes)
         if not SESSION_OPEN <= boundary.time() < SESSION_CLOSE:
@@ -1206,8 +1235,8 @@ class KiteOrderGateway(OrderGateway):
         that could not be opened (refused, unreachable, DNS failure). requests reports the latter as
         a plain ConnectionError whose MaxRetryError reason is urllib3's NewConnectionError. Behind a
         proxy, a proxy that could not be reached raises ProxyError around the same connect failure
-        (urllib3's own test for "the server never received it"). A proxy that was reached but failed
-        the tunnel (CONNECT 403/502) is not proof: it stays ambiguous."""
+        (urllib3's own test for "the server never received it"). A proxy that refused the tunnel is
+        handled by _tunnel_refused, for the entry only."""
         name = type(e).__name__
         if name == "ConnectTimeout":
             return True
@@ -1216,6 +1245,17 @@ class KiteOrderGateway(OrderGateway):
             reason = getattr(reason, "original_error", None)
             return any(c.__name__ == "ConnectTimeoutError" for c in type(reason).__mro__)  # NewConnectionError too
         return any(c.__name__ == "NewConnectionError" for c in type(reason).__mro__)
+
+    @staticmethod
+    def _tunnel_refused(e: BaseException) -> bool:
+        """True if a proxy refused the CONNECT for Kite (403, 407, 502, 503...). urllib3 raises this only
+        from its tunnel set-up and writes a request only through an open tunnel, so the proxy received
+        the CONNECT line and nothing else: the order never left. The GTT path keeps treating it as
+        ambiguous on purpose: attempts plus book polls ride out a longer proxy outage than one never-sent
+        window would."""
+        reason = getattr(e.args[0], "reason", None) if type(e).__name__ == "ProxyError" and e.args else None
+        reason = getattr(reason, "original_error", None)
+        return isinstance(reason, OSError) and str(reason).startswith("Tunnel connection failed:")
 
     def __init__(self, kite, exchange: str = "NSE", product: str = "CNC", fill_timeout: float = 30.0,
                  poll_interval: float = 1.0, cancel_grace: float = 15.0, stop_limit_buffer: float = 0.02,
@@ -1399,54 +1439,71 @@ class KiteOrderGateway(OrderGateway):
         ]
         # ``known``: the GTT book's ids before this entry began (a match listed there belongs to someone else).
         trigger_id, ambiguous, error = None, False, None
-        attempt, never_sent_until = 0, None
+        attempt, never_sent_until, recheck = 0, None, False
         while attempt < 3:
-            try:
-                gtt = await asyncio.to_thread(
-                    k.place_gtt, trigger_type=k.GTT_TYPE_OCO, tradingsymbol=sym, exchange=self.exchange,
-                    trigger_values=[plan.stop_loss, plan.target], last_price=avg, orders=legs)
-                trigger_id = str(gtt['trigger_id'])
-                logger.info(f"🛡️ [{sym}] GTT OCO {trigger_id} armed: stop {plan.stop_loss:.2f} (limit {stop_limit:.2f}) "
-                            f"/ target {plan.target:.2f}")
-                break
-            except Exception as e:
-                error = e
-                logger.error(f"[{sym}] GTT attempt {attempt + 1}/3 failed: {e!r}")
-                if is_permanent_error(e):
-                    break
-                if self._never_sent(e):
-                    # Nothing left this machine, so nothing can exist: retry through the outage for up to
-                    # cancel_grace without using up an attempt.
-                    never_sent_until = never_sent_until or time.monotonic() + self.cancel_grace
+            found = None
+            if recheck:
+                # A retry after an ambiguous attempt must follow a read of the book: the ambiguous request's
+                # GTT may have been booked during the outage. An unreadable book is part of the outage.
+                try:
+                    gtts = await asyncio.to_thread(k.get_gtts)
+                except Exception as read_error:
+                    logger.warning(f"[{sym}] GTT book read failed ({read_error!r}); not placing until it can be read.")
                     if time.monotonic() >= never_sent_until:
                         break
                     await asyncio.sleep(self.poll_interval)
                     continue
-                attempt += 1
-                never_sent_until = None                        # a later outage gets its own window
-                # The request may have reached the broker, which can still be creating the GTT: a blind
-                # retry would arm a second one that sells the whole position again.
-                ambiguous = True
-                found, readable = await self._await_gtt(sym, plan, filled, exclude=known or set())
-                if found is None and readable:
-                    continue                                   # no GTT appeared in cancel_grace: retry
-                if found is None:
-                    self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing failed "
-                                f"({e!r}) and the GTT book could not be read at the end of the window. "
-                                f"CHECK THE GTT BOOK.")
-                    return Fill(sym, filled, avg, order_id, None)
-                if known is None:
-                    self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing failed "
-                                f"({e!r}); GTT {found[0]} matches this position, but the book was unreadable before "
-                                f"arming, so it may be an earlier one. CHECK THE GTT BOOK.")
-                    return Fill(sym, filled, avg, order_id, None)
-                trigger_id, status = found
-                if status == 'triggered':
-                    self._alert(f"[{sym}] GTT {trigger_id} for {filled} shares (order {order_id}) had already TRIGGERED "
-                                f"when its lost reply was resolved: the exit has fired. CHECK ORDERS AND HOLDINGS.")
-                else:
-                    logger.info(f"🛡️ [{sym}] GTT OCO {trigger_id} found in the GTT book; the lost reply is resolved.")
-                break
+                recheck = False
+                found = next(iter(self._matching_gtts(gtts, sym, plan, filled, known or set())), None)
+            if found is None:
+                try:
+                    gtt = await asyncio.to_thread(
+                        k.place_gtt, trigger_type=k.GTT_TYPE_OCO, tradingsymbol=sym, exchange=self.exchange,
+                        trigger_values=[plan.stop_loss, plan.target], last_price=avg, orders=legs)
+                    trigger_id = str(gtt['trigger_id'])
+                    logger.info(f"🛡️ [{sym}] GTT OCO {trigger_id} armed: stop {plan.stop_loss:.2f} "
+                                f"(limit {stop_limit:.2f}) / target {plan.target:.2f}")
+                    break
+                except Exception as e:
+                    error = e
+                    logger.error(f"[{sym}] GTT attempt {attempt + 1}/3 failed: {e!r}")
+                    if is_permanent_error(e):
+                        break
+                    if self._never_sent(e):
+                        # Nothing left this machine, so nothing can exist from this request: retry through the
+                        # outage for up to cancel_grace without using up an attempt.
+                        recheck = ambiguous
+                        never_sent_until = never_sent_until or time.monotonic() + self.cancel_grace
+                        if time.monotonic() >= never_sent_until:
+                            break
+                        await asyncio.sleep(self.poll_interval)
+                        continue
+                    attempt += 1
+                    never_sent_until = None                    # a later outage gets its own window
+                    # The request may have reached the broker, which can still be creating the GTT: a blind
+                    # retry would arm a second one that sells the whole position again.
+                    ambiguous = True
+                    found, readable = await self._await_gtt(sym, plan, filled, exclude=known or set())
+                    if found is None and readable:
+                        continue                               # no GTT appeared in cancel_grace: retry
+                    if found is None:
+                        self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing "
+                                    f"failed ({e!r}) and the GTT book could not be read at the end of the window. "
+                                    f"CHECK THE GTT BOOK.")
+                        return Fill(sym, filled, avg, order_id, None)
+            # A GTT created by an ambiguous request: adopt it rather than arm a second one.
+            if known is None:
+                self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing failed "
+                            f"({error!r}); GTT {found[0]} matches this position, but the book was unreadable before "
+                            f"arming, so it may be an earlier one. CHECK THE GTT BOOK.")
+                return Fill(sym, filled, avg, order_id, None)
+            trigger_id, status = found
+            if status == 'triggered':
+                self._alert(f"[{sym}] GTT {trigger_id} for {filled} shares (order {order_id}) had already TRIGGERED "
+                            f"when its lost reply was resolved: the exit has fired. CHECK ORDERS AND HOLDINGS.")
+            else:
+                logger.info(f"🛡️ [{sym}] GTT OCO {trigger_id} found in the GTT book; the lost reply is resolved.")
+            break
         if trigger_id is not None and ambiguous:
             await self._watch_duplicates(sym, plan, filled, order_id, trigger_id, known or set())
         if trigger_id is None and ambiguous:
@@ -1465,7 +1522,7 @@ class KiteOrderGateway(OrderGateway):
                 transaction_type=k.TRANSACTION_TYPE_BUY, quantity=plan.quantity, product=self.product,
                 order_type=k.ORDER_TYPE_LIMIT, price=plan.entry_limit, validity=k.VALIDITY_DAY, tag=tag))
         except Exception as e:
-            if is_permanent_error(e) or self._never_sent(e):
+            if is_permanent_error(e) or self._never_sent(e) or self._tunnel_refused(e):
                 raise                         # refused by the broker, or never sent: nothing exists
             logger.error(f"[{sym}] place_order failed ({e!r}); looking for tag {tag} at the broker.")
             order_id = await self._find_by_tag(sym, tag, e)
@@ -1799,6 +1856,11 @@ async def _watch_feed(feed_dead: asyncio.Event, tick_adapter: Optional[LiveTickA
             pass
         if tick_adapter is None:
             continue
+        if tick_adapter.blind_for > stall_after:
+            tick_adapter.mark_feed_down()
+            raise RuntimeError(f"every tick for {tick_adapter.blind_for:.0f}s was stamped more than "
+                               f"{tick_adapter.max_stamp_ahead:.0f}s ahead of this run's clock (the host clock runs "
+                               f"far behind, or the host was suspended); restart once the time sync is fixed")
         now = clock()
         last = tick_adapter.last_alive or started
         in_session = now.weekday() < 5 and SESSION_OPEN <= now.time() < SESSION_CLOSE
@@ -1900,7 +1962,9 @@ class _StopRoutes:
     * While any engine runs, it owns the signal exclusively: a host callback such as ``loop.stop``
       must not cut an orderly shutdown short, so the host's own handling is displaced, not chained.
     * Stock asyncio exposes its loop callbacks, so the host's own ``loop.add_signal_handler`` callback
-      is re-registered afterwards. A registration the host changed while engines ran is left as set.
+      is re-registered afterwards. Whatever the host set while engines ran (a loop callback, a plain
+      handler, SIG_IGN) is what is handed back, and an engine that starts after such a change takes
+      the signal back for its own run.
     * uvloop's callbacks cannot be read back. A host callback it held is lost with a warning, and the
       signal is back at its default: never left routed to a loop entry that no longer exists.
     * A loop that cannot own signals (Windows) gets a plain handler that hands the signal over
@@ -1916,6 +1980,37 @@ class _StopRoutes:
         for callback in list(route['callbacks'] if route else ()):
             callback(signum)
 
+    def _owned(self, route: dict, signum: int) -> bool:
+        """Whether ``signum`` still reaches _dispatch: the host has not re-registered, removed or replaced it."""
+        current = signal.getsignal(signum)
+        if route['handler'] is not None:
+            return current is route['handler']
+        if current is not route['installed']:
+            return False
+        handlers = route['handlers']
+        entry = handlers.get(signum) if handlers is not None else None
+        return handlers is None or (entry is not None and entry._callback == self._dispatch)
+
+    def _take(self, loop: asyncio.AbstractEventLoop, signum: int) -> Optional[dict]:
+        previous = signal.getsignal(signum)
+        if previous == signal.SIG_IGN:
+            return None
+        handlers = getattr(loop, "_signal_handlers", None)
+        route = {'loop': loop, 'callbacks': [], 'previous': previous, 'handler': None, 'installed': None,
+                 'handlers': handlers if isinstance(handlers, dict) else None,
+                 'prior': handlers.get(signum) if isinstance(handlers, dict) else None}
+        try:
+            loop.add_signal_handler(signum, self._dispatch, signum)
+            route['installed'] = signal.getsignal(signum)
+        except (NotImplementedError, RuntimeError, ValueError):
+            handler = functools.partial(_deliver_signal, loop, self._dispatch)
+            try:
+                signal.signal(signum, handler)
+            except (ValueError, OSError):                 # not the main thread, or not supported here
+                return None
+            route['handler'] = handler
+        return route
+
     def hook(self, loop: asyncio.AbstractEventLoop, callback: Callable[[int], None]) -> List[int]:
         """Route every stop signal this loop can take to ``callback``; returns the signals hooked."""
         hooked = []
@@ -1924,28 +2019,17 @@ class _StopRoutes:
             if route is not None and route['loop'].is_closed():
                 del self.routes[signum]                       # a loop that ended without handing back
                 route = None
-            if route is not None:
-                if route['loop'] is loop:
-                    route['callbacks'].append(callback)
-                    hooked.append(signum)
+            if route is not None and route['loop'] is not loop:
                 continue                                      # another live loop owns this signal
-            previous = signal.getsignal(signum)
-            if previous == signal.SIG_IGN:
-                continue
-            handlers = getattr(loop, "_signal_handlers", None)
-            route = {'loop': loop, 'callbacks': [callback], 'previous': previous, 'handler': None,
-                     'handlers': handlers if isinstance(handlers, dict) else None,
-                     'prior': handlers.get(signum) if isinstance(handlers, dict) else None}
-            try:
-                loop.add_signal_handler(signum, self._dispatch, signum)
-            except (NotImplementedError, RuntimeError, ValueError):
-                handler = functools.partial(_deliver_signal, loop, self._dispatch)
-                try:
-                    signal.signal(signum, handler)
-                except (ValueError, OSError):                 # not the main thread, or not supported here
+            if route is None or not self._owned(route, signum):
+                # New, or the host took it while engines ran: (re)take it. What the host set is handed back.
+                fresh = self._take(loop, signum)
+                if fresh is None:
                     continue
-                route['handler'] = handler
-            self.routes[signum] = route
+                if route is not None:
+                    fresh['callbacks'] = route['callbacks']
+                self.routes[signum] = route = fresh
+            route['callbacks'].append(callback)
             hooked.append(signum)
         return hooked
 
@@ -1964,21 +2048,29 @@ class _StopRoutes:
                 if signal.getsignal(signum) is route['handler'] and previous is not None:
                     signal.signal(signum, previous)
                 continue
+            current = signal.getsignal(signum)
             handlers = route['handlers']
             if handlers is not None:
-                current = handlers.get(signum)
-                if current is None or current._callback != self._dispatch:
+                entry = handlers.get(signum)
+                if entry is None or entry._callback != self._dispatch:
                     continue                                  # the host re-registered or removed it
+            elif current is not route['installed'] and getattr(current, "__self__", None) is loop:
+                continue                                      # uvloop: the host re-registered it
             prior = route['prior']
             if prior is not None:                             # re-armed with its wakeup fd
                 loop.add_signal_handler(signum, prior._callback, *prior._args)
             else:
                 loop.remove_signal_handler(signum)
-            if handlers is None and getattr(previous, "__self__", None) is loop:
-                logger.warning(f"Signal {signum}: the host's own {type(loop).__name__} callback for it cannot be "
-                               f"read back, so the signal is back at its default. Re-register it after main().")
-            elif previous is not None and previous is not signal.getsignal(signum):
+            lost = handlers is None and getattr(previous, "__self__", None) is loop   # uvloop: unreadable
+            if current is not route['installed']:             # the host set a plain handler (or SIG_IGN) mid-run
+                if current is not None:
+                    signal.signal(signum, current)
+            elif not lost and previous is not None and previous is not signal.getsignal(signum):
                 signal.signal(signum, previous)               # a live plain handler beside a loop entry
+            if lost:
+                where = "back at its default" if current is route['installed'] else "left as the host set it mid-run"
+                logger.warning(f"Signal {signum}: the host's own {type(loop).__name__} callback for it cannot be "
+                               f"read back, so the signal is {where}. Re-register it after main().")
 
     def release(self, loop: asyncio.AbstractEventLoop) -> None:
         """Forget a closed loop's routes (its handlers went with it)."""

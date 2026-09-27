@@ -2,6 +2,7 @@
 import asyncio
 import sys
 import threading
+import time
 import types
 from datetime import datetime, timedelta
 
@@ -712,16 +713,18 @@ class WallClock(datetime):
         return cls.FIXED.astimezone(tz) if tz else cls.FIXED.replace(tzinfo=None)
 
 
-def test_a_host_clock_step_mid_session_does_not_cut_a_bar(monkeypatch):
-    # The host runs 20 s behind; at 10:04:00 NTP steps it right (the fix v1.5's warning asks for). v1.5
-    # kept the stale -19.7 s lag in the stepped frame, closed the 10:00 bar at 10:04:43 and dropped its tail.
+@pytest.mark.parametrize("skew", [20, -20])
+def test_a_host_clock_step_mid_session_does_not_cut_a_bar(monkeypatch, skew):
+    # The host runs 20 s behind (or ahead); at 10:04:00 NTP steps it right (the fix v1.5's warning asks for).
+    # v1.5 kept the stale lag in the stepped frame, closed the 10:00 bar early and dropped its tail. The
+    # production bar clock runs here, as main() starts it for a live feed.
     monkeypatch.setattr(engine, "datetime", WallClock)
-    start, step, skew = ist(2026, 9, 25, 9, 59, 20), ist(2026, 9, 25, 10, 4, 0), timedelta(seconds=20)
+    start, step, offset = ist(2026, 9, 25, 9, 59, 20), ist(2026, 9, 25, 10, 4, 0), timedelta(seconds=skew)
     mono = [0.0]
 
     def at(true):                                     # move both clocks to true exchange time `true`
         mono[0] = (true - start).total_seconds()
-        WallClock.FIXED = true - skew if true < step else true
+        WallClock.FIXED = true - offset if true < step else true
 
     async def scenario():
         at(start)
@@ -729,29 +732,32 @@ def test_a_host_clock_step_mid_session_does_not_cut_a_bar(monkeypatch):
                                    asyncio.get_running_loop(), token_map={1234: "SWIGGY"}, require_feed_liveness=True,
                                    clock=engine.steady_clock(monotonic=lambda: mono[0]))
         a.mark_feed_reset()
+        bar_clock = asyncio.create_task(a.bar_clock(interval=0))
         trades = {ist(2026, 9, 25, 9, 59, 50): (1_000, 100.0), ist(2026, 9, 25, 10, 0, 10): (21_000, 100.0),
                   ist(2026, 9, 25, 10, 1, 0): (21_000, 101.0), ist(2026, 9, 25, 10, 4, 50): (41_000, 97.0),
-                  ist(2026, 9, 25, 10, 5, 20): (42_000, 97.5)}
+                  ist(2026, 9, 25, 10, 4, 58): (41_500, 96.5), ist(2026, 9, 25, 10, 5, 20): (42_000, 97.5)}
         true = start
         while true < ist(2026, 9, 25, 10, 5, 30):
             true += timedelta(seconds=0.1)
             sent = true - timedelta(seconds=0.3)                      # 0.3 s of latency
+            at(true)
             if sent in trades:
                 cum, price = trades[sent]
-                at(true)
                 a.broker_on_ticks(None, [kite_packet(cum, sent, price)])
                 await asyncio.sleep(0)
                 while not a.tick_queue.empty():
                     a.on_tick(a.tick_queue.get_nowait())
             if true.microsecond == 0:
-                at(true)
                 a.note_feed_alive(a.clock())                          # a heartbeat
-                a.flush_due_bars(a.clock())                           # the bar clock
+            await asyncio.sleep(0)                                    # the bar clock's turn
+            await asyncio.sleep(0)
+        bar_clock.cancel()
+        await asyncio.gather(bar_clock, return_exceptions=True)
         return a.market_state["SWIGGY"], a.dropped_ticks
 
     bars, dropped = asyncio.run(scenario())
     bar = bars.loc[pd.Timestamp(ist(2026, 9, 25, 10, 0))]
-    assert (bar["Low"], bar["Close"], bar["Volume"], dropped) == (97.0, 97.0, 40_000.0, 0)
+    assert (bar["Low"], bar["Close"], bar["Volume"], dropped) == (96.5, 96.5, 40_500.0, 0)
 
 
 def test_a_host_clock_step_does_not_trip_the_feed_watchdog(monkeypatch):
@@ -925,3 +931,103 @@ def test_a_breakout_in_a_lost_last_bar_does_not_fire_again_at_the_next_open():
         return make_bars([103.0], volumes=[900_000], start=ist(2026, 9, 24, 15, 25))
 
     assert asyncio.run(run(crossed_at_1525)) == 0
+
+
+# ---------------------------------------------------------------- round 7: the 30 s rule, suspends, zeroed stamps
+def stamped(price, cum, stamp, ahead):
+    """A Kite print whose exchange stamp leads its receive time by ``ahead`` seconds."""
+    t = cum_tick(price, cum, stamp)
+    t.received = stamp - timedelta(seconds=ahead)
+    return t
+
+
+def test_a_print_dropped_as_far_ahead_blinds_its_bar_and_the_counter():
+    # A host ~30.4 s behind: whole-second stamps put some prints just over the 30 s limit and the rest under
+    # it. v1.6 kept the 10:00 bar built from the prints that got through, and credited the dropped print's
+    # shares to the 10:05 bar.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 5), 29.8))
+    a.on_tick(stamped(101.0, 1_100_000, ist(2026, 9, 25, 10, 2), 29.9))
+    a.on_tick(stamped(100.2, 1_400_000, ist(2026, 9, 25, 10, 4, 58), 30.2))  # just over the limit: dropped
+    assert a.dropped_ticks == 1 and a.current_bars["SWIGGY"]["partial"] is True
+    a.on_tick(stamped(100.3, 1_410_000, ist(2026, 9, 25, 10, 5, 1), 29.7))
+    a.on_tick(stamped(100.4, 1_420_000, ist(2026, 9, 25, 10, 6), 29.7))
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in a.market_state["SWIGGY"].index
+    assert a.current_bars["SWIGGY"]["Volume"] == 10_000 and a.current_bars["SWIGGY"]["partial"] is True
+
+
+def test_a_late_print_that_slips_past_the_rule_is_not_credited_with_the_day():
+    # Host 35 s behind: every print is dropped until one arrives 6 s late and gets through. Nothing had been
+    # accepted today, so v1.6 counted the whole day's counter into that one bar: a fake 70x RVOL.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    for second, cum in [(5, 7_000_000), (30, 7_020_000), (55, 7_040_000)]:
+        a.on_tick(stamped(100.5, cum, ist(2026, 9, 25, 10, 0, second), 35.0))
+    a.on_tick(stamped(100.9, 7_055_000, ist(2026, 9, 25, 10, 1), 29.0))
+    assert a.dropped_ticks == 3 and "SWIGGY" not in a.current_bars
+
+
+@pytest.mark.skipif(not hasattr(time, "CLOCK_BOOTTIME"), reason="Linux only")
+def test_the_steady_clock_keeps_counting_through_a_suspend():
+    # CLOCK_MONOTONIC stops while the host is suspended: after a laptop sleep, v1.6's live clock stayed
+    # behind by the sleep, every tick was dropped as far ahead and the run went on trading nothing.
+    assert engine.steady_clock.__defaults__[1] is engine._uptime
+    assert abs(engine._uptime() - time.clock_gettime(time.CLOCK_BOOTTIME)) < 1.0
+
+
+def test_a_run_whose_every_tick_is_far_ahead_stops_instead_of_running_blind():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    for second in range(0, 21, 2):                                        # 20 s of prints, all 40 s ahead
+        a.on_tick(stamped(100.0, 1_000_000 + second, ist(2026, 9, 25, 10, 1, second), 40.0))
+    assert a.blind_for == 20.0
+    with pytest.raises(RuntimeError, match="stamped more than 30s ahead of this run's clock"):
+        asyncio.run(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01))
+
+
+def test_one_corrupt_stamp_does_not_stop_the_run(monkeypatch):
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 28, 9, 0))
+    a.on_tick(stamped(100.0, 1_000, ist(2026, 9, 28, 10, 50), 600.0))     # corrupt: dropped
+    a.on_tick(stamped(100.0, 1_100, ist(2026, 9, 28, 10, 50, 30), 0.3))   # believable again
+    a.on_tick(stamped(100.0, 1_200, ist(2026, 9, 28, 11, 0, 50), 600.0))  # another corrupt one, 20 s later
+    a.note_feed_alive(at=SessionClock.FIXED)
+
+    async def watch_briefly():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 0.1)
+
+    asyncio.run(watch_briefly())
+
+
+def test_a_zeroed_stamp_is_bucketed_in_feed_time(monkeypatch):
+    # The host runs 20 s fast. v1.6 bucketed a zeroed-stamp print by the raw host clock, so a print sent at
+    # 10:04:40 closed the 10:00 bar 20 s early and its last prints were dropped as late.
+    monkeypatch.setattr(engine, "datetime", WallClock)
+    WallClock.FIXED = ist(2026, 9, 25, 10, 5, 0, 300000)                 # true 10:04:40
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               token_map={1234: "SWIGGY"})
+    a.note_feed_lag(WallClock.FIXED, 20.3)
+    t = a._normalize({"instrument_token": 1234, "last_price": 100.0, "volume_traded": 10,
+                      "exchange_timestamp": datetime.fromtimestamp(0)})  # noqa: DTZ006 (as KiteTicker)
+    assert engine.bar_floor(t.timestamp) == ist(2026, 9, 25, 10, 0)
+
+
+def test_with_the_host_behind_a_first_print_after_the_first_bucket_is_blind():
+    # Pins the first-print rule itself (in exchange time): a connect at exchange 09:15:10, stamped 09:14:50 by
+    # a host 20 s behind, did not watch the open, so the day's counter cannot all belong to the 09:20 bar.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 14, 50))
+    a.on_tick(stamped(104.0, 420_000, ist(2026, 9, 25, 9, 22), 19.7))
+    a.on_tick(stamped(104.5, 421_000, ist(2026, 9, 25, 9, 25, 1), 19.7))
+    assert pd.Timestamp(ist(2026, 9, 25, 9, 20)) not in a.market_state["SWIGGY"].index
+
+
+def test_a_tick_handled_after_the_feed_went_down_is_not_a_crash():
+    # on_close's mark_feed_down is queued behind ticks already received; judging such a tick's watch start
+    # from "down" (datetime.max) must not overflow.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 0))
+    a.mark_feed_down()
+    a.on_tick(stamped(101.0, 5_000, ist(2026, 9, 25, 10, 0, 30), 19.7))
+    assert "SWIGGY" not in a.current_bars or a.current_bars["SWIGGY"]["partial"] is True

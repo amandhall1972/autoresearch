@@ -1,5 +1,83 @@
 # Changelog
 
+## v1.7 (2026-09-27)
+
+v1.6 went through a seventh adversarial review on a frozen snapshot
+(`ce04700`), with the same four areas. Every skeptic ran. All 13 findings were
+reproduced by their skeptic: 9 confirmed, 4 with part of the claim overstated,
+none refuted, no duplicates. One is high, 2 medium, 10 low. Twice the skeptic's
+refined fix replaced the finder's:
+- R7-KGW-1: the finder's re-check adopted a GTT that had already triggered
+  without the TRIGGERED alert.
+- R7-KGW-2: the finder's "refused tunnel = never sent everywhere" shrank the
+  GTT path's proxy-outage coverage from about two windows to one. It now
+  applies to the entry only.
+
+Every v1.7 regression test fails on the v1.6 snapshot and passes here, except
+these controls:
+- `test_an_outage_after_an_ambiguous_attempt_whose_gtt_never_lands_still_arms_one`,
+  `test_a_gtt_refused_at_the_proxys_tunnel_stays_on_the_ambiguous_path` and
+  `test_one_corrupt_stamp_does_not_stop_the_run`: cases the fixes must leave
+  alone. The last one fails if the run of far-ahead drops is not reset by a
+  believable tick;
+- the pins for v1.6 rules that no test covered (R7-DT-1, R7-DT-2, R7-DT-3):
+  `test_a_host_clock_step_mid_session_does_not_cut_a_bar` (now drives the
+  production bar clock, host ahead and behind),
+  `test_the_live_routers_clock_does_not_step_with_the_host_clock`,
+  `test_with_the_host_behind_a_first_print_after_the_first_bucket_is_blind`,
+  `test_a_tick_handled_after_the_feed_went_down_is_not_a_crash`, and
+  `test_when_the_vendor_cuts_the_listing_the_message_does_not_blame_the_lookback`
+  (now on a vendor's rolling window). Each fails on the mutation that reverts
+  its rule: the bar clock or the receive stamp back on the wall clock,
+  `exchange_clock` on the wall clock, the first-print rule in host time, the
+  feed-down guard removed, the vendor cutoff dropped.
+
+Existing tests changed:
+- `test_a_refused_tunnel_is_still_looked_up` pinned R7-KGW-2's wrong premise.
+  It is replaced by `test_an_entry_refused_at_the_proxys_tunnel_releases_the_symbol`
+  and the GTT-path control above.
+- `test_a_host_clock_step_mid_session_does_not_cut_a_bar` and
+  `test_when_the_vendor_cuts_the_listing_the_message_does_not_blame_the_lookback`
+  were strengthened as described.
+- StubKite gained `gtt_booked`: whether each failed GTT request still booked
+  its GTT.
+
+Verdict: ✔ confirmed by the independent skeptic, ◐ confirmed with part of the
+claim overstated. Severity is the skeptic's rating.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.6 defect | v1.7 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ◐ | After an ambiguous GTT attempt and its empty 15 s poll, a never-sent retry window kept calling `place_gtt` without reading the book again. A GTT the ambiguous request booked during that outage was not adopted, and a second whole-position GTT was armed. The duplicate watch then reported it. v1.6's per-outage window widened this path. Overstated: a booking later than the window already duplicates without any outage, and the watch reports it. | After an ambiguous attempt, every retry follows a successful read of the book. A match is adopted through the same code as the poll, so the "earlier run" and TRIGGERED alerts still apply. An unreadable book counts as part of the outage: nothing is placed. | `test_a_gtt_booked_during_a_later_outage_is_adopted_not_armed_again` (active and triggered), `test_after_an_ambiguous_attempt_nothing_is_placed_while_the_book_is_unreadable`, `test_an_outage_after_an_ambiguous_attempt_whose_gtt_never_lands_still_arms_one` (control) |
+| low | ◐ | v1.6 kept a refused tunnel (a proxy answering CONNECT with 403/407/502/503) ambiguous, on the premise that the proxy "got the request". It got only the CONNECT line: urllib3 writes the request only through an open tunnel. Behind such a proxy, a provably unsent entry blocked the symbol for the session. Overstated: the effect was conservative, and it matched the documentation. | For the entry, a refused tunnel is never sent, and the symbol is released (`_tunnel_refused`). The GTT path keeps it ambiguous on purpose, because attempts plus book polls cover a longer proxy outage than one never-sent window. | `test_an_entry_refused_at_the_proxys_tunnel_releases_the_symbol`, `test_a_gtt_refused_at_the_proxys_tunnel_stays_on_the_ambiguous_path` (control) |
+
+### Live feed
+
+| Sev | Verdict | v1.6 defect | v1.7 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | The 30 s rule dropped ticks one at a time. KiteTicker's whole-second stamps meant a host 30–31.5 s behind lost a random share of the prints, and the bar built from the rest was kept, evaluated and traded; the dropped shares landed in the next bar. The skeptic added that with a host far behind, one late print that slipped through was credited with the whole day's counter (a fake 70x RVOL). | A drop blinds the symbol, as a stall does. The forming bar is discarded (and back-filled), and the counter is re-baselined, even when nothing had been accepted that day. A lone corrupt stamp now costs one bar. | `test_a_print_dropped_as_far_ahead_blinds_its_bar_and_the_counter`, `test_a_late_print_that_slips_past_the_rule_is_not_credited_with_the_day` |
+| medium | ◐ | `steady_clock` ran on `CLOCK_MONOTONIC`, which stops while the host is suspended. After a laptop sleep of more than 30 s, every tick was dropped for the rest of the run and the watchdog, judging on the same stalled clock, never tripped. The skeptic added that the bar interrupted by the sleep could be kept, and its signal judged as fresh. Overstated: a socket left half-open by the sleep does trip the watchdog. | On Linux the clock counts suspended time (`CLOCK_BOOTTIME`). Everywhere, a run in which every stamped tick has been dropped as far ahead for 15 s stops (exit 1) instead of running blind. | `test_the_steady_clock_keeps_counting_through_a_suspend`, `test_a_run_whose_every_tick_is_far_ahead_stops_instead_of_running_blind`, `test_one_corrupt_stamp_does_not_stop_the_run` (control) |
+| low | ✔ | A zeroed-stamp print was bucketed by the raw host clock, outside feed time and the 30 s rule. A fast host plus one zeroed print closed a bar up to the offset early and traded it (predates v1.6). With a host far behind, zeroed prints still built bars. | The fallback is in feed time (the host clock minus the feed's lag), which errs early and so never cuts a bar. The far-behind case is covered by the two fixes above. | `test_a_zeroed_stamp_is_bucketed_in_feed_time` |
+
+### Lifecycle
+
+| Sev | Verdict | v1.6 defect | v1.7 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ✔ | An engine that started after the host had re-registered or removed a stop signal joined the existing route without checking that it still received the signal. The README advised re-registering for uvloop. A supervisor's stop then went to the host's callback (`loop.stop` cut the entry off) or killed the process mid-entry. v1.5 re-hooked on every `main()` and did not have this. | A route the host changed is taken back when the next engine hooks it: `_owned` checks the process-level handler and, where readable, the loop table. What the host set is recorded as what to hand back. | `test_an_engine_that_starts_after_the_host_took_the_signal_back_owns_it` (re-register and remove, on asyncio and uvloop) |
+| low | ✔ | A plain handler or `SIG_IGN` the host set with `signal.signal` during a run was replaced by the default afterwards. A host that ignored SIGHUP was then killed by it. On uvloop, a callback the host registered mid-run was removed without the warning. | On hand-back, the process-level handler is judged too: a plain handler or `SIG_IGN` set mid-run is kept, and a uvloop callback registered mid-run is left in place. The uvloop warning says which applied. | `test_a_plain_handler_or_ignore_the_host_sets_during_a_run_is_kept` (asyncio and uvloop), `test_on_uvloop_a_callback_the_host_registers_during_a_run_is_kept` |
+
+### Tests and docs
+
+| Sev | Verdict | v1.6 defect | v1.7 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | The steady-clock pins never ran the production bar clock and covered one step direction. Reverting the bar clock or the receive stamps to the wall clock left all 273 tests green. | The pin drives `bar_clock` as `main()` does, with the host ahead and behind. A router pin checks that `exchange_clock` ignores a host step. | see controls above |
+| low | ◐ | The "watching since, in exchange time" rule at the first-print site and the feed-down overflow guard were each unpinned. Overstated: the mutation's error is only what traded before the connect. | Two pins. | see controls above |
+| low | ✔ | v1.5's vendor-window pin went through the CSV file's own cutoff, so Yahoo's rolling-window path was untested. | The test's vendor uses `BrokerAdapter.history_cutoff`. | see controls above |
+| low | ✔ | README, CHANGELOG and the docstring said one late packet cannot move the skew median; it can when the minute holds only one other sample. | Qualified in all three. | documentation |
+| low | ✔ | The README's setup without uv did not say that the uvloop tests are skipped there. | Said. | documentation |
+| low | ✔ | The README said five review rounds and listed six. | Corrected (now seven). | documentation |
+
 ## v1.6 (2026-09-27)
 
 v1.5 went through a sixth adversarial review on a frozen snapshot (`68f13c7`),
