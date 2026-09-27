@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.12)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.13)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -831,6 +831,7 @@ class LiveTickAdapter:
         self._glitch_warned: set = set()                             # (symbol, day) already reported
         # A bucket in which the volume counter was re-baselined lost its head to the baseline.
         self._blind_bucket: Dict[str, Tuple[datetime, datetime]] = {}   # first and last bucket, inclusive
+        self._spill_bar: Dict[str, datetime] = {}    # a bar whose Close may be a print of the bucket after it
 
     def _normalize(self, t: dict) -> Optional[Tick]:
         if 'instrument_token' in t:
@@ -1054,20 +1055,25 @@ class LiveTickAdapter:
             return
         if tick.received is not None:
             self._ahead_run = None                                   # stamps are believable again
-        latest = None
+        latest = proof_by = None
         if tick.unstamped and tick.arrived is not None:
             # Prints queued ahead of this one may have raised the lag since the broker thread read it.
             tick.timestamp = tick.arrived - timedelta(seconds=self.feed_lag)
             # Feed time errs early (the lag includes the stamps' truncation); the latest it can have traded is
             # its receive time on the exchange's clock, as near as the lag samples tell it, and at least a
             # stamp's truncation past its feed time (a host behind the exchange leaves only one bound).
-            latest = max(tick.arrived - timedelta(seconds=self._receipt_skew()), tick.timestamp + timedelta(seconds=1))
+            proof_by = max(tick.arrived - timedelta(seconds=self._receipt_skew()), tick.timestamp + timedelta(seconds=1))
+            lowest = min((sample for _, sample in self._lag_samples), default=0.0)
+            latest = max(proof_by, tick.arrived + timedelta(seconds=max(0.0, 1.0 - lowest)))
         feed_time = tick.timestamp
+        spill = False
         if tick.unstamped and (open_bar := self.current_bars.get(sym)) is not None:
             # Feed time just past the open bar's end, while the bar clock's grace still holds it open: the print
             # joins that bar, so it cannot close the bar before the bar clock would, even if latency has just
             # risen. With no bar open, a bar it opens just past a boundary is provisional (below).
             end = open_bar['timestamp'] + timedelta(minutes=self.bar_minutes)
+            # A print that may be the next bucket's (none after the close) must not decide this bar's evaluation.
+            spill = end.time() < SESSION_CLOSE and (tick.timestamp >= end or (latest is not None and latest >= end))
             if end <= tick.timestamp < end + BAR_CLOSE_GRACE:
                 tick.timestamp = end - timedelta(microseconds=1)
             elif tick.timestamp < open_bar['timestamp']:
@@ -1138,7 +1144,7 @@ class LiveTickAdapter:
         # delivery puts the print after it.
         last = self._last_update.get(sym)
         proven = last is not None and last[0] == self._feed_epoch \
-            and boundary <= last[1] < boundary + width and last[1] <= (latest or last[1])
+            and boundary <= last[1] < boundary + width and last[1] <= (proof_by or last[1])
         ambiguous = tick.unstamped and boundary.time() != SESSION_OPEN and not proven
         provisional = ambiguous and active is None and tick.timestamp - boundary < BAR_CLOSE_GRACE
         if active is None:
@@ -1149,6 +1155,10 @@ class LiveTickAdapter:
         else:
             if not tick.unstamped or tick.timestamp - boundary >= BAR_CLOSE_GRACE:
                 active['provisional'] = False
+            if spill:
+                active['spill'] = True      # it may be the next bucket's print
+            elif not tick.unstamped:
+                active['spill'] = False     # received after it: in-order delivery puts it in this bucket
             active['High'] = max(active['High'], tick.price)
             active['Low'] = min(active['Low'], tick.price)
             active['Close'] = tick.price
@@ -1207,6 +1217,8 @@ class LiveTickAdapter:
                            index=pd.DatetimeIndex([idx], name=history.index.name))
         hole_start = self._hole_before(history.index[-1], idx) if len(history) else None
         self.market_state[sym] = history = pd.concat([history, row]) if len(history) else row
+        if bar.get('spill'):
+            self._spill_bar[sym] = idx
         logger.info(f"📊 [{sym}] 5m Bar Closed {idx:%Y-%m-%d %H:%M} | O: {bar['Open']:.2f} H: {bar['High']:.2f} "
                     f"L: {bar['Low']:.2f} C: {bar['Close']:.2f} | V: {bar['Volume']:,}")
 
@@ -1217,15 +1229,31 @@ class LiveTickAdapter:
                 self._notify(sym, idx, row.iloc[0])
                 return
             task = asyncio.get_running_loop().create_task(self._backfill_then_evaluate(sym, hole_start, idx, row.iloc[0],
-                                                                                    bar.get('ambiguous', False)))
+                                                                                    bar.get('ambiguous', False),
+                                                                                    bar.get('spill', False)))
             self._backfills.add(task)
             task.add_done_callback(self._backfills.discard)
             return
         self._notify(sym, idx, row.iloc[0])
-        self._evaluate(sym, history, idx)
+        if not self._spilled(sym, history, idx, bar.get('spill', False)):
+            self._evaluate(sym, history, idx)
+
+    def _spilled(self, sym: str, history: pd.DataFrame, idx: datetime, spill: bool) -> bool:
+        """Whether the bar at ``idx`` (the last of ``history``) must not be evaluated: it holds a print with no
+        exchange time that may be the next bucket's, or it follows such a bar, whose Close may be that print's."""
+        if spill:
+            logger.warning(f"[{sym}] The {idx:%H:%M} bar holds a print with no exchange time that may belong to the "
+                           f"next bar; it is not evaluated.")
+            return True
+        before = self._spill_bar.get(sym)
+        if before is not None and len(history) > 1 and history.index[-2] == pd.Timestamp(before):
+            logger.warning(f"[{sym}] The {idx:%H:%M} bar is not evaluated: the {before:%H:%M} bar's close before it "
+                           f"may be a print of this bar.")
+            return True
+        return False
 
     async def _backfill_then_evaluate(self, sym: str, start: datetime, idx: datetime, live_bar: pd.Series,
-                                      ambiguous: bool = False) -> None:
+                                      ambiguous: bool = False, spill: bool = False) -> None:
         try:
             fetched = await self.backfill(sym, start, idx)
             fetched = fetched[(fetched.index >= pd.Timestamp(start)) & (fetched.index < pd.Timestamp(idx))]
@@ -1242,6 +1270,8 @@ class LiveTickAdapter:
         for ts, bar in fetched.iterrows():
             self._notify(sym, ts, bar)
         self._notify(sym, idx, live_bar)
+        if self._spilled(sym, history.loc[:idx], idx, spill):
+            return
         before = pd.Timestamp(idx - timedelta(minutes=self.bar_minutes))
         if ambiguous and before in fetched.index and fetched.loc[before, 'Volume'] > 0:
             # The print with no exchange time that opened this bar may have traded in the bucket before it, which
@@ -1587,11 +1617,10 @@ class KiteOrderGateway(OrderGateway):
              "product": self.product, "price": plan.target},
         ]
         # ``known``: the GTT book's ids before this entry began (a match listed there belongs to someone else).
-        # ``ambiguous``: an attempt may have been received, so retries follow a read of the book. ``maybe_booked``:
-        # one may have reached Kite, so a GTT may exist (a proxy's refused tunnel is retried as ambiguous, but it
-        # carried nothing to Kite).
-        trigger_id, ambiguous, maybe_booked, fired, error = None, False, False, False, None
-        attempt, never_sent_until, recheck = 0, None, False
+        # ``maybe_booked``: an attempt may have reached Kite, so a GTT may exist and retries follow a read of the
+        # book (a proxy's refused tunnel is retried as ambiguous, but it carried nothing to Kite).
+        trigger_id, maybe_booked, fired, error = None, False, False, None
+        attempt, never_sent_until, recheck, book_refusal = 0, None, False, None
         while attempt < 3:
             found = None
             if recheck:
@@ -1625,7 +1654,7 @@ class KiteOrderGateway(OrderGateway):
                     if self._never_sent(e):
                         # Nothing left this machine, so nothing can exist from this request: retry through the
                         # outage for up to cancel_grace without using up an attempt.
-                        recheck = ambiguous
+                        recheck = maybe_booked                 # only a GTT that may exist needs the book
                         never_sent_until = never_sent_until or time.monotonic() + self.cancel_grace
                         if time.monotonic() >= never_sent_until:
                             break
@@ -1635,9 +1664,10 @@ class KiteOrderGateway(OrderGateway):
                     never_sent_until = None                    # a later outage gets its own window
                     # The request may have reached the broker, which can still be creating the GTT: a blind
                     # retry would arm a second one that sells the whole position again.
-                    ambiguous = True
                     maybe_booked = maybe_booked or not self._tunnel_refused(e)
                     found, book_error = await self._await_gtt(sym, plan, filled, exclude=known or set())
+                    if found is None and book_error is not None and is_permanent_error(book_error):
+                        book_refusal = book_error              # e.g. an expired session: named in the alert below
                     if found is None and (book_error is None or not maybe_booked):
                         continue                               # none appeared in cancel_grace, or none can exist: retry
                     if found is None:
@@ -1665,13 +1695,17 @@ class KiteOrderGateway(OrderGateway):
             self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): every GTT request failed "
                         f"(last: {error!r}) and at least one may still have been created. CHECK THE GTT BOOK.")
         elif trigger_id is None:
+            book = f"; the GTT book answered {book_refusal!r}" if book_refusal not in (None, error) else ""
             self._alert(f"[{sym}] POSITION OPEN WITHOUT EXITS: {filled} shares bought (order {order_id}) but no GTT "
-                        f"could be placed (last: {error!r}).")
+                        f"could be placed (last: {error!r}){book}.")
         return Fill(sym, filled, avg, order_id, trigger_id, exits_unknown=trigger_id is None and maybe_booked,
                     exits_fired=fired)
 
     async def _enter_and_protect(self, plan: OrderPlan, tag: str, known: Optional[set]) -> Optional[Fill]:
         k, sym = self.kite, plan.signal.symbol
+        if self.stopping:          # a stop handled since execute() checked; no await between here and the send
+            logger.warning(f"[{sym}] Entry not sent: shutdown began.")
+            return None
         try:
             order_id = str(await asyncio.to_thread(
                 k.place_order, variety=k.VARIETY_REGULAR, exchange=self.exchange, tradingsymbol=sym,
@@ -2224,30 +2258,39 @@ class _StopRoutes:
             return
         route['reclaim'] = loop.call_later(RECLAIM_POLL, self._reclaim, loop, signum, route)
 
+    def forget_closed(self) -> None:
+        """Drop the routes of a loop that ended without handing back, or the parent's, inherited by a forked child.
+        A dispatcher of the dead loop still in place is reset first; where it cannot be (not the main thread), the
+        route is kept for the next main-thread engine (or run()) to reset."""
+        for signum, route in list(self.routes.items()):
+            if not (route['loop'].is_closed() or route['pid'] != os.getpid()):
+                continue
+            if route['pid'] == os.getpid():
+                current = signal.getsignal(signum)
+                # A dispatcher of the dead loop (uvloop's, the engines' or one the host re-registered on it, or the
+                # plain one) swallows every stop, and taken as the next engine's `previous` it would be handed back.
+                # asyncio's close reset its own.
+                dead = current is not None and (
+                    current is route['handler'] or getattr(current, '__self__', None) is route['loop'])
+                if dead:
+                    try:
+                        signal.signal(signum, _host_handler(route, signum, forked=False))
+                    except (ValueError, OSError):
+                        continue
+                unreleased = route['handlers'] is not None or (dead and current is (route['handler'] or route['installed']))
+                if any(getattr(c, 'held', False) for c in route['callbacks']) and unreleased:
+                    logger.warning(f"Signal {signum} was still held by a finished main(hold_signals=True) when its "
+                                   f"loop closed: it was never released (engine.release_signals()).")
+            self.routes.pop(signum, None)
+
     def hook(self, loop: asyncio.AbstractEventLoop, callback: Callable[[int], None]) -> List[int]:
         """Route every stop signal this loop can take to ``callback``; returns the signals hooked."""
         hooked = []
+        self.forget_closed()
         for signum in STOP_SIGNALS:
             route = self.routes.get(signum)
-            if route is not None and (route['loop'].is_closed() or route['pid'] != os.getpid()):
-                if route['pid'] == os.getpid():
-                    current = signal.getsignal(signum)
-                    # A dispatcher of the dead loop (uvloop's, the engines' or one the host re-registered on it, or the
-                    # plain one) swallows every stop, and taken as the next engine's `previous` it would be handed back.
-                    # asyncio's close reset its own.
-                    dead = current is not None and (
-                        current is route['handler'] or getattr(current, '__self__', None) is route['loop'])
-                    unreleased = route['handlers'] is not None or (dead and current is (route['handler'] or route['installed']))
-                    if any(getattr(c, 'held', False) for c in route['callbacks']) and unreleased:
-                        logger.warning(f"Signal {signum} was still held by a finished main(hold_signals=True) when its "
-                                       f"loop closed: it was never released (engine.release_signals()).")
-                    if dead:
-                        try:
-                            signal.signal(signum, _host_handler(route, signum, forked=False))
-                        except (ValueError, OSError):
-                            pass
-                del self.routes[signum]                       # a loop that ended without handing back, or the
-                route = None                                  # parent's, inherited by a forked child
+            if route is not None and route['loop'].is_closed():
+                continue                                      # its dead dispatcher awaits the main thread (see above)
             if route is not None and route['loop'] is not loop:
                 continue                                      # another live loop owns this signal
             if route is None or not self._owned(route, signum):
@@ -2375,19 +2418,24 @@ def _forget_inherited_routes() -> None:
     routes, _STOP_ROUTES.routes = _STOP_ROUTES.routes, {}
     for signum, route in routes.items():
         current, dispatcher = signal.getsignal(signum), route['handler'] or route['installed']
-        _STOP_ROUTES.inherited[signum] = (dispatcher, _host_handler(route, signum))
+        default = signal.default_int_handler if signum == signal.SIGINT else signal.SIG_DFL
+        # asyncio: a host loop callback registered mid-run sits under the same shared dispatcher, and the parent's
+        # hand-back keeps it. It cannot run here, so the child gets the default, not the plain handler it replaced.
+        handlers = route['handlers'] if route['handler'] is None else None
+        entry = handlers.get(signum) if handlers is not None else None
+        host = default if handlers is not None and (entry is None or entry._callback != _STOP_ROUTES._dispatch) \
+            else _host_handler(route, signum)
+        _STOP_ROUTES.inherited[signum] = (dispatcher, host)
         if current is not dispatcher and not _loop_bound(current):
             continue                      # the host changed it (a SIG_IGN guard included): leave what it set
-        default = signal.default_int_handler if signum == signal.SIGINT else signal.SIG_DFL
         try:                              # a host loop callback set mid-run (uvloop) is dead here too: the default
-            signal.signal(signum, _host_handler(route, signum) if current is dispatcher else default)
+            signal.signal(signum, host if current is dispatcher else default)
         except (ValueError, OSError):
             pass
-    if routes:
-        try:
-            signal.set_wakeup_fd(-1)      # the parent loop's self-pipe (3.12's asyncio drops it on fork too)
-        except (ValueError, OSError):
-            pass
+    try:                                  # at every fork, even one before any engine hooked, as 3.12's asyncio does:
+        signal.set_wakeup_fd(-1)          # the parent loop's self-pipe
+    except (ValueError, OSError):
+        pass
 
 if hasattr(os, 'register_at_fork'):
     os.register_at_fork(after_in_child=_forget_inherited_routes)
@@ -2585,7 +2633,12 @@ def run(argv: Optional[List[str]] = None) -> int:
     """CLI entry. Stop signals stay owned by the engine until asyncio.run has finished its teardown
     (which can wait seconds for a worker thread), so a late signal cannot replace main()'s result."""
     configure_logging()
+    _STOP_ROUTES.forget_closed()              # a closed loop's dead dispatcher is not the host's, to be restored below
     saved = {signum: signal.getsignal(signum) for signum in STOP_SIGNALS}
+    for signum, previous in saved.items():
+        inherited = _STOP_ROUTES.inherited.get(signum)
+        if inherited is not None and previous is inherited[0]:
+            saved[signum] = inherited[1]      # a forked child restored the parent engines' dispatcher (as in _take)
     result: List[int] = []
     loops: List[asyncio.AbstractEventLoop] = []
 

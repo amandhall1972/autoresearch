@@ -1,5 +1,111 @@
 # Changelog
 
+## v1.13 (2026-09-27)
+
+v1.12 went through a thirteenth adversarial review on a frozen snapshot
+(`85900f5`), with the same four areas. Every finder and skeptic completed.
+There were 13 findings, with one duplicate across areas: R13-DATA-DOCS-1 is
+R13-LIFECYCLE-5. That leaves 12 defects. None was refuted: 10 confirmed, 3
+with part of the claim overstated. Of the 12 distinct defects, 4 are medium
+and 8 low. Where the fix is not the finder's:
+- R13-ORDERS-1: the finder's `recheck = maybe_booked` on its own lost a
+  diagnosis. After a refused tunnel, a book answering 403 and then the proxy
+  down, the alert no longer named the expired session. It ships with
+  R13-ORDERS-3's fix, which remembers a permanent book error and names it, and
+  a control pins the pair.
+- R13-FEED-2: the finder's flag skipped only the open bar that a print from the
+  next bucket may have joined. That print's price stays the bar's Close, which
+  the next bar's first-crossing test compares against, so a stale crossing
+  still fired one bar late. The bar after a spill bar is skipped too. A print
+  received after the close cannot spill, and a stamped print of the bar's own
+  bucket received after it clears the flag.
+- R13-FEED-1: the skeptic added the cost the finder left out. The true upper
+  bound files prints received up to a second before a boundary late on every
+  host, synced ones included.
+- R13-LIFECYCLE-5 / R13-DATA-DOCS-1: v1.13 takes the data/docs version. It also
+  records the default in the child's inherited map, so a child that lifts a
+  guard with the saved handler gets the default after its engine as well. A
+  test pins this.
+- R13-LIFECYCLE-3: a route whose dead dispatcher a worker thread cannot reset
+  is kept for the next main-thread engine (or `run()`), not dropped.
+- R13-LIFECYCLE-4: docs only. The finder's code option added state for a
+  documented misuse, and it could not cover the window before the child's
+  engine hooks.
+
+Every v1.13 regression test fails on the v1.12 snapshot and passes here, on
+Python 3.11 and 3.10 (`test_the_fast_modules_pass_without_the_kite_extra`
+fails there too, because it runs the fast modules). The exceptions are these
+controls:
+- `test_a_refused_tunnel_then_a_dead_proxy_still_names_the_expired_session`:
+  v1.12 named the session through the recheck that v1.13 drops. It fails when
+  the permanent book error is not kept.
+- `test_an_open_bar_joined_by_a_print_that_may_be_the_next_buckets_is_not_evaluated`
+  for a print that traded 2 s before the boundary, whose bar is still
+  evaluated.
+- `test_a_stamped_print_of_the_bar_received_after_a_print_that_may_spill_clears_it`
+  and `test_the_sessions_last_bar_joined_by_a_print_received_after_the_close_is_still_evaluated`.
+  Each fails when its exemption is removed.
+- `test_a_forked_helper_does_not_get_back_a_plain_handler_the_host_replaced_with_a_loop_callback_mid_run`
+  on uvloop, which was already right.
+- `test_a_held_run_whose_loop_closed_unreleased_leaves_no_dead_dispatcher_behind[asyncio-a loop without signal support]`.
+  This R12 pin now runs without uvloop, and there it fails when the reset is
+  removed.
+
+Every v1.13 rule was also mutated on a copy, and each mutant failed its pins:
+- the wakeup-fd clear back under `if routes:` (4 tests);
+- the thread engine dropping the route (2);
+- `run()` without the closed-route cleanup (2), or without the inherited
+  mapping (2);
+- the inherited map recording the stale plain handler (1);
+- the book error not kept (2);
+- the spill exemption at the close (1), and the spill flag never cleared (1);
+- the next-bar skip removed (1);
+- the proof checked against the new bound instead of the guarded one (1).
+
+Existing tests changed:
+- The forward-stamp control is now
+  `test_after_a_forward_stamp_a_rebaselining_print_still_blinds_the_bucket_it_traded_in`.
+  Under the true bound, a forward stamp also blinds the next bucket, which is
+  back-filled. The assertion now checks only that the bucket the print traded
+  in is blinded, never kept short.
+- `test_a_child_that_lifted_a_guard_with_the_saved_dispatcher_is_stopped_after_its_own_engine`
+  also runs the child's engine through `run()`.
+- `test_a_held_run_whose_loop_closed_unreleased_leaves_no_dead_dispatcher_behind`
+  skips only the cases that need uvloop. Without it, the asyncio case of the
+  dead plain-handler reset still runs (R13-DATA-DOCS-2).
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.12 defect | v1.13 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ◐ | After a refused tunnel, a never-sent error (a proxy restart refusing connections) sent the GTT loop into a book recheck, which only reads the book. The book sits behind the same proxy and stayed unreadable, so the loop gave up with attempts unused: POSITION OPEN WITHOUT EXITS after about 3 windows, not the promised full retries. Overstated: it needs refusals that outlast a window after the connect failure, and no documented guarantee named this path. | The book is read before a retry only after an attempt that may have reached Kite. | `test_a_proxy_restart_inside_a_tunnel_outage_still_uses_every_attempt` |
+| low | ✔ | A stop handled between `execute()`'s check and the entry task's first step still sent `place_order`, contradicting "once shutdown has begun, no new entry is sent". The window is narrow: a stop and the LTP reply both pending while the loop is busy. | The entry task checks again right before sending, with no await in between. | `test_a_stop_handled_after_the_entry_was_scheduled_but_before_it_ran_sends_nothing` |
+| low | ✔ | With refused tunnels alone, an expired session reported by the GTT book was never named. The alert named only the proxy, so the operator learned only that the position was unprotected. | The book's permanent error is kept and named: "…; the GTT book answered TokenException(…)". | `test_refused_tunnels_name_the_expired_session_the_gtt_book_answered`, `test_a_refused_tunnel_then_a_dead_proxy_still_names_the_expired_session` (control) |
+
+### Live feed
+
+| Sev | Verdict | v1.12 defect | v1.13 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ◐ | Each lag sample is latency plus truncation minus the host's offset, so it gives only a lower bound on how far the host runs behind. On a host running behind, the lowest-sample bound subtracted that sample's latency too. When the late packet was the guard's upper median, the offset was dropped altogether. A print's "latest possible time" then fell before the print itself. B was filed in a bucket where the name never traded, and that bar was evaluated: R12-FEED-1's fake breakout, back. On the same host, the opening print was dropped as pre-open, and a re-baseline left the next bar short. Overstated: with many samples in the window, the misfiling window is about one stamp's truncation, and an offset with no sample stays uncorrectable. | The latest possible time is receipt + 1 s − the lowest sample. That is a true upper bound whenever the print's latency is at least the window's lowest. The proof keeps the median-guarded bound, so a forward stamp still proves nothing. The cost: prints received up to a second before a boundary are filed late on every host, and more after a forward stamp. These are missed signals, documented. | `test_on_a_host_behind_the_exchange_an_unstamped_trade_is_not_filed_in_a_bucket_before_it_traded` (three samples, and two), `test_on_a_host_behind_the_exchange_an_unstamped_opening_print_with_samples_is_not_dropped_as_pre_open`, `test_on_a_host_behind_the_exchange_a_rebaselining_print_blinds_the_bucket_it_traded_in` |
+| medium | ✔ | When a bar of the bucket before was still open, an unstamped print that could belong to the next bucket joined it. It did so either inside the 2 s grace, or through a feed time pulled back by a late packet. It became that bar's Close and part of its volume, and the bar was evaluated with no log: a fake breakout the exchange bars never show. This is the bar-open sibling of R12-FEED-1, and it predates v1.12. | Such a print marks the bar as a spill bar. Neither that bar nor the next one (whose first-crossing test would compare against the print's price) is evaluated, and each skip is logged. A stamped print of the bar's own bucket received after it clears the mark. The session's last bar is exempt. | `test_an_open_bar_joined_by_a_print_that_may_be_the_next_buckets_is_not_evaluated` (within the grace, after a late packet, and a control), `test_the_bar_after_one_whose_close_may_be_the_next_buckets_print_is_not_evaluated`, `test_a_stamped_print_of_the_bar_received_after_a_print_that_may_spill_clears_it` (control), `test_the_sessions_last_bar_joined_by_a_print_received_after_the_close_is_still_evaluated` (control) |
+| low | ✔ | The new limitation understated which prints are filed late. It missed prints received before the boundary: up to 1 s minus the lag on a synced host, and every bucket's last moments on a host running ahead. It also said "for a minute" where a late packet's lag holds until the next sample. | Docs: the limitation gives the real window, including the host-ahead lead, forward stamps, the open-bar spill and its cost, and the unmeasurable offset. | (docs) |
+
+### Lifecycle
+
+| Sev | Verdict | v1.12 defect | v1.13 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | `run()` saved the signal handlers before its engine started and restored them afterwards. After a held run closed unreleased, it put back the dead dispatcher that its own engine had just reset. In a forked child that had lifted a guard with the saved handler, it put back the parent engines' dispatcher. Either way every later stop was swallowed, so the R12 fixes worked only through `main()`. | `run()` first drops closed routes (resetting their dead dispatchers), then maps an inherited dispatcher to the host's handler, as `_take` does, before it saves anything. | `test_run_after_a_held_run_closed_unreleased_leaves_no_dead_dispatcher_behind` (uvloop, and a loop without signal support), `test_a_child_that_lifted_a_guard_with_the_saved_dispatcher_is_stopped_after_its_own_engine[run-*]` |
+| medium | ✔ | The at-fork reset cleared the wakeup fd only when engines were routed. uvloop points the wakeup fd at its self-pipe whenever it runs, and asyncio does once any loop callback exists. A worker forked before the engine hooked, such as a pool started first, therefore wrote every stop it handled in Python into the parent's pipe. That covers its own graceful handler, SIGINT's default, and 3.11's Runner. The parent's engine then shut down on a signal sent to the worker. It predates v1.12. | The wakeup fd is cleared at every fork, as CPython 3.12's asyncio does. | `test_a_worker_forked_before_the_engine_hooked_does_not_forward_its_stops_to_the_parent` (SIGTERM and SIGINT; asyncio and uvloop) |
+| low | ✔ | An engine in a worker thread cannot reset a signal. Its `hook()` still dropped the closed route, losing the only record that the handler in place was dead. The next main-thread engine then handed it back. | The route is kept until a main-thread engine (or `run()`) can reset it. | `test_an_engine_in_a_thread_leaves_a_dead_dispatcher_for_the_main_thread_to_reset` (uvloop, and a loop without signal support) |
+| low | ◐ | The README told a child to lift a guard with "what the host had before its engines started". On 3.11 under `asyncio.run`, that is the Runner's SIGINT handler, which the same paragraph says cannot run in the child, so the child's first Ctrl-C was swallowed. Overstated: a second Ctrl-C stops it. | Docs: lift a guard with `SIG_DFL` (`signal.default_int_handler` for SIGINT) or with a plain handler, never with anything that ran through a loop. | (docs) |
+| low | ✔ | R13-LIFECYCLE-5, and the same defect as R13-DATA-DOCS-1. On asyncio, a loop callback the host registered mid-run sits under the engines' shared dispatcher. At fork the child therefore got the plain handler the host had used before the run, which the host had replaced. The README promises the default here, and the parent's hand-back keeps the callback. It predates v1.12. | An asyncio table entry that is not the engines' gives the child the default, both at fork and in its inherited map. | `test_a_forked_helper_does_not_get_back_a_plain_handler_the_host_replaced_with_a_loop_callback_mid_run` (asyncio and uvloop; before and after its own engine), `test_a_child_that_lifted_a_guard_after_the_host_moved_to_a_loop_callback_gets_the_default_after_its_engine` |
+
+### Tests and docs
+
+| Sev | Verdict | v1.12 defect | v1.13 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | Without uvloop, the only non-uvloop pin of the dead plain-dispatcher reset was skipped, although the README says only uvloop cases are. A mutant without the reset passed the whole suite on the documented pip path. | The test skips only the cases that need uvloop, and imports it lazily. | `test_a_held_run_whose_loop_closed_unreleased_leaves_no_dead_dispatcher_behind[asyncio-a loop without signal support]` |
+
 ## v1.12 (2026-09-27)
 
 v1.11 went through a twelfth adversarial review on a frozen snapshot

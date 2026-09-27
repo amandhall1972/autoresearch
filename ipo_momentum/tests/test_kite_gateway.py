@@ -1049,3 +1049,55 @@ def test_a_gtt_armed_after_a_504_is_still_watched_for_a_duplicate():
     gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
     fill = asyncio.run(gw.execute(kite_plan()))
     assert fill.exit_order_id == "777" and len(gw.alerts) == 1 and "to rule out a duplicate" in gw.alerts[0]
+
+
+# ---------------------------------------------------------------- round 13: only a GTT that may exist gates a retry
+def test_a_proxy_restart_inside_a_tunnel_outage_still_uses_every_attempt():
+    # Refused tunnels, then a moment of refused connections (the proxy restarting), then refused tunnels again, with the
+    # book behind the same proxy. v1.12 took the refused tunnel for a request that may have booked a GTT, so after the
+    # never-sent error it only read the (refused) book, and gave up with attempts unused: POSITION OPEN WITHOUT EXITS.
+    tunnel = refused_tunnel()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[tunnel, unreachable_proxy(), tunnel, {"trigger_id": 900}])
+    proxy_outage(kite, tunnel, until_places=4)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == ("900", False) and kite.gtt_places == 4 and gw.alerts == []
+
+
+def test_refused_tunnels_name_the_expired_session_the_gtt_book_answered():
+    # Every GTT request is refused at the tunnel while the book answers 403 (an expired session, which a restart does
+    # not fix either). v1.12's alert named only the proxy.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}], gtt_results=[refused_tunnel()])
+    expiring_book(kite, 1, TOKEN)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == (None, False) and kite.gtt_places == 3
+    assert "POSITION OPEN WITHOUT EXITS" in gw.alerts[-1] and "the GTT book answered TokenException" in gw.alerts[-1]
+
+
+def test_a_refused_tunnel_then_a_dead_proxy_still_names_the_expired_session():
+    # Control: v1.12 named the session here through the book recheck that v1.13 no longer runs after a refused tunnel.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused_tunnel(), unreachable_proxy()])
+    expiring_book(kite, 1, TOKEN)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == (None, False)
+    assert "POSITION OPEN WITHOUT EXITS" in gw.alerts[-1] and "TokenException" in gw.alerts[-1]
+
+
+def test_a_stop_handled_after_the_entry_was_scheduled_but_before_it_ran_sends_nothing(monkeypatch):
+    # The stop can be handled between execute()'s check and the entry task's first step (a loop callback queued behind
+    # the LTP reply). v1.12 still sent place_order, although "once shutdown has begun, no new entry is sent".
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}])
+    gw = fast_gateway(kite)
+    real_uuid4 = engine.uuid.uuid4
+
+    def uuid4():                                        # called just before the entry task is scheduled
+        asyncio.get_running_loop().call_soon(setattr, gw, "stopping", True)
+        return real_uuid4()
+
+    monkeypatch.setattr(engine.uuid, "uuid4", uuid4)
+    assert asyncio.run(gw.execute(kite_plan())) is None
+    assert "order.place" not in kite.routes()

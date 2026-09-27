@@ -1642,9 +1642,10 @@ def test_on_a_host_behind_the_exchange_a_rebaselining_print_still_blinds_the_buc
     assert blinded(a, ist(2026, 9, 25, 10, 5))
 
 
-def test_one_forward_stamp_does_not_drag_a_prints_latest_time_late():
-    # Control: a print stamped 20 s ahead leaves a -20 s sample. Taken as the host's offset, it would put this print's
-    # latest time in the next bucket and blind the wrong one, keeping the right one short.
+def test_after_a_forward_stamp_a_rebaselining_print_still_blinds_the_bucket_it_traded_in():
+    # A print stamped 20 s ahead leaves a -20 s sample, which could also be a host 20 s behind: from v1.13 the print's
+    # latest time moves up to 21 s late and the next bucket is blinded too (back-filled). The bucket the print traded
+    # in must still be blinded, never kept short.
     now = [ist(2026, 9, 25, 10, 4, 20)]
     a = clocked(now)
     a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
@@ -1653,7 +1654,7 @@ def test_one_forward_stamp_does_not_drag_a_prints_latest_time_late():
     a.mark_feed_reset(at=ist(2026, 9, 25, 10, 4, 40))
     now[0] = ist(2026, 9, 25, 10, 4, 45)
     a.on_tick(a._normalize(zeroed(1_200_000, 104.0)))
-    assert blinded(a, ist(2026, 9, 25, 10, 0)) and not blinded(a, ist(2026, 9, 25, 10, 5))
+    assert blinded(a, ist(2026, 9, 25, 10, 0))
 
 
 # ---------------------------------------------------------------- round 11: every bucket a print can belong to; pins
@@ -1867,3 +1868,176 @@ def test_a_bar_an_unstamped_print_opened_while_closing_a_partial_bar_is_not_eval
 
     asyncio.run(scenario())
     assert pd.Timestamp(ist(2026, 9, 25, 11, 5)) not in [idx for _, idx in alpha.evaluated]
+
+
+# ---------------------------------------------------------------- round 13: a true upper bound; bars a print may spill
+def at_host(price, cum, stamp, delay, behind=0.0):
+    """A stamped print received ``delay`` s after its stamp (exchange time) by a host ``behind`` s behind the exchange."""
+    return stamped(price, cum, stamp, behind - delay)
+
+
+def quiet_until_1000(now, behind=0.0, **kwargs):
+    """History to 09:50 and a 09:55 bar the bar clock closed, on a host ``behind`` s behind the exchange."""
+    host = lambda t: t - timedelta(seconds=behind)                      # noqa: E731
+    history = pd.concat([session_history(24), make_bars([100.0] * 8, start=ist(2026, 9, 25, 9, 15))])  # to 09:50
+    a = clocked(now, history=history, **kwargs)
+    a.mark_feed_reset(at=host(ist(2026, 9, 25, 9, 0)))
+    a.on_tick(at_host(100.0, 10_000, ist(2026, 9, 25, 9, 55, 10), 0.3, behind))
+    a.on_tick(at_host(100.2, 13_000, ist(2026, 9, 25, 9, 57), 0.3, behind))
+    a.note_feed_alive(host(ist(2026, 9, 25, 10, 0, 3)))
+    a.flush_due_bars(host(ist(2026, 9, 25, 10, 0, 3)))                  # closes 09:55
+    return a, host
+
+
+@pytest.mark.parametrize("quotes", [[(10, 0.6), (20, 0.8), (40, 5.0)], [(20, 0.8), (40, 5.0)]])
+def test_on_a_host_behind_the_exchange_an_unstamped_trade_is_not_filed_in_a_bucket_before_it_traded(quotes):
+    # A host 3 s behind: each lag sample is latency + truncation - 3 s, and one quote came 5 s late. v1.12's latest time
+    # subtracted the lowest sample, latency and all, or dropped the offset when the late sample was the guard's upper
+    # median: B, traded at 10:05:00.15, was filed in 10:00, where the name never traded, and that bar was evaluated.
+    alpha = RecordingAlpha()
+    truth = make_bars([100.2], volumes=[401_000], start=ist(2026, 9, 25, 10, 5))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 7, 300000)]
+        a, host = quiet_until_1000(now, behind=3.0, loop=asyncio.get_running_loop(), backfill=broker_of(truth))
+        a.alpha = alpha
+        for second, delay in quotes:
+            a.on_tick(at_host(100.2, 13_000, ist(2026, 9, 25, 10, 4, second), delay, 3.0))
+        now[0] = host(ist(2026, 9, 25, 10, 5, 0, 450000))                 # B: traded 10:05:00.15, latency 0.3
+        a.on_tick(a._normalize(zeroed(413_000, 102.0)))
+        assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 5)
+        a.on_tick(at_host(100.2, 414_000, ist(2026, 9, 25, 10, 6), 0.3, 3.0))
+        a.on_tick(at_host(100.2, 414_100, ist(2026, 9, 25, 10, 10, 1), 0.3, 3.0))
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in [idx for _, idx in alpha.evaluated]
+
+
+def test_on_a_host_behind_the_exchange_an_unstamped_opening_print_with_samples_is_not_dropped_as_pre_open():
+    # Samples left from the last close, on a host 3 s behind: one normal, one late. v1.12 dropped the offset and the
+    # opening print, received at 09:15:00.3 on the exchange's clock (09:14:57.3 on the host's), as pre-open.
+    host = lambda t: t - timedelta(seconds=3.0)                          # noqa: E731
+    now = [host(ist(2026, 9, 25, 9, 0))]
+    a = clocked(now, history=session_history(24), started_at=host(ist(2026, 9, 24, 15, 0)))
+    a.mark_feed_reset(at=host(ist(2026, 9, 24, 15, 0)))
+    for second, lag in [(10, 0.8), (40, 5.0)]:
+        a.note_feed_lag(host(ist(2026, 9, 24, 15, 29, second)), lag - 3.0)
+    now[0] = host(ist(2026, 9, 25, 9, 15, 0, 300000))
+    a.on_tick(a._normalize(zeroed(500_000, 108.0)))
+    a.on_tick(at_host(106.0, 520_000, ist(2026, 9, 25, 9, 16), 0.3, 3.0))
+    bar = a.current_bars["SWIGGY"]
+    assert (a.dropped_ticks, bar["timestamp"], bar["Open"], bar["High"]) == (0, ist(2026, 9, 25, 9, 15), 108.0, 108.0)
+
+
+def test_on_a_host_behind_the_exchange_a_rebaselining_print_blinds_the_bucket_it_traded_in():
+    # v1.12 blinded only 10:00 for a print that traded at 10:05:00.1, so the 10:05 bar was kept short.
+    host = lambda t: t - timedelta(seconds=3.0)                          # noqa: E731
+    now = [host(ist(2026, 9, 25, 10, 4, 10))]
+    a = clocked(now)
+    a.mark_feed_reset(at=host(ist(2026, 9, 25, 9, 0)))
+    a.on_tick(at_host(100.0, 1_000_000, ist(2026, 9, 25, 10, 3, 50), 0.7, 3.0))
+    for second, delay in [(20, 0.8), (40, 5.0)]:
+        a.on_tick(at_host(100.0, 1_000_000, ist(2026, 9, 25, 10, 4, second), delay, 3.0))
+    a.mark_feed_reset(at=host(ist(2026, 9, 25, 10, 4, 58)))                # a reconnect
+    now[0] = host(ist(2026, 9, 25, 10, 5, 0, 400000))                     # traded 10:05:00.1, latency 0.3
+    a.on_tick(a._normalize(zeroed(1_300_000, 101.0)))
+    assert blinded(a, ist(2026, 9, 25, 10, 5))
+
+
+@pytest.mark.parametrize("quotes,traded,latency,spills", [
+    ([(10, 0.8), (20, 0.8), (40, 0.8)], 1.7, 0.8, True),                 # within the grace: joins the open bar
+    ([(10, 0.3), (20, 5.0), (40, 0.3)], 0.15, 0.3, True),                # one late packet: feed time inside the bar
+    ([(10, 0.3), (20, 0.3), (40, 0.3)], -2.0, 0.3, False),               # control: traded 2 s before the boundary
+])
+def test_an_open_bar_joined_by_a_print_that_may_be_the_next_buckets_is_not_evaluated(quotes, traded, latency, spills):
+    # A 10:02 trade opened the 10:00 bar; B, an unstamped 400k @102 that traded `traded` s after 10:05, joins it. v1.12
+    # evaluated that bar with B as its Close and 400k in its volume: a fake breakout the exchange bars never show.
+    alpha = RecordingAlpha()
+    truth = pd.concat([make_bars([100.1], volumes=[1_000], start=ist(2026, 9, 25, 10, 0)),
+                       make_bars([100.2], volumes=[401_000], start=ist(2026, 9, 25, 10, 5))])
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(truth))
+        a.alpha = alpha
+        a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 2), 0.3))     # opens 10:00
+        for second, delay in quotes:
+            a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 4, second), delay))
+        now[0] = ist(2026, 9, 25, 10, 5) + timedelta(seconds=traded + latency)
+        a.on_tick(a._normalize(zeroed(414_000, 102.0)))
+        assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 0)
+        a.on_tick(at_host(100.2, 414_500, ist(2026, 9, 25, 10, 6), 0.3))
+        a.on_tick(at_host(100.2, 415_000, ist(2026, 9, 25, 10, 10, 1), 0.3))
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert (pd.Timestamp(ist(2026, 9, 25, 10, 0)) in [idx for _, idx in alpha.evaluated]) is not spills
+
+
+def test_the_bar_after_one_whose_close_may_be_the_next_buckets_print_is_not_evaluated():
+    # The exchange's 10:00 bar closes at 101 on 250k (a genuine first crossing). B, 1,000 @99 traded at 10:05:01.7, joins
+    # it within the grace and becomes its Close, so 10:05 (closing at 101) looked like a first crossing one bar late.
+    alpha = RecordingAlpha()
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(engine.empty_bars()))
+        a.alpha = alpha
+        a.on_tick(at_host(101.0, 263_000, ist(2026, 9, 25, 10, 2), 0.8))    # 250k @101
+        for second in (10, 20, 40):
+            a.on_tick(at_host(101.0, 263_000, ist(2026, 9, 25, 10, 4, second), 0.8))
+        now[0] = ist(2026, 9, 25, 10, 5, 2, 500000)
+        a.on_tick(a._normalize(zeroed(264_000, 99.0)))                       # B
+        a.on_tick(at_host(101.0, 514_000, ist(2026, 9, 25, 10, 7), 0.8))    # 250k @101
+        a.on_tick(at_host(101.0, 514_100, ist(2026, 9, 25, 10, 10, 1), 0.8))
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    evaluated = [idx for _, idx in alpha.evaluated]
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in evaluated and pd.Timestamp(ist(2026, 9, 25, 10, 5)) not in evaluated
+
+
+def test_a_stamped_print_of_the_bar_received_after_a_print_that_may_spill_clears_it():
+    # Control for the spill flag: in-order delivery puts B before a stamped print of 10:00 received after it.
+    alpha = RecordingAlpha()
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(engine.empty_bars()))
+        a.alpha = alpha
+        a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 2), 0.3))
+        a.note_feed_lag(ist(2026, 9, 25, 10, 4, 40), 0.3)
+        now[0] = ist(2026, 9, 25, 10, 4, 59, 900000)
+        a.on_tick(a._normalize(zeroed(20_000, 100.5)))                       # may be 10:05's
+        assert a.current_bars["SWIGGY"].get("spill", True) is True           # (v1.12 had no flag)
+        a.on_tick(at_host(100.6, 21_000, ist(2026, 9, 25, 10, 4, 59), 1.0))  # stamped 10:04:59, received after it
+        assert a.current_bars["SWIGGY"].get("spill", False) is False
+        a.on_tick(at_host(100.7, 22_000, ist(2026, 9, 25, 10, 5, 30), 0.3))  # closes 10:00
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) in [idx for _, idx in alpha.evaluated]
+
+
+def test_the_sessions_last_bar_joined_by_a_print_received_after_the_close_is_still_evaluated():
+    # Control for the spill flag: with no bucket after 15:25, such a print can only be the session's.
+    alpha = RecordingAlpha()
+    history = pd.concat([session_history(24), make_bars([100.0] * 73, start=ist(2026, 9, 25, 9, 15))])   # to 15:15
+    now = [ist(2026, 9, 25, 15, 20, 10, 300000)]
+    a = clocked(now, history=history)
+    a.alpha = alpha
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(at_host(100.0, 10_000, ist(2026, 9, 25, 15, 20, 10), 0.3))
+    a.on_tick(at_host(100.1, 12_000, ist(2026, 9, 25, 15, 26), 0.3))        # closes 15:20, opens 15:25
+    a.note_feed_lag(ist(2026, 9, 25, 15, 29, 40), 0.8)
+    now[0] = ist(2026, 9, 25, 15, 30, 0, 300000)
+    a.on_tick(a._normalize(zeroed(15_000, 100.5)))                        # joins 15:25
+    a.note_feed_alive(ist(2026, 9, 25, 15, 30, 3))
+    a.flush_due_bars(ist(2026, 9, 25, 15, 30, 3))
+    assert "SWIGGY" not in a.current_bars
+    assert pd.Timestamp(ist(2026, 9, 25, 15, 25)) in [idx for _, idx in alpha.evaluated]
