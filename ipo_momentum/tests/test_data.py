@@ -572,4 +572,4 @@ def test_the_fast_modules_pass_without_the_kite_extra(tmp_path):
     # in exactly the setup the collection guard was meant to protect.
     code, out = without_the_kite_extra(tmp_path, "test_live.py", "test_execution.py", "test_alpha.py")
     assert code == 0 and " failed" not in out and " error" not in out, out
-    assert " passed" in out and "could not import" not in out, out                # other skips are platform ones
+    assert " passed" in out and "SKIPPED" not in out, out

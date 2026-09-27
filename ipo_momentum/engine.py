@@ -57,6 +57,7 @@ logger = logging.getLogger("QUANT_ENGINE")
 
 OHLCV = ["Open", "High", "Low", "Close", "Volume"]
 BAR_MINUTES = 5
+BAR_CLOSE_GRACE = timedelta(seconds=2)          # the bar clock closes a bar this long after its bucket ends
 SESSION_OPEN = dtime(9, 15)
 SESSION_CLOSE = dtime(15, 30)
 DEFAULT_CSV = Path(__file__).resolve().parent / "data" / "SWIGGY_5m_2026-09-08_2026-09-25.csv"
@@ -829,7 +830,7 @@ class LiveTickAdapter:
             # Feed time, as bars are closed, with the bar clock's own 2 s grace: such a print cannot close a bar
             # before the bar clock would, even if latency has just risen (it errs early: a late one is dropped and
             # its shares carry forward). A float read is thread-safe.
-            ts = self.clock() - timedelta(seconds=self.feed_lag + 2)
+            ts = self.clock() - timedelta(seconds=self.feed_lag) - BAR_CLOSE_GRACE
         cumulative = t.get('volume_traded')
         volume = t.get('last_traded_quantity', t.get('volume', 0)) if cumulative is None else 0
         return Tick(symbol=symbol, price=float(price), volume=int(volume or 0), timestamp=ts,
@@ -1137,7 +1138,7 @@ class LiveTickAdapter:
             task.cancel()
         await asyncio.gather(*self._backfills, return_exceptions=True)
 
-    def flush_due_bars(self, now: datetime, grace: timedelta = timedelta(seconds=2)) -> None:
+    def flush_due_bars(self, now: datetime, grace: timedelta = BAR_CLOSE_GRACE) -> None:
         """Close bars whose bucket has ended; without this, a bar waits for the *next* tick,
         which never comes for an illiquid name or the session's final bar. Both the deadline and
         the liveness proof are judged in feed time (receive time minus the measured feed lag)."""

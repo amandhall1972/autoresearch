@@ -6,12 +6,8 @@ v1.7 went through an eighth adversarial review on a frozen snapshot
 (`06bbaef`), with the same four areas. 18 findings, 3 of them duplicates
 across areas (the data/docs reviewer's R8-TD-1, R8-TD-7 and R8-TD-8 are
 R8-LT-1, R8-LT-3 and R8-SR-1), which leaves the 15 defects below.
-- Orders, feed and lifecycle: each finding was reproduced by its skeptic, 7
-  confirmed and 2 with part of the claim overstated, none refuted.
-- Data/docs: the skeptic had not finished when this was committed, so those
-  six rows carry the finder's rating (and one row stays "pending").
-
-None is critical or high: 2 medium, 13 low. Three times the skeptic's
+Every finding was reproduced by its skeptic: 13 confirmed, 2 with part of the
+claim overstated, none refuted. None is critical or high: 2 medium, 13 low. Three times the skeptic's
 refinement replaced the finder's fix:
 - R8-LT-1: only drops *just* over the limit count as straddling it, so one
   far-corrupt stamp cannot stop a healthy host.
@@ -78,8 +74,13 @@ claim overstated. Severity is the skeptic's rating.
 
 | Sev | Verdict | v1.7 defect | v1.8 fix | Pinned by |
 | --- | --- | --- | --- | --- |
-| low | — | See the controls above: the suspend pin passed with `CLOCK_MONOTONIC` (R8-TD-2); the far-ahead watchdog test hung instead of failing when reverted (R8-TD-3); the mid-run signal tests raced engine start-up under load (R8-TD-4); the no-extra guard failed wherever a platform-only skip ran (R8-TD-5); the receive-date keying was unpinned (R8-TD-6). | Rewritten, bounded, synchronised on the hook, narrowed, pinned. | as listed |
-| low | pending | A zeroed-stamp print stamped only by the last minute's largest lag could still close a bar early when latency rose at a bucket boundary (R8-TD-9). | The fallback also subtracts the bar clock's 2 s grace, so such a print cannot close a bar before the bar clock would. | `test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen` |
+| low | ✔ | R8-TD-2: the suspend pin passed with `CLOCK_MONOTONIC`, because on a host that never slept the two clocks agree. | The pin simulates an hour's suspend. It is platform-neutral: elsewhere it checks the fallback, so the suite has no platform skip. | `test_the_steady_clock_keeps_counting_through_a_suspend` (control) |
+| low | ✔ | R8-TD-3: the far-ahead watchdog test hung instead of failing when its fix was reverted. | Bounded (it fails within 2 s). | `test_a_run_whose_every_tick_is_far_ahead_stops_instead_of_running_blind` |
+| low | ✔ | R8-TD-4: the mid-run signal tests raced engine start-up with fixed sleeps. One failed under load, and one passed on v1.6. | They wait until the engine has hooked its signals, or has exited. | the signal tests in `test_end_to_end.py` |
+| low | ✔ | R8-TD-5: the no-extra guard asserted "no skips", and the Linux-only suspend test broke it on macOS and Windows. | The suspend test no longer skips, and the guard stays strict. | `test_the_fast_modules_pass_without_the_kite_extra` |
+| low | ✔ | R8-TD-6: the receive-date keying of the re-baselined counter was unpinned. | Pinned (a control since R8-LT-3's guard, see above). | `test_a_corrupt_stamp_dated_another_day_does_not_credit_the_day_to_one_bar` |
+| low | ✔ | R8-TD-9: a zeroed-stamp print stamped only by the last minute's largest lag could still close a bar early when latency rose at a bucket boundary. Its last genuine print was then dropped, changing the bar's Close. | The fallback subtracts the bar clock's own grace (`BAR_CLOSE_GRACE`, shared with `flush_due_bars`), so such a print cannot close a bar before the bar clock would. | `test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen` |
+| medium | ✔ | R8-TD-1 is R8-LT-1 (the straddling host), seen from the docs. | Fixed there; its scenario (a third of the prints just over the limit) is pinned too. | `test_prints_every_two_seconds_a_third_of_them_just_over_the_limit_stop_the_run` |
 | low | ✔ | README and CHANGELOG: "a lone corrupt stamp costs one bar" (R8-LT-3 / R8-TD-7), "takes the signal back" for `SIG_IGN` (R8-SR-1 / R8-TD-8). | Corrected. | documentation |
 
 ## v1.7 (2026-09-27)

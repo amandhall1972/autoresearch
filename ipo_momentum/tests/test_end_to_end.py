@@ -493,8 +493,8 @@ def loop_callback(loop, signum):
     return getattr(getattr(handle, "_callback", None), "__qualname__", None)
 
 
-async def hooked(n, signum=signal.SIGTERM):          # until n engines take signum (a fixed sleep races start-up)
-    while len(engine._STOP_ROUTES.routes.get(signum, {{}}).get("callbacks", ())) < n:
+async def hooked(n, run, signum=signal.SIGTERM):     # until n engines take signum (a fixed sleep races start-up)
+    while len(engine._STOP_ROUTES.routes.get(signum, {{}}).get("callbacks", ())) < n and not run.done():
         await asyncio.sleep(0.01)
 
 
@@ -611,11 +611,11 @@ def test_one_stop_signal_stops_every_engine_in_the_loop_in_order():
     code, out, err = run_host("""
         loop.add_signal_handler(signal.SIGTERM, got.append, "host")
         a = asyncio.create_task(engine.main(ARGS + ["0.5"]))
-        await hooked(1)
+        await hooked(1, a)
         b = asyncio.create_task(engine.main(ARGS + ["30"]))
         print("a", await a, flush=True)
         c = asyncio.create_task(engine.main(ARGS + ["30"]))
-        await hooked(2)
+        await hooked(2, c)
         os.kill(os.getpid(), signal.SIGTERM)                          # b and c are running; a has finished
         print("b c", await b, await c, flush=True)
         during = list(got)                                            # the engines had the signal
@@ -634,7 +634,7 @@ def test_a_finished_engine_never_keeps_the_signal():
     code, out, err = run_host("""
         loop.add_signal_handler(signal.SIGTERM, got.append, "host")
         a = asyncio.create_task(engine.main(ARGS + ["0.5"]))
-        await hooked(1)
+        await hooked(1, a)
         b = asyncio.create_task(engine.main(ARGS + ["1.5"]))
         print("engines", await a, await b, flush=True)
         print("after", loop_callback(loop, signal.SIGTERM), await delivered(signal.SIGTERM), flush=True)
@@ -649,7 +649,7 @@ def test_a_handler_the_host_replaces_during_a_run_is_kept():
     code, out, err = run_host("""
         loop.add_signal_handler(signal.SIGTERM, got.append, "old")
         run = asyncio.create_task(engine.main(ARGS + ["0.6"]))
-        await hooked(1)
+        await hooked(1, run)
         loop.add_signal_handler(signal.SIGTERM, got.append, "new")
         print("main", await run, "after", await delivered(signal.SIGTERM), flush=True)
     """)
@@ -662,7 +662,7 @@ def test_a_handler_the_host_removes_during_a_run_stays_removed():
     code, out, err = run_host("""
         loop.add_signal_handler(signal.SIGTERM, got.append, "host")
         run = asyncio.create_task(engine.main(ARGS + ["0.6"]))
-        await hooked(1)
+        await hooked(1, run)
         loop.remove_signal_handler(signal.SIGTERM)
         print("main", await run, "after", loop_callback(loop, signal.SIGTERM),
               signal.getsignal(signal.SIGTERM) == signal.SIG_DFL, flush=True)
@@ -760,10 +760,10 @@ def test_an_engine_that_starts_after_the_host_took_the_signal_back_owns_it(loop_
                  else "loop.remove_signal_handler(signal.SIGTERM)")
     code, out, err = run_host(f"""
         a = asyncio.create_task(engine.main(ARGS + ["5"]))
-        await hooked(1)
+        await hooked(1, a)
         {take_back}
         b = asyncio.create_task(engine.main(ARGS + ["5"]))
-        await hooked(2)
+        await hooked(2, b)
         os.kill(os.getpid(), signal.SIGTERM)
         print("engines", await a, await b, "host got", got, flush=True)
     """, uvloop=loop_kind == "uvloop")
@@ -781,7 +781,7 @@ def test_a_plain_handler_or_ignore_the_host_sets_during_a_run_is_kept(loop_kind)
         pytest.importorskip("uvloop")
     code, out, err = run_host("""
         run = asyncio.create_task(engine.main(ARGS + ["0.6"]))
-        await hooked(1)
+        await hooked(1, run)
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, lambda signum, frame: got.append("plain"))
         print("main", await run, flush=True)
@@ -796,7 +796,7 @@ def test_on_uvloop_a_callback_the_host_registers_during_a_run_is_kept():
     pytest.importorskip("uvloop")
     code, out, err = run_host("""
         run = asyncio.create_task(engine.main(ARGS + ["0.6"]))
-        await hooked(1)
+        await hooked(1, run)
         loop.add_signal_handler(signal.SIGTERM, got.append, "host")
         print("main", await run, "after", await delivered(signal.SIGTERM), flush=True)
     """, uvloop=True)
@@ -814,10 +814,10 @@ def test_an_engine_that_starts_while_the_host_ignores_the_signal_still_gets_it_l
         pytest.importorskip("uvloop")
     code, out, err = run_host("""
         a = asyncio.create_task(engine.main(ARGS + ["5"]))
-        await hooked(1)
+        await hooked(1, a)
         old = signal.signal(signal.SIGTERM, signal.SIG_IGN)
         b = asyncio.create_task(engine.main(ARGS + ["5"]))
-        await hooked(2)
+        await hooked(2, b)
         signal.signal(signal.SIGTERM, old)
         os.kill(os.getpid(), signal.SIGTERM)
         print("engines", await a, await b, flush=True)
@@ -847,10 +847,10 @@ def test_a_re_take_keeps_the_hosts_pre_run_loop_callback():
     code, out, err = run_host("""
         loop.add_signal_handler(signal.SIGTERM, got.append, "X loop cb")
         a = asyncio.create_task(engine.main(ARGS + ["3"]))
-        await hooked(1)
+        await hooked(1, a)
         signal.signal(signal.SIGTERM, lambda signum, frame: got.append("P plain"))
         b = asyncio.create_task(engine.main(ARGS + ["0.3"]))
-        await hooked(2)                                               # b re-took the signal while a runs
+        await hooked(2, b)                                               # b re-took the signal while a runs
         print("engines", await a, await b, "table", loop_callback(loop, signal.SIGTERM), flush=True)
         os.kill(os.getpid(), signal.SIGTERM)
         await asyncio.sleep(0.5)
@@ -880,7 +880,7 @@ def test_a_plain_handler_set_mid_run_keeps_its_flags():
             return bool(action.flags & 0x10000000)
 
         run = asyncio.create_task(engine.main(ARGS + ["0.6"]))
-        await hooked(1)
+        await hooked(1, run)
         signal.signal(signal.SIGTERM, lambda signum, frame: got.append("P plain"))
         signal.siginterrupt(signal.SIGTERM, False)
         mid = restart()

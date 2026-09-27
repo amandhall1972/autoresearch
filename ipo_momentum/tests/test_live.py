@@ -968,11 +968,14 @@ def test_a_late_print_that_slips_past_the_rule_is_not_credited_with_the_day():
     assert a.dropped_ticks == 3 and "SWIGGY" not in a.current_bars
 
 
-@pytest.mark.skipif(not hasattr(time, "CLOCK_BOOTTIME"), reason="Linux only")
 def test_the_steady_clock_keeps_counting_through_a_suspend(monkeypatch):
     # CLOCK_MONOTONIC stops while the host is suspended: after a laptop sleep, v1.6's live clock stayed
     # behind by the sleep, every tick was dropped as far ahead and the run went on trading nothing. A host
-    # that never slept cannot tell the clocks apart, so the suspend is simulated.
+    # that never slept cannot tell the clocks apart, so the suspend is simulated. Elsewhere the fallback is
+    # time.monotonic, whose missed time the router adds to signal ages (tested separately).
+    if not hasattr(time, "CLOCK_BOOTTIME"):
+        assert engine._uptime is time.monotonic
+        return
     slept, real = [0.0], time.clock_gettime
     monkeypatch.setattr(time, "clock_gettime",
                         lambda which: real(which) + (slept[0] if which == time.CLOCK_BOOTTIME else 0.0))
@@ -1173,3 +1176,17 @@ def test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen(monkeypat
     a = asyncio.run(scenario())
     bar = a.current_bars["SWIGGY"]
     assert bar["timestamp"] == ist(2026, 9, 25, 10, 0) and bar["Low"] == 95.0 and a.dropped_ticks == 0
+
+
+def test_prints_every_two_seconds_a_third_of_them_just_over_the_limit_stop_the_run():
+    # R8-TD-1's scenario: v1.7 reset the run of drops at every print that passed, so it never reached 15 s.
+    now = [ist(2026, 9, 25, 10, 0)]
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), clock=lambda: now[0])
+    for i in range(30):
+        ahead = 30.2 if i % 3 == 2 else 29.8
+        stamp = ist(2026, 9, 25, 10, 0) + timedelta(seconds=2 * i)
+        a.on_tick(stamped(100.0, 1_000_000 + 100 * i, stamp, ahead))
+        now[0] = stamp - timedelta(seconds=ahead)
+    with pytest.raises(RuntimeError, match="within 1.5s of the 30s limit"):
+        asyncio.run(asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 2))
