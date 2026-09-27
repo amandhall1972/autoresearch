@@ -1,5 +1,97 @@
 # Changelog
 
+## v1.6 (2026-09-27)
+
+v1.5 went through a sixth adversarial review on a frozen snapshot (`68f13c7`),
+with the same four areas. Every skeptic ran. All 16 findings were reproduced by
+their skeptic: 11 confirmed, 5 with part of the claim overstated, none refuted,
+no duplicates. None is critical or high: 2 medium, 14 low. The skeptics also
+rated three of the finders' fixes as regressions, and one of their own
+suggestions was declined:
+- On uvloop, the finder's plain handler let a host's `loop.stop` run in the
+  middle of the engine's shutdown. The engine now owns the signal exclusively.
+- Two engines in one loop: the finder's hash-keyed registry crashed on
+  unhashable host callbacks and leaked finished engines. The skeptic's
+  hand-off kept "only the newest engine gets the signal". A process-wide router
+  now reaches every engine and hands each signal back once.
+- For the stale plain handler, the finder's unconditional `signal.signal`
+  cleared `SA_RESTART`. It is now restored only when it is not already in place.
+- For the NTP step, the finder's "shift every sample" double-shifted samples
+  taken before the shift, and missed the watchdog. A live feed now runs on a
+  steady clock instead.
+- For the first bar of a session behind a skewed host, the finder's formula
+  overflowed when the feed was down. That case is now guarded.
+- For a session's lost last bar, the skeptic suggested documenting it, or a
+  background fetch after the close. The next session's first bar now waits
+  for the back-fill instead: evaluated across the hole, it can fire a stale
+  breakout a day late (pinned below).
+
+Every v1.6 regression test fails on the v1.5 snapshot and passes here, except
+these controls:
+- `test_a_host_that_stops_its_loop_on_sigterm_cannot_cut_the_shutdown_short`
+  (asyncio and uvloop) and `test_handing_a_signal_back_keeps_its_sa_restart_flag`:
+  properties v1.5 had, which two of the rejected fixes would have broken;
+- `test_a_refused_tunnel_is_still_looked_up` and
+  `test_with_a_synced_host_a_connect_before_the_open_counts_the_first_print`:
+  the cases the fixes must leave alone;
+- `test_an_update_that_is_not_newer_is_not_lag` and
+  `test_the_live_router_judges_signal_ages_on_the_feeds_clock`: pins for v1.5
+  rules that no test covered (R6-TD-5). Each fails on the mutation that removes
+  its rule;
+- `test_the_fast_modules_pass_without_the_kite_extra`, whose defect was in
+  v1.5's `test_live.py`: it fails with that file.
+
+Existing tests changed:
+- `test_a_host_clock_behind_the_exchange_is_corrected_not_ignored` records a
+  positive lag sample instead of setting `feed_lag`, since the router now uses
+  the samples' median.
+- `test_orchestrator_excludes_symbols_whose_history_misses_the_listing` expects
+  the corrected CSV message.
+- `test_process_ticks_survives_an_exception_and_keeps_counting_tasks` ends its
+  history at 15:25. A session that ends at 15:20 is now a hole before the next
+  session.
+- `test_only_heartbeats_and_text_stamp_liveness_from_on_message` no longer
+  imports `kiteconnect`.
+
+Verdict: ✔ confirmed by the independent skeptic, ◐ confirmed with part of the
+claim overstated. Severity is the skeptic's rating.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.5 defect | v1.6 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | The never-sent retry window was opened once for the whole GTT loop. An ambiguous attempt's 15 s book poll used it up, so a second short outage (refused, then 504, then refused) broke out at once with attempts unused. The filled position had no GTT, and the alert read `GTT STATE UNKNOWN`. | Each outage gets its own window: at most 3, one before each attempt. `settle_timeout` counts them (12 windows and 20 calls; about 6¼ minutes at the defaults), and the README's supervisor stop grace is now 420 s. | `test_a_second_outage_after_an_ambiguous_attempt_gets_its_own_window` (3 sequences), `test_the_shutdown_estimate_counts_a_never_sent_window_before_each_gtt_attempt` |
+| low | ✔ | Behind an HTTP(S) proxy, no failure counted as never sent. A refused or timed-out *proxy* (requests' `ProxyError`) blocked the symbol for the session, and the GTT path treated it as ambiguous. | A `ProxyError` whose proxy could not be reached is never sent (urllib3's own test). A proxy that was reached but refused the tunnel stays ambiguous. | `test_an_unreachable_proxy_counts_as_never_sent_but_a_refused_tunnel_does_not`, `test_an_unreachable_proxy_releases_the_symbol_without_a_lookup`, `test_a_refused_tunnel_is_still_looked_up` (control) |
+
+### Live feed
+
+| Sev | Verdict | v1.5 defect | v1.6 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ◐ | The NTP fix v1.5's warning asks for, a step of the host clock mid-session, left the stored lag in the old frame. The bar clock could close a bar S s early, drop its tail and trade the cut bar. The skeptic added that a step of 15 s or more also tripped the feed watchdog (exit 1). Overstated: a name that trades every second discards the bar instead. | A live feed runs on a steady clock: the wall clock read at start-up, advanced by the monotonic clock. Receive stamps, liveness, bar closing, the watchdog and the router's clock all use it, so a host clock step cannot move them. | `test_a_host_clock_step_mid_session_does_not_cut_a_bar`, `test_a_host_clock_step_does_not_trip_the_feed_watchdog`, `test_a_live_feed_runs_on_a_steady_clock` |
+| low | ◐ | The router's skew correction was the *largest* lag sample. One trade 8 s late cut a 20 s correction to 12 s, so tick-closed signals were refused as "not closed yet" again, and the warning misstated the skew. Overstated: never worse than v1.4. | The skew is the upper median of the last minute's samples, which one packet cannot move (`clock_skew`). Bars still wait for the largest lag. | `test_one_late_packet_does_not_move_the_router_clock` |
+| low | ✔ | The zeroed-exchange-time guard tested the fallback, not the raw field, so a zeroed stamp became a 0 s lag sample and cancelled a behind-host correction for a minute. | The raw `exchange_timestamp` is judged. | `test_a_zeroed_exchange_time_is_not_a_lag_sample` |
+| low | ✔ | One packet stamped 10 minutes ahead became a -600 s lag. A future-dated bar closed at once, a still-forming candle was back-filled, and the router's clock moved with it, bypassing its "not closed yet" defence. | A tick stamped more than 30 s ahead of the host clock is dropped, with a rate-limited critical log, before it moves anything. | `test_a_tick_stamped_far_in_the_future_is_dropped_before_it_moves_anything` |
+| low | ✔ | With the host behind, a connect just after 09:15 was stamped before it. The day's first print counted from zero and the 09:15 bar was kept, missing its opening seconds (predates v1.5). | "Watching since" is judged in exchange time, using the skew and the tick's own lag. A feed that is down stays down (no overflow). | `test_with_the_host_behind_a_connect_after_the_open_still_blinds_the_first_bar`, `test_with_a_synced_host_a_connect_before_the_open_counts_the_first_print` (control) |
+
+### Lifecycle
+
+| Sev | Verdict | v1.5 defect | v1.6 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | On uvloop, the host-handler fix did nothing: uvloop does not expose its callbacks. v1.5 re-installed uvloop's dispatcher with no entry behind it, and every later SIGTERM was swallowed. | The engine owns the signal exclusively on every loop. On uvloop, a host callback cannot be read back, so afterwards the signal is back at its default, with a warning to re-register it. It is never swallowed. uvloop is now a dev dependency, so this is tested. | `test_on_uvloop_the_engine_owns_the_signal_and_never_leaves_it_swallowed`, `test_a_host_that_stops_its_loop_on_sigterm_cannot_cut_the_shutdown_short` (control) |
+| low | ◐ | Restore acted on a stale snapshot. With two engines in one loop, the first to finish removed the other's handler, so `docker stop` killed it outright. The second then re-armed the first's dead handler, and SIGINT and SIGTERM were ignored for good. A handler the host replaced or removed mid-run was undone. Overstated: not a v1.5 regression, and not a documented mode. | Stop signals are routed process-wide (`_StopRoutes`). The first engine hooks a signal, every engine receives it, and the last one out hands it back. Callbacks are compared by identity, never hashed. A registration the host changed during the run is left as set. | `test_one_stop_signal_stops_every_engine_in_the_loop_in_order`, `test_a_finished_engine_never_keeps_the_signal`, `test_a_handler_the_host_replaces_during_a_run_is_kept`, `test_a_handler_the_host_removes_during_a_run_stays_removed` |
+| low | ✔ | With a loop entry and a live plain handler for the same signal, only the stale loop entry came back. | Both come back. The plain handler is re-installed only if it is not already in place, which keeps `SA_RESTART`. | `test_a_live_plain_handler_beside_a_stale_loop_entry_comes_back_too`, `test_handing_a_signal_back_keeps_its_sa_restart_flag` (control) |
+| low | ◐ | When both the lookback and the vendor's window cut the listing, the message named neither. Overstated: the date and the remedy were right. | Sources declare `history_cutoff()`. When both cut it, the message names both dates and the `--max-lookback-days` that reaches the source's earliest day. | `test_when_both_the_lookback_and_the_vendor_cut_the_listing_the_message_names_both` |
+
+### Data, tests and docs
+
+| Sev | Verdict | v1.5 defect | v1.6 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | Without `kiteconnect`, a v1.5 feed test imported it and failed, and the README said only `test_kite_gateway.py` was skipped. The guard only collected tests, so it could not see an import inside a test body. | The test stubs `kiteconnect` in `sys.modules`. The guard also *runs* `test_live.py`, `test_execution.py` and `test_alpha.py` without the extra. The README names the two skipped Kite history tests. | `test_the_fast_modules_pass_without_the_kite_extra` (control, see above) |
+| low | ✔ | For a CSV (the README's own SWIGGY 2024-11-13 example), the exclusion log blamed the lookback and prescribed `--max-lookback-days`, which only led to a second exclusion. | A CSV source's history starts at its file's first day (`history_cutoff`), so the message says where the data starts and offers `--allow-partial-history` only. | `test_orchestrator_excludes_symbols_whose_history_misses_the_listing` (corrected) |
+| low | ✔ | The README said both GTT-book windows keep polling past a failed last read. The duplicate watch alerts instead, and its alert was not documented. | README corrected, and the watch's alert documented. | documentation |
+| low | ◐ | A bar discarded at a session's tail (a join, reconnect or stall near the close) was never back-filled in the run, although the README said the back-fill restores it. While fixing it, a second effect turned up: the next 09:15 bar was evaluated across the hole, and a breakout in the lost 15:25 bar fired again at the next open, a day late. Overstated: v1.4 also lost the bar after a late join. | A session's first bar also checks the previous session's tail and back-fills it before being evaluated, like any other hole. This costs one fetch, and only when the previous session lost bars. The offline demo, whose fixture lacks every session's 15:20 and 15:25 bars, logs that gap and does not evaluate its first tape bar. | `test_a_sessions_lost_last_bar_is_backfilled_before_the_next_session_trades`, `test_a_breakout_in_a_lost_last_bar_does_not_fire_again_at_the_next_open` |
+| low | ✔ | Two rules v1.5 listed as pinned were pinned by no test: main() giving the router the feed's clock, and "only newer updates are lag". Both mutations survived the suite. | Pinned. | `test_the_live_router_judges_signal_ages_on_the_feeds_clock`, `test_an_update_that_is_not_newer_is_not_lag` (controls, see above) |
+
 ## v1.5 (2026-09-27)
 
 v1.4 went through a fifth adversarial review on a frozen snapshot (`accab1d`),

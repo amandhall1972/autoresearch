@@ -217,9 +217,9 @@ def test_orchestrator_excludes_symbols_whose_history_misses_the_listing(caplog):
     assert "symbol excluded" in caplog.text
     caplog.clear()
     orch = engine.ProductionOrchestrator({"SWIGGY": ist(2024, 11, 13)}, ad, as_of=ist(2026, 9, 26))
-    assert asyncio.run(orch.build_the_ground()) is False                  # the lookback, not the data, cut it
-    assert "The 180-day lookback starts 2026-03-31, after the 2024-11-13 listing" in caplog.text
-    assert "--max-lookback-days to reach the listing" in caplog.text
+    assert asyncio.run(orch.build_the_ground()) is False                  # the file starts later than the lookback
+    assert "History starts 2026-09-08, 664 days after the 2024-11-13 listing" in caplog.text
+    assert "--max-lookback-days" not in caplog.text                       # v1.5 prescribed it; it cannot help
 
     orch = engine.ProductionOrchestrator({"SWIGGY": ist(2024, 11, 13)}, ad, as_of=ist(2026, 9, 26),
                                          allow_partial_history=True)
@@ -538,10 +538,8 @@ def test_a_special_sessions_forming_bar_is_still_dropped():
     assert [t.strftime("%H:%M") for t in kept.index] == ["18:00", "18:05", "18:10"]
 
 
-def test_the_suite_collects_without_the_kite_extra(tmp_path):
-    # README's non-uv setup installs pandas, numpy and pytest only. v1.3 imported requests before the
-    # kiteconnect skip, so collection failed and no test ran at all; v1.4 skipped all of test_execution.py,
-    # sizing and paper tests included. Only the Kite gateway module may be skipped.
+def without_the_kite_extra(tmp_path, *pytest_args):
+    """pytest over this suite in a fresh interpreter that cannot import kiteconnect or requests."""
     (tmp_path / "sitecustomize.py").write_text(
         "import sys\n"
         "class Block:\n"
@@ -551,12 +549,27 @@ def test_the_suite_collects_without_the_kite_extra(tmp_path):
         "sys.meta_path.insert(0, Block())\n")
     tests = Path(__file__).parent
     env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), str(Path(engine.__file__).parent), str(tests)]))
-    proc = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-rs", "-p", "no:cacheprovider",
-                           "-o", "pythonpath=", str(tests)], env=env, capture_output=True, text=True, cwd=tmp_path,
-                          timeout=120)
-    out = proc.stdout + proc.stderr
-    assert proc.returncode == 0 and "ERROR collecting" not in out and "Interrupted" not in out, out
+    proc = subprocess.run([sys.executable, "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider", "-o", "pythonpath=",
+                           *[str(tests / a) if a.startswith("test_") else a for a in pytest_args]],
+                          env=env, capture_output=True, text=True, cwd=tmp_path, timeout=300)
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def test_the_suite_collects_without_the_kite_extra(tmp_path):
+    # README's non-uv setup installs pandas, numpy and pytest only. v1.3 imported requests before the
+    # kiteconnect skip, so collection failed and no test ran at all; v1.4 skipped all of test_execution.py,
+    # sizing and paper tests included. Only the Kite gateway module may be skipped.
+    code, out = without_the_kite_extra(tmp_path, "--collect-only", str(Path(__file__).parent))
+    assert code == 0 and "ERROR collecting" not in out and "Interrupted" not in out, out
     assert "test_execution.py::test_quantity_risks_the_budget_and_respects_the_notional_cap" in out
     assert "test_execution.py::test_the_halt_report_lists_fills_that_completed_during_shutdown" in out
     assert "test_kite_gateway.py" in out and "could not import 'kiteconnect'" in out
     assert "test_kite_gateway.py::" not in out                            # skipped as a whole, nothing else
+
+
+def test_the_fast_modules_pass_without_the_kite_extra(tmp_path):
+    # Collecting runs no test body: v1.5's liveness test imported kiteconnect inside the test and failed
+    # in exactly the setup the collection guard was meant to protect.
+    code, out = without_the_kite_extra(tmp_path, "test_live.py", "test_execution.py", "test_alpha.py")
+    assert code == 0 and " failed" not in out and " error" not in out, out
+    assert " passed" in out and "SKIPPED" not in out, out

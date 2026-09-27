@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.5)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.6)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -162,6 +162,16 @@ def next_ist_midnight(ts: datetime) -> datetime:
     return datetime.combine(to_ist(ts).date() + timedelta(days=1), dtime(0), tzinfo=IST)
 
 
+def steady_clock(wall: Optional[Callable[[], datetime]] = None,
+                 monotonic: Callable[[], float] = time.monotonic) -> Callable[[], datetime]:
+    """The wall clock as read now, advanced by a monotonic clock from then on, so it never steps. A live
+    feed stamps and judges everything with it: an NTP correction mid-session (a step of the host clock)
+    then cannot shift feed time, liveness or signal ages. Any offset it started with is measured as
+    clock skew, like any other."""
+    start, ticks = to_ist((wall or (lambda: datetime.now(IST)))()), monotonic()
+    return lambda: start + timedelta(seconds=monotonic() - ticks)
+
+
 def next_session_open(ts: datetime) -> datetime:
     """09:15 IST on the next weekday after ``ts`` (exchange holidays are not modelled)."""
     day = to_ist(ts).date() + timedelta(days=1)
@@ -318,6 +328,14 @@ class TokenBucketRateLimiter:
                 await asyncio.sleep(start - now)
 
 class BrokerAdapter(ABC):
+    history_limit_days: Optional[int] = None    # how many days back the source serves 5m bars (None: no limit)
+
+    def history_cutoff(self, symbol: Optional[str] = None) -> Optional[datetime]:
+        """00:00 IST of the oldest day this source can serve 5m bars for, or None if it is not limited."""
+        if self.history_limit_days is None:
+            return None
+        return next_ist_midnight(datetime.now(IST) - timedelta(days=self.history_limit_days))
+
     async def boot(self) -> None:
         """Optional start-up hook (instrument downloads, logins); the default does nothing."""
         return None
@@ -441,7 +459,7 @@ class PublicExchangeAdapter(BrokerAdapter):
     async def fetch_historical_bars(self, symbol: str, start_date: datetime, end_date: datetime, interval: str = "5m") -> pd.DataFrame:
         logger.info(f"[{symbol}] Fetching public exchange prints via direct HTTP...")
         # Snapped to midnight so the window never starts mid-session.
-        cutoff = next_ist_midnight(datetime.now(IST) - timedelta(days=self.history_limit_days))
+        cutoff = self.history_cutoff(symbol)
         if start_date < cutoff:
             logger.info(f"[{symbol}] Yahoo intraday history is limited; clamping start to {cutoff:%Y-%m-%d}.")
             start_date = cutoff
@@ -509,6 +527,12 @@ class CsvReplayAdapter(BrokerAdapter):
     """
     def __init__(self, files: Dict[str, Path]):
         self.files = {sym: Path(p) for sym, p in files.items()}
+        self.first_bar: Dict[str, datetime] = {}
+
+    def history_cutoff(self, symbol: Optional[str] = None) -> Optional[datetime]:
+        """A file is the source's whole history: nothing exists before the day of its first bar."""
+        first = self.first_bar.get(symbol)
+        return None if first is None else datetime.combine(to_ist(first).date(), dtime(0), tzinfo=IST)
 
     @staticmethod
     def load(path: Path) -> pd.DataFrame:
@@ -526,6 +550,8 @@ class CsvReplayAdapter(BrokerAdapter):
         if path.stem.split("_")[0].upper() != symbol.upper():             # files are named SYMBOL_interval_from_to
             logger.warning(f"[{symbol}] {path.name} does not look like {symbol} data; replaying it as {symbol} anyway.")
         df = await asyncio.to_thread(self.load, path)
+        if len(df):
+            self.first_bar[symbol] = df.index[0]
         window = df[(df.index >= pd.Timestamp(start_date)) & (df.index < pd.Timestamp(end_date))]
         logger.info(f"[{symbol}] Replaying {len(window)} bars from {path.name}.")
         return window
@@ -562,7 +588,7 @@ class ProductionOrchestrator:
 
         # A lookback longer than any listing can matter would overflow the calendar; cap it at 100 years.
         lookback = timedelta(days=min(self.max_lookback_days, MAX_LOOKBACK_DAYS))
-        vendor_limit = getattr(self.broker, "history_limit_days", None)
+        history_cutoff = getattr(self.broker, "history_cutoff", None)
         for symbol, listing_date in self.watchlist.items():
             if listing_date is None:
                 start_date = next_ist_midnight(end_date - min(timedelta(days=self.demo_lookback_days), lookback))
@@ -580,12 +606,20 @@ class ProductionOrchestrator:
                 logger.warning(f"[{symbol}] No listing date given: treating the first bar ({df.index[0]:%Y-%m-%d %H:%M}) "
                                f"as the listing, so the base and AVWAP are anchored there (demo semantics).")
             elif start_date > listing_date or df.index[0].date() != listing_date.date():
-                vendor_cut = vendor_limit is not None and \
-                    next_ist_midnight(datetime.now(IST) - timedelta(days=vendor_limit)) > listing_date
+                cutoff = history_cutoff(symbol) if callable(history_cutoff) else None
+                vendor_cut = cutoff is not None and cutoff > listing_date
                 if start_date > listing_date and not vendor_cut:
                     msg = (f"[{symbol}] The {self.max_lookback_days}-day lookback starts {start_date:%Y-%m-%d}, after "
                            f"the {listing_date:%Y-%m-%d} listing, so the IPO base and AVWAP anchor are unknown")
                     remedy = "--max-lookback-days to reach the listing, or --allow-partial-history to anchor at the first bar"
+                elif start_date > listing_date and start_date > cutoff:
+                    # Both cut it, the lookback later: more lookback helps, but only up to the source's window.
+                    reach = (to_ist(end_date).date() - cutoff.date()).days + 1
+                    msg = (f"[{symbol}] The {self.max_lookback_days}-day lookback starts {start_date:%Y-%m-%d} and the "
+                           f"source's history {cutoff:%Y-%m-%d}, both after the {listing_date:%Y-%m-%d} listing, so the "
+                           f"IPO base and AVWAP anchor are unknown")
+                    remedy = (f"--allow-partial-history to anchor at the first bar; --max-lookback-days {reach} "
+                              f"starts at the source's earliest day")
                 else:
                     gap = (df.index[0].date() - listing_date.date()).days
                     msg = (f"[{symbol}] History starts {df.index[0]:%Y-%m-%d}, {gap} days after the "
@@ -711,19 +745,23 @@ class LiveTickAdapter:
     is discarded. The hole it leaves is back-filled from the broker's history before the
     next bar is evaluated.
     """
+    max_stamp_ahead = 30.0          # seconds an exchange stamp may lead the host clock before it is not believed
+
     def __init__(self, market_state: Dict[str, pd.DataFrame], alpha_engine: AlphaEngine, oms_queue: asyncio.Queue,
                  loop: asyncio.AbstractEventLoop, token_map: Optional[Dict[int, str]] = None,
                  bar_minutes: int = BAR_MINUTES, started_at: Optional[datetime] = None,
                  bar_listeners: Optional[List[Callable[[str, datetime, pd.Series], None]]] = None,
                  backfill: Optional[Callable[[str, datetime, datetime], Awaitable[pd.DataFrame]]] = None,
-                 require_feed_liveness: bool = False):
+                 require_feed_liveness: bool = False, clock: Optional[Callable[[], datetime]] = None):
         self.market_state = market_state
+        # The host clock for receive stamps and bar closing (main() gives a live feed a steady_clock).
+        self.clock = clock or (lambda: datetime.now(IST))
         self.alpha = alpha_engine
         self.oms_queue = oms_queue
         self.loop = loop
         self.token_map = dict(token_map or {})
         self.bar_minutes = bar_minutes
-        self.started_at = to_ist(started_at or datetime.now(IST))
+        self.started_at = to_ist(started_at or self.clock())
         self.tick_queue = asyncio.Queue()
         self.current_bars: Dict[str, dict] = {}
         self.last_closed: Dict[str, datetime] = {}
@@ -743,9 +781,11 @@ class LiveTickAdapter:
         # Receive time minus exchange time, the largest seen in the last minute: bars are closed and
         # liveness judged in feed time, so feed latency or a host clock running fast cannot cut a bar's
         # tail. Negative when the host clock runs behind the exchange (then no sample is ever positive).
+        # clock_skew is the robust estimate of that host offset alone (see there).
         self.feed_lag = 0.0
         self._lag_samples: collections.deque = collections.deque()
         self._lag_warned: Optional[datetime] = None
+        self._ahead_warned: Optional[datetime] = None
         self._last_update: Dict[str, Tuple[int, datetime]] = {}      # symbol -> (feed epoch, newest exchange time)
         self._glitch_warned: set = set()                             # (symbol, day) already reported
         # A bucket in which the volume counter was re-baselined lost its head to the baseline.
@@ -764,7 +804,7 @@ class LiveTickAdapter:
         ts = t.get('exchange_timestamp') or t.get('timestamp')
         ts = to_ist(ts) if ts is not None else None
         if ts is None or ts.year < 2000:
-            ts = datetime.now(IST)
+            ts = self.clock()
         cumulative = t.get('volume_traded')
         volume = t.get('last_traded_quantity', t.get('volume', 0)) if cumulative is None else 0
         return Tick(symbol=symbol, price=float(price), volume=int(volume or 0), timestamp=ts,
@@ -773,15 +813,16 @@ class LiveTickAdapter:
     def broker_on_ticks(self, ws, ticks: list):
         """Websocket Callback. Accepts Kite payloads (instrument_token, last_price, volume_traded,
         exchange_timestamp) and simple dicts (symbol, price, volume, timestamp)."""
-        received = datetime.now(IST)
+        received = self.clock()
         try:
             for t in ticks:
                 tick = self._normalize(t)
                 if tick is None:
                     self.dropped_ticks += 1
                     continue
-                if t.get('exchange_timestamp') is not None and tick.timestamp.year >= 2000:
-                    tick.received = received      # lets on_tick measure the feed's lag
+                raw = t.get('exchange_timestamp')
+                if getattr(raw, "year", 0) >= 2000:
+                    tick.received = received      # the exchange's own time: lets on_tick measure the lag
                 # Thread-safe dispatch from the broker's C-Thread to our Async Event Loop
                 self.loop.call_soon_threadsafe(self.tick_queue.put_nowait, tick)
         finally:
@@ -791,7 +832,16 @@ class LiveTickAdapter:
     def note_feed_alive(self, at: Optional[datetime] = None) -> None:
         """Any message from the broker, heartbeats included, stamped with its receive time.
         Must run on the event loop."""
-        self.last_alive = to_ist(at or datetime.now(IST))
+        self.last_alive = to_ist(at or self.clock())
+
+    @property
+    def clock_skew(self) -> float:
+        """How far the host clock runs behind the exchange, in seconds (<= 0): the upper median of the
+        last minute's lag samples. Each sample is latency minus that offset; the median cannot be moved
+        by one late or corrupt packet, and a host that does not run behind reads 0. Latency is not part
+        of it: a late signal really is older."""
+        samples = sorted(sample for _, sample in self._lag_samples)
+        return min(0.0, samples[len(samples) // 2]) if samples else 0.0
 
     def note_feed_lag(self, at: datetime, lag: float, window: timedelta = timedelta(seconds=60),
                       grace: timedelta = timedelta(seconds=2)) -> None:
@@ -801,14 +851,18 @@ class LiveTickAdapter:
         while self._lag_samples and self._lag_samples[0][0] < at - window:
             self._lag_samples.popleft()
         self.feed_lag = max(sample for _, sample in self._lag_samples)
-        if abs(self.feed_lag) > grace.total_seconds() and (self._lag_warned is None or at - self._lag_warned >= window):
+        if self._lag_warned is not None and at - self._lag_warned < window:
+            return
+        lowest = min(sample for _, sample in self._lag_samples)
+        skew = self.clock_skew if lowest < -grace.total_seconds() else 0.0     # the median is never below it
+        if skew < -grace.total_seconds():
             self._lag_warned = at
-            if self.feed_lag > 0:
-                logger.warning(f"Feed runs {self.feed_lag:.1f}s behind the host clock (latency or clock skew); "
-                               f"bars are closed that much later.")
-            else:
-                logger.warning(f"Host clock runs {-self.feed_lag:.1f}s behind the exchange; bars and signal ages "
-                               f"are corrected for it. Check the host's time sync.")
+            logger.warning(f"Host clock runs {-skew:.1f}s behind the exchange; bars and signal ages are corrected "
+                           f"for it. Check the host's time sync.")
+        elif self.feed_lag > grace.total_seconds():
+            self._lag_warned = at
+            logger.warning(f"Feed runs {self.feed_lag:.1f}s behind the host clock (latency or clock skew); "
+                           f"bars are closed that much later.")
 
     def mark_feed_down(self) -> None:
         """The broker feed dropped. Every forming bar misses its tail, and nothing opened before the
@@ -821,7 +875,7 @@ class LiveTickAdapter:
         """The broker feed (re)connected. Every counter must be re-baselined, and bars that were
         forming while the feed was down are incomplete. Must run on the event loop."""
         self._feed_epoch += 1
-        self._feed_since = to_ist(at or datetime.now(IST))
+        self._feed_since = to_ist(at or self.clock())
         self.last_alive = self._feed_since
         for bar in self.current_bars.values():
             bar['partial'] = True
@@ -849,16 +903,27 @@ class LiveTickAdapter:
             return cum - prev[1], False
         # First print of the session, or the first since the feed (re)connected or stalled. The counter then
         # holds trades we did not see; they belong to this bar only if we have been watching since the open.
-        if not same_day and self._feed_since <= datetime.combine(day, SESSION_OPEN, tzinfo=IST):
+        if not same_day and self._watching_since(tick) <= datetime.combine(day, SESSION_OPEN, tzinfo=IST):
             return cum, False
         # The new baseline also swallowed whatever traded earlier in this print's bucket: that bar is blind.
         self._blind_bucket[tick.symbol] = bar_floor(tick.timestamp, self.bar_minutes)
         return 0, True
 
-    def _open_bar(self, sym: str, bucket: datetime, price: float, volume: int) -> None:
+    def _watching_since(self, tick: Optional[Tick] = None) -> datetime:
+        """When the feed started watching, in exchange time: the host stamp moved forward by how far the
+        host runs behind (the tick's own lag counts too: the day's first print has no samples before it).
+        A host running ahead is not corrected, so the answer errs late, which errs blind."""
+        if self._feed_since == datetime.max.replace(tzinfo=IST):
+            return self._feed_since                                  # the feed is down
+        skew = self.clock_skew
+        if tick is not None and tick.received is not None:
+            skew = min(skew, (tick.received - tick.timestamp).total_seconds())
+        return self._feed_since - timedelta(seconds=skew)
+
+    def _open_bar(self, sym: str, bucket: datetime, price: float, volume: int, tick: Optional[Tick] = None) -> None:
         # A bucket that began before we were watching, or whose head went into a re-baselined counter,
         # has an unknown open and volume.
-        partial = self._feed_since > bucket or self._blind_bucket.get(sym) == bucket
+        partial = self._watching_since(tick) > bucket or self._blind_bucket.get(sym) == bucket
         self.current_bars[sym] = {'timestamp': bucket, 'Open': price, 'High': price, 'Low': price,
                                   'Close': price, 'Volume': volume, 'partial': partial}
 
@@ -871,6 +936,15 @@ class LiveTickAdapter:
             if sym not in self._unanchored:
                 self._unanchored.add(sym)
                 logger.warning(f"[{sym}] Ticks ignored: no established history for this symbol.")
+            return
+        if tick.received is not None and (ahead := (tick.timestamp - tick.received).total_seconds()) > self.max_stamp_ahead:
+            # The exchange cannot stamp a print in our future: a corrupt stamp, or a host clock so far behind
+            # that nothing measured against it can be trusted. Dropped before it can move any state.
+            self.dropped_ticks += 1
+            if self._ahead_warned is None or abs(tick.received - self._ahead_warned) >= timedelta(seconds=60):
+                self._ahead_warned = tick.received
+                logger.critical(f"[{sym}] Tick stamped {ahead:.0f}s ahead of the host clock dropped: a corrupt "
+                                f"exchange time, or the host clock runs far behind. Fix the host's time sync and restart.")
             return
         # Floor the timestamp to the current 5-minute block
         boundary = bar_floor(tick.timestamp, self.bar_minutes)
@@ -909,10 +983,10 @@ class LiveTickAdapter:
                 self.close_bar(sym)
             return
         if active is None:
-            self._open_bar(sym, boundary, tick.price, volume)
+            self._open_bar(sym, boundary, tick.price, volume, tick)
         elif boundary > active['timestamp']:
             self.close_bar(sym)
-            self._open_bar(sym, boundary, tick.price, volume)
+            self._open_bar(sym, boundary, tick.price, volume, tick)
         else:
             active['High'] = max(active['High'], tick.price)
             active['Low'] = min(active['Low'], tick.price)
@@ -920,12 +994,22 @@ class LiveTickAdapter:
             active['Volume'] += volume
 
     def _hole_before(self, prev_idx: datetime, idx: datetime) -> Optional[datetime]:
-        """Start of the bars missing between history's last bar and ``idx`` in idx's session."""
-        session_open = datetime.combine(idx.date(), SESSION_OPEN, tzinfo=IST)
+        """Start of the bars missing between history's last bar and ``idx``: the rest of prev_idx's session
+        (a late join, a reconnect or a stall near the close can cost it its last bars), then idx's session
+        up to idx."""
         width = timedelta(minutes=self.bar_minutes)
-        if idx <= session_open or prev_idx >= idx - width:
+        if prev_idx >= idx - width:
+            return None
+        if prev_idx + width < datetime.combine(prev_idx.date(), SESSION_CLOSE, tzinfo=IST):
+            return prev_idx + width
+        session_open = datetime.combine(idx.date(), SESSION_OPEN, tzinfo=IST)
+        if idx <= session_open:
             return None
         return max(prev_idx + width, session_open)
+
+    @staticmethod
+    def _span(start: datetime, end: datetime) -> str:
+        return f"{start:%H:%M}-{end:%H:%M}" if start.date() == end.date() else f"{start:%Y-%m-%d %H:%M}-{end:%Y-%m-%d %H:%M}"
 
     def _notify(self, sym: str, ts: datetime, bar: pd.Series) -> None:
         for listener in self.bar_listeners:
@@ -968,7 +1052,7 @@ class LiveTickAdapter:
         if hole_start is not None:
             # Evaluating across a hole could report a stale "first crossing" one bar late at a worse price.
             if self.backfill is None:
-                logger.warning(f"[{sym}] Bars {hole_start:%H:%M}-{idx:%H:%M} are missing; the {idx:%H:%M} bar is not evaluated.")
+                logger.warning(f"[{sym}] Bars {self._span(hole_start, idx)} are missing; the {idx:%H:%M} bar is not evaluated.")
                 self._notify(sym, idx, row.iloc[0])
                 return
             task = asyncio.get_running_loop().create_task(self._backfill_then_evaluate(sym, hole_start, idx, row.iloc[0]))
@@ -983,7 +1067,7 @@ class LiveTickAdapter:
             fetched = await self.backfill(sym, start, idx)
             fetched = fetched[(fetched.index >= pd.Timestamp(start)) & (fetched.index < pd.Timestamp(idx))]
         except Exception as e:
-            logger.warning(f"[{sym}] Back-fill of {start:%H:%M}-{idx:%H:%M} failed ({e!r}); the {idx:%H:%M} bar is not evaluated.")
+            logger.warning(f"[{sym}] Back-fill of {self._span(start, idx)} failed ({e!r}); the {idx:%H:%M} bar is not evaluated.")
             self._notify(sym, idx, live_bar)
             return
         history = self.market_state[sym]
@@ -991,7 +1075,7 @@ class LiveTickAdapter:
             history = pd.concat([history, fetched])
             history = history[~history.index.duplicated(keep='first')].sort_index()
             self.market_state[sym] = history
-            logger.info(f"[{sym}] Back-filled {len(fetched)} missing bar(s) {start:%H:%M}-{idx:%H:%M} from the broker.")
+            logger.info(f"[{sym}] Back-filled {len(fetched)} missing bar(s) {self._span(start, idx)} from the broker.")
         for ts, bar in fetched.iterrows():
             self._notify(sym, ts, bar)
         self._notify(sym, idx, live_bar)
@@ -1033,7 +1117,7 @@ class LiveTickAdapter:
                 self.tick_queue.task_done()
 
     async def bar_clock(self, interval: float = 1.0, clock: Optional[Callable[[], datetime]] = None):
-        clock = clock or (lambda: datetime.now(IST))
+        clock = clock or self.clock
         while True:
             await asyncio.sleep(interval)
             if not self.tick_queue.empty():
@@ -1120,10 +1204,17 @@ class KiteOrderGateway(OrderGateway):
     def _never_sent(e: BaseException) -> bool:
         """True if the request provably never left this machine: a connect timeout, or a connection
         that could not be opened (refused, unreachable, DNS failure). requests reports the latter as
-        a plain ConnectionError whose MaxRetryError reason is urllib3's NewConnectionError."""
-        if type(e).__name__ == "ConnectTimeout":
+        a plain ConnectionError whose MaxRetryError reason is urllib3's NewConnectionError. Behind a
+        proxy, a proxy that could not be reached raises ProxyError around the same connect failure
+        (urllib3's own test for "the server never received it"). A proxy that was reached but failed
+        the tunnel (CONNECT 403/502) is not proof: it stays ambiguous."""
+        name = type(e).__name__
+        if name == "ConnectTimeout":
             return True
-        reason = getattr(e.args[0], "reason", None) if type(e).__name__ == "ConnectionError" and e.args else None
+        reason = getattr(e.args[0], "reason", None) if name in ("ConnectionError", "ProxyError") and e.args else None
+        if name == "ProxyError":
+            reason = getattr(reason, "original_error", None)
+            return any(c.__name__ == "ConnectTimeoutError" for c in type(reason).__mro__)  # NewConnectionError too
         return any(c.__name__ == "NewConnectionError" for c in type(reason).__mro__)
 
     def __init__(self, kite, exchange: str = "NSE", product: str = "CNC", fill_timeout: float = 30.0,
@@ -1139,14 +1230,14 @@ class KiteOrderGateway(OrderGateway):
         self.stop_limit_buffer = stop_limit_buffer
         self.tick_size = tick_size
         # An estimate of the worst case, used only to decide when shutdown reports "did not settle": the
-        # fill wait, plus 10 windows of cancel_grace (tag lookup, cancel wait, 3 GTT-book polls that may
-        # each run one more window until a read succeeds, never-sent GTT retries, the duplicate watch),
-        # plus 18 SDK calls at the client timeout (ltp, place, 3 cancels, 3 snapshot tries, 3 GTT
-        # attempts, one overrun call per window). requests bounds each connect and each socket read by
-        # that timeout, not a whole call, so a trickling reply can take longer; the entry is then still
-        # awaited, never interrupted.
+        # fill wait, plus 12 windows of cancel_grace (tag lookup, cancel wait, 3 GTT-book polls that may
+        # each run one more window until a read succeeds, up to 3 never-sent GTT retry windows (one
+        # before each attempt), the duplicate watch), plus 20 SDK calls at the client timeout (ltp,
+        # place, 3 cancels, 3 snapshot tries, 3 GTT attempts, one overrun call per window). requests
+        # bounds each connect and each socket read by that timeout, not a whole call, so a trickling
+        # reply can take longer; the entry is then still awaited, never interrupted.
         sdk_timeout = float(getattr(kite, "timeout", None) or 7.0)
-        self.settle_timeout = fill_timeout + 10 * cancel_grace + 18 * (sdk_timeout + poll_interval)
+        self.settle_timeout = fill_timeout + 12 * cancel_grace + 20 * (sdk_timeout + poll_interval)
 
     async def _poll_state(self, order_id: str) -> Optional[dict]:
         try:
@@ -1332,6 +1423,7 @@ class KiteOrderGateway(OrderGateway):
                     await asyncio.sleep(self.poll_interval)
                     continue
                 attempt += 1
+                never_sent_until = None                        # a later outage gets its own window
                 # The request may have reached the broker, which can still be creating the GTT: a blind
                 # retry would arm a second one that sells the whole position again.
                 ambiguous = True
@@ -1682,7 +1774,7 @@ def start_kite_feed(api_key: str, access_token: str, tokens: List[int], tick_ada
         # Heartbeats (1 byte) and text messages. A tick payload is stamped by broker_on_ticks once its
         # ticks are queued, so it cannot vouch for its own tail.
         if not is_binary or len(payload) <= 4:
-            loop.call_soon_threadsafe(tick_adapter.note_feed_alive, datetime.now(IST))
+            loop.call_soon_threadsafe(tick_adapter.note_feed_alive, tick_adapter.clock())
 
     kws.on_message = on_message
     kws.on_error = lambda ws, code, reason: logger.error(f"Kite websocket error {code}: {reason}")
@@ -1697,7 +1789,8 @@ async def _watch_feed(feed_dead: asyncio.Event, tick_adapter: Optional[LiveTickA
     """Fails when the feed is gone: KiteTicker gave up reconnecting, or (during the session) no
     message at all, heartbeats included, arrived for ``stall_after`` seconds. KiteTicker never
     pings, so a half-open socket would otherwise stay 'connected' and silent forever."""
-    started = datetime.now(IST)
+    clock = tick_adapter.clock if tick_adapter is not None else (lambda: datetime.now(IST))
+    started = clock()
     while True:
         try:
             await asyncio.wait_for(feed_dead.wait(), timeout=check_every)
@@ -1706,7 +1799,7 @@ async def _watch_feed(feed_dead: asyncio.Event, tick_adapter: Optional[LiveTickA
             pass
         if tick_adapter is None:
             continue
-        now = datetime.now(IST)
+        now = clock()
         last = tick_adapter.last_alive or started
         in_session = now.weekday() < 5 and SESSION_OPEN <= now.time() < SESSION_CLOSE
         if in_session and (now - last).total_seconds() > stall_after:
@@ -1781,9 +1874,12 @@ def _config_error(args: argparse.Namespace) -> Optional[str]:
     return None
 
 def exchange_clock(get_ticker: Callable[[], "LiveTickAdapter"]) -> Callable[[], datetime]:
-    """The wall clock, corrected when the host runs behind the exchange: the ticker measures that as a
-    negative feed lag. Positive lag (real latency) does make a signal older, so it is not removed."""
-    return lambda: datetime.now(IST) - timedelta(seconds=min(0.0, get_ticker().feed_lag))
+    """The ticker's host clock, corrected by how far it runs behind the exchange (its clock_skew). Latency
+    is not removed: a signal that arrives late really is older."""
+    def now() -> datetime:
+        ticker = get_ticker()
+        return ticker.clock() - timedelta(seconds=ticker.clock_skew)
+    return now
 
 STOP_SIGNALS = [s for s in (getattr(signal, n, None) for n in ("SIGINT", "SIGTERM", "SIGHUP")) if s is not None]
 
@@ -1793,6 +1889,103 @@ def _deliver_signal(loop: asyncio.AbstractEventLoop, callback: Callable[[int], N
         loop.call_soon_threadsafe(callback, signum)
     except RuntimeError:        # the loop has already closed
         pass
+
+class _StopRoutes:
+    """Routes the process's stop signals to every engine running in it.
+
+    Signals belong to the process, not to one main() call, so each is hooked once, when the first
+    engine on a loop starts, and handed back once, when the last one ends. Overlapping engines in one
+    loop (one main() per IPO) all take a supervisor's stop, and the host gets back what it had.
+
+    * While any engine runs, it owns the signal exclusively: a host callback such as ``loop.stop``
+      must not cut an orderly shutdown short, so the host's own handling is displaced, not chained.
+    * Stock asyncio exposes its loop callbacks, so the host's own ``loop.add_signal_handler`` callback
+      is re-registered afterwards. A registration the host changed while engines ran is left as set.
+    * uvloop's callbacks cannot be read back. A host callback it held is lost with a warning, and the
+      signal is back at its default: never left routed to a loop entry that no longer exists.
+    * A loop that cannot own signals (Windows) gets a plain handler that hands the signal over
+      thread-safely, replaced by the previous one afterwards.
+    * A signal the parent ignored (nohup) stays ignored. A plain handler is re-installed only if it
+      is not already in place, which keeps the SA_RESTART flag asyncio's own handler relies on.
+    """
+    def __init__(self):
+        self.routes: Dict[int, dict] = {}
+
+    def _dispatch(self, signum: int) -> None:
+        route = self.routes.get(signum)
+        for callback in list(route['callbacks'] if route else ()):
+            callback(signum)
+
+    def hook(self, loop: asyncio.AbstractEventLoop, callback: Callable[[int], None]) -> List[int]:
+        """Route every stop signal this loop can take to ``callback``; returns the signals hooked."""
+        hooked = []
+        for signum in STOP_SIGNALS:
+            route = self.routes.get(signum)
+            if route is not None and route['loop'].is_closed():
+                del self.routes[signum]                       # a loop that ended without handing back
+                route = None
+            if route is not None:
+                if route['loop'] is loop:
+                    route['callbacks'].append(callback)
+                    hooked.append(signum)
+                continue                                      # another live loop owns this signal
+            previous = signal.getsignal(signum)
+            if previous == signal.SIG_IGN:
+                continue
+            handlers = getattr(loop, "_signal_handlers", None)
+            route = {'loop': loop, 'callbacks': [callback], 'previous': previous, 'handler': None,
+                     'handlers': handlers if isinstance(handlers, dict) else None,
+                     'prior': handlers.get(signum) if isinstance(handlers, dict) else None}
+            try:
+                loop.add_signal_handler(signum, self._dispatch, signum)
+            except (NotImplementedError, RuntimeError, ValueError):
+                handler = functools.partial(_deliver_signal, loop, self._dispatch)
+                try:
+                    signal.signal(signum, handler)
+                except (ValueError, OSError):                 # not the main thread, or not supported here
+                    continue
+                route['handler'] = handler
+            self.routes[signum] = route
+            hooked.append(signum)
+        return hooked
+
+    def unhook(self, loop: asyncio.AbstractEventLoop, callback: Callable[[int], None], hooked: List[int]) -> None:
+        """Stop routing to ``callback``; the last engine out hands each signal back."""
+        for signum in hooked:
+            route = self.routes.get(signum)
+            if route is None or route['loop'] is not loop:
+                continue
+            route['callbacks'] = [c for c in route['callbacks'] if c is not callback]
+            if route['callbacks']:
+                continue
+            del self.routes[signum]
+            previous = route['previous']
+            if route['handler'] is not None:                  # a plain handler (no loop support)
+                if signal.getsignal(signum) is route['handler'] and previous is not None:
+                    signal.signal(signum, previous)
+                continue
+            handlers = route['handlers']
+            if handlers is not None:
+                current = handlers.get(signum)
+                if current is None or current._callback != self._dispatch:
+                    continue                                  # the host re-registered or removed it
+            prior = route['prior']
+            if prior is not None:                             # re-armed with its wakeup fd
+                loop.add_signal_handler(signum, prior._callback, *prior._args)
+            else:
+                loop.remove_signal_handler(signum)
+            if handlers is None and getattr(previous, "__self__", None) is loop:
+                logger.warning(f"Signal {signum}: the host's own {type(loop).__name__} callback for it cannot be "
+                               f"read back, so the signal is back at its default. Re-register it after main().")
+            elif previous is not None and previous is not signal.getsignal(signum):
+                signal.signal(signum, previous)               # a live plain handler beside a loop entry
+
+    def release(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Forget a closed loop's routes (its handlers went with it)."""
+        for signum in [s for s, r in self.routes.items() if r['loop'] is loop]:
+            del self.routes[signum]
+
+_STOP_ROUTES = _StopRoutes()
 
 async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> int:
     """The engine. With ``hold_signals`` (run() does this), stop signals stay routed to the
@@ -1863,7 +2056,7 @@ async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> 
     ticker = LiveTickAdapter(orchestrator.market_state, alpha, oms_queue, loop, token_map=broker_adapter.token_map(),
                              started_at=tape_start - timedelta(seconds=1) if simulate else None,
                              bar_listeners=[oms.on_bar], backfill=broker_adapter.backfill if args.live_feed else None,
-                             require_feed_liveness=args.live_feed)
+                             require_feed_liveness=args.live_feed, clock=steady_clock() if args.live_feed else None)
 
     # 3. Launch Async Coroutines
     tick_worker = asyncio.create_task(ticker.process_ticks(), name="tick-aggregator")
@@ -1896,24 +2089,8 @@ async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> 
         runtime.cancel()
 
     # Ctrl-C, `kill`/systemd/docker stop and a closed terminal all take the orderly path below, so an
-    # entry in flight is always settled. A signal the parent ignored (nohup, a background job) stays
-    # ignored, and each replaced handler is restored afterwards. Where the loop cannot own signals
-    # (Windows), a plain handler hands the signal to the loop thread-safely.
-    hooked, replaced = [], []
-    for signum in STOP_SIGNALS:
-        previous = signal.getsignal(signum)
-        if previous == signal.SIG_IGN:
-            continue
-        prior = getattr(loop, "_signal_handlers", {}).get(signum)   # a host's own loop.add_signal_handler
-        try:
-            loop.add_signal_handler(signum, on_stop_signal, signum)
-            hooked.append((signum, previous, prior))
-        except (NotImplementedError, RuntimeError, ValueError):
-            try:
-                signal.signal(signum, functools.partial(_deliver_signal, loop, on_stop_signal))
-                replaced.append((signum, previous, None))
-            except (ValueError, OSError):   # not the main thread, or not supported on this platform
-                pass
+    # entry in flight is always settled. _StopRoutes honours nohup and hands every signal back afterwards.
+    hooked = _STOP_ROUTES.hook(loop, on_stop_signal)
 
     try:
         try:
@@ -1952,13 +2129,7 @@ async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> 
         return _halt_report(oms, gateway, ticker, exit_code, stop_signal)
     finally:
         if not hold_signals:
-            for signum, _, _ in hooked:
-                loop.remove_signal_handler(signum)
-            for signum, previous, prior in hooked + replaced:
-                if prior is not None:           # the host's loop callback, re-armed with its wakeup fd
-                    loop.add_signal_handler(signum, prior._callback, *prior._args)
-                elif previous is not None:      # None: a handler installed outside Python
-                    signal.signal(signum, previous)
+            _STOP_ROUTES.unhook(loop, on_stop_signal, hooked)
 
 def _halt_report(oms: "ExecutionRouter", gateway: OrderGateway, ticker: LiveTickAdapter, exit_code: int,
                  stop_signal: Optional[int]) -> int:
@@ -1992,8 +2163,10 @@ def run(argv: Optional[List[str]] = None) -> int:
     configure_logging()
     saved = {signum: signal.getsignal(signum) for signum in STOP_SIGNALS}
     result: List[int] = []
+    loops: List[asyncio.AbstractEventLoop] = []
 
     async def engine_main() -> int:
+        loops.append(asyncio.get_running_loop())
         result.append(await main(argv, hold_signals=True))
         return result[0]
 
@@ -2005,6 +2178,8 @@ def run(argv: Optional[List[str]] = None) -> int:
         logger.info("Graceful exit invoked by Operator.")
         return 130
     finally:
+        for loop in loops:
+            _STOP_ROUTES.release(loop)
         for signum, previous in saved.items():
             if previous is not None:
                 try:

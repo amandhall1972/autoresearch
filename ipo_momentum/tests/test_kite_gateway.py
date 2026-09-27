@@ -605,3 +605,92 @@ def test_a_refused_gtt_request_that_outlasts_the_window_says_no_gtt_exists():
     fill = asyncio.run(gw.execute(kite_plan()))
     assert fill.exit_order_id is None and kite.created_gtts == []
     assert "POSITION OPEN WITHOUT EXITS" in gw.alerts[0] and "GTT STATE UNKNOWN" not in gw.alerts[0]
+
+
+@pytest.mark.parametrize("script", ["refused, 504, refused", "504, refused, 504, refused", "refused, read timeout, refused"])
+def test_a_second_outage_after_an_ambiguous_attempt_gets_its_own_window(script):
+    # v1.5 opened one never-sent window for the whole GTT loop: an ambiguous attempt's book poll used it
+    # up, so a second short outage broke out at once and left the position without a GTT.
+    make = {"refused": refused_connection, "504": lambda: KE.NetworkException("Gateway timed out", code=504),
+            "read timeout": lambda: requests.exceptions.ReadTimeout("read timed out")}
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[make[step]() for step in script.split(", ")] + [{"trigger_id": 778}])
+    gw = fast_gateway(kite, cancel_grace=0.3, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "778" and [g["id"] for g in kite.created_gtts] == [778] and gw.alerts == []
+
+
+def test_the_shutdown_estimate_counts_a_never_sent_window_before_each_gtt_attempt():
+    gw = engine.KiteOrderGateway(StubKite([OPEN]), fill_timeout=30, poll_interval=1, cancel_grace=15)
+    assert gw.settle_timeout == 30 + 12 * 15 + 20 * (7 + 1)
+
+
+def closed_port():
+    import socket
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]                                   # closed again: connections are refused
+
+
+def proxied_session(proxy_port):
+    session = requests.Session()
+    session.trust_env = False
+    session.proxies = {"http": f"http://127.0.0.1:{proxy_port}", "https": f"http://127.0.0.1:{proxy_port}"}
+    return session
+
+
+def unreachable_proxy():
+    """What requests raises when the proxy itself refuses the connection: nothing reached Kite."""
+    try:
+        proxied_session(closed_port()).get("https://api.kite.trade/orders", timeout=2)
+    except requests.exceptions.ProxyError as e:
+        return e
+    raise AssertionError("the proxy connection was not refused")
+
+
+def refused_tunnel():
+    """What requests raises when the proxy was reached but refused the CONNECT (403): the proxy got the
+    request line, so this is no proof that nothing was sent."""
+    import socket
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def answer():
+        conn, _ = server.accept()
+        conn.recv(4096)
+        conn.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+        conn.close()
+    threading.Thread(target=answer, daemon=True).start()
+    try:
+        proxied_session(server.getsockname()[1]).get("https://api.kite.trade/orders", timeout=2)
+    except requests.exceptions.ProxyError as e:
+        return e
+    finally:
+        server.close()
+    raise AssertionError("the tunnel was not refused")
+
+
+def test_an_unreachable_proxy_counts_as_never_sent_but_a_refused_tunnel_does_not():
+    import urllib3
+    timed_out = requests.exceptions.ProxyError(urllib3.exceptions.MaxRetryError(
+        None, "https://api.kite.trade/orders",
+        reason=urllib3.exceptions.ProxyError("Unable to connect to proxy",
+                                             urllib3.exceptions.ConnectTimeoutError(None, "timed out"))))
+    assert engine.KiteOrderGateway._never_sent(unreachable_proxy())
+    assert engine.KiteOrderGateway._never_sent(timed_out)
+    assert not engine.KiteOrderGateway._never_sent(refused_tunnel())
+
+
+def test_an_unreachable_proxy_releases_the_symbol_without_a_lookup():
+    # v1.5 recognised only direct connect failures: behind a dead proxy the entry looked its tag up
+    # through the same proxy and blocked the symbol for the session.
+    kite = StubKite([OPEN], place_error=unreachable_proxy())
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert r.active_inventory == set() and r.unresolved == [] and "orders" not in kite.routes()
+
+
+def test_a_refused_tunnel_is_still_looked_up():
+    kite = StubKite([OPEN], place_error=refused_tunnel(), orders_result=[])
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert "orders" in kite.routes() and r.active_inventory == {"SWIGGY"} and len(r.unresolved) == 1

@@ -37,14 +37,15 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 
 ```bash
 cd ipo_momentum
-uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest (pinned in uv.lock)
+uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest, uvloop (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 243 tests, ~100 s, fully offline
+uv run pytest                       # 273 tests, ~2 min, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
-`pytest` for the tests; without `kiteconnect` only `test_kite_gateway.py` is
-skipped), then `python engine.py --source csv`.
+`pytest` for the tests; without `kiteconnect`, `test_kite_gateway.py` and the
+two Kite adapter tests in `test_data.py` are skipped, and the rest pass), then
+`python engine.py --source csv`.
 
 | Mode | Command |
 | --- | --- |
@@ -142,10 +143,10 @@ date.
 **Supervisors.** A normal shutdown with a live entry in flight takes a few
 seconds: the fill wait ends, the remainder is cancelled, and the GTT is armed.
 With a degraded broker API it can take minutes, bounded by the gateway's
-deadlines (about 5 minutes at the defaults). Give the supervisor's stop grace
-room before it sends SIGKILL: `docker stop -t 360` or compose
-`stop_grace_period: 360s`, systemd `TimeoutStopSec=360`, Kubernetes
-`terminationGracePeriodSeconds: 360`. Docker's default is only 10 s.
+deadlines (at most about 6¼ minutes at the defaults). Give the supervisor's
+stop grace room before it sends SIGKILL: `docker stop -t 420` or compose
+`stop_grace_period: 420s`, systemd `TimeoutStopSec=420`, Kubernetes
+`terminationGracePeriodSeconds: 420`. Docker's default is only 10 s.
 
 Without `--listing-date` (Yahoo and CSV demos only), the first bar of the last
 20 days is treated as the listing, as in v1.0's demo, and the run says so. SWIGGY
@@ -199,10 +200,23 @@ SIGINT, SIGTERM or SIGHUP, or loses a worker:
    open position.
 
 Signals stay owned by the engine, with repeats logged and ignored, until the
-process has finished exiting. A host that embeds `main()` gets its own handlers
-back afterwards, including ones registered with `loop.add_signal_handler`. Where the event loop cannot own signals (Windows),
-a plain signal handler hands them to the loop thread-safely, so the same path
-runs on Python 3.10 and 3.11+.
+process has finished exiting. Signals belong to the process, so each is taken
+once, when the first engine on a loop starts, and handed back once, when the
+last one ends:
+- Every engine running in the loop (say, one `main()` per IPO) takes the same
+  stop signal in order; none is left to be killed by the supervisor.
+- While an engine runs it owns the signal outright: a host's own handler (say,
+  `loop.stop`) is displaced, not chained, so it cannot cut the orderly
+  shutdown short.
+- On asyncio's own loops, a host that embeds `main()` gets back exactly what it
+  had, including callbacks registered with `loop.add_signal_handler` and a
+  plain handler set beside one. A registration the host changes during a run
+  is left as the host set it.
+- uvloop's callbacks cannot be read back. A host callback it held for a stop
+  signal is therefore lost: the engine logs a warning, and the signal is back
+  at its default (never silently swallowed). Re-register it after `main()`.
+- Where the loop cannot own signals (Windows), a plain signal handler hands them
+  to the loop thread-safely and the previous one is restored afterwards.
 
 ---
 
@@ -244,7 +258,15 @@ Trailing stays the default because it is the original strategy's definition.
   falling back to a `timestamp` field, then to receive time. `last_trade_time`
   is deliberately not used, because for a quiet name it can be minutes old. A
   zeroed exchange time, which the SDK parses as 1970, also falls back to
-  receive time. KiteTicker's naive host-local datetimes are converted to IST.
+  receive time (and is not a lag sample). KiteTicker's naive host-local
+  datetimes are converted to IST. A tick stamped more than 30 s ahead of the
+  host clock is dropped with a critical log before it can move anything: the
+  exchange cannot stamp a print in the future, so either the stamp is corrupt
+  or the host clock is too far behind to trust.
+* **Host clock.** A live feed keeps its own clock: the wall clock as read at
+  start-up, advanced by the monotonic clock. An NTP step mid-session therefore
+  cannot shift bar closing, liveness, the watchdog or signal ages; the start-up
+  offset is measured like any other clock skew (below).
 * **Volume.** Full- and quote-mode ticks report cumulative day volume
   (`volume_traded`), and a bar receives the *difference* between prints.
   - A print only opens or extends a bar if something verifiably traded. Depth
@@ -255,12 +277,13 @@ Trailing stays the default because it is the original strategy's definition.
     credited with an outage's volume. That includes the bar of the bucket in
     which the counter is re-baselined, whose first trades went into the new
     baseline: a short bar would lower the RVOL baseline and fake later breakouts.
-    The back-fill restores the exchange's candles.
+    The back-fill restores the exchange's candles (see Holes, below).
   - The day's counter never legitimately goes down, so its highest value today
     is a high-water mark. A print below it (a zeroed or stale packet) is a
     glitch. It is never adopted as the baseline, in any feed epoch, however many
     arrive in a row, and the next good print is credited normally.
-  - The first print of a day counts from zero only if the feed was up at 09:15.
+  - The first print of a day counts from zero only if the feed was up at 09:15,
+    judged in exchange time.
   - LTP-mode ticks carry no volume and make no bars; the feed uses full mode.
 * **Feed liveness (live feed only).** Every websocket message is proof of life,
   including the 1-byte heartbeat Kite sends when there is nothing else to send.
@@ -272,11 +295,14 @@ Trailing stays the default because it is the original strategy's definition.
     so the stalled tail is not credited to the next bar as well.
   - Both checks run in *feed* time. The feed's lag behind the host clock is
     measured from exchange timestamps on trades, and on newer updates once the
-    symbol has traded in this connection (the largest lag in the last minute;
-    a subscribe snapshot's old timestamp does not count). So network latency or
-    a fast host clock cannot close a bar before its last prints arrive, and a
-    host clock running *behind* the exchange (negative lag) is corrected too,
-    with a warning, including for the router's signal ages.
+    symbol has traded in this connection (a subscribe snapshot's old timestamp
+    does not count). Bars wait for the largest lag in the last minute, so
+    network latency or a fast host clock cannot close a bar before its last
+    prints arrive, and a host clock running *behind* the exchange (negative
+    lag) is corrected too, with a warning.
+  - The router's signal ages use a separate estimate of how far the host runs
+    behind: the median lag of the last minute, which one late or corrupt packet
+    cannot move. Real latency is not removed: a late signal really is older.
   - A tick payload proves liveness only after its ticks are queued, and the bar
     clock never closes a bar while ticks already received are still queued.
   - KiteTicker's ping loop never actually sends a ping, so a half-open socket
@@ -287,10 +313,14 @@ Trailing stays the default because it is the original strategy's definition.
 * **Holes.** If bars are missing before a newly closed bar (a discarded blind
   spot, or a bucket with no trades), they are back-filled from the broker's
   history before that bar is evaluated. This prevents a "first crossing" from
-  firing one bar late at a worse price. The back-fill is strict: an empty
-  answer means nothing traded, and a failed fetch raises, so the bar is recorded
-  but not evaluated. Without a history source, a bar after a hole is likewise
-  not evaluated.
+  firing one bar late at a worse price. A session's first bar also checks the
+  previous session's tail: a join, reconnect or stall near the close can cost
+  it its last bars, and a breakout in the lost 15:25 bar would otherwise fire
+  again at the next open. The back-fill is strict: an empty answer means
+  nothing traded, and a failed fetch raises, so the bar is recorded but not
+  evaluated. Without a history source, a bar after a hole is likewise not
+  evaluated (the offline demo's first tape bar is one: the bundled sessions
+  lack their 15:20 and 15:25 bars).
 * **Integrity.** Late and out-of-order prints are dropped before they can move
   the volume counter. History fetches drop the still-forming bar.
 
@@ -336,8 +366,10 @@ or duplicated:
      timeout, a 5xx), the tag is looked up in the order book for up to 15 s,
      because the broker can book an order moments later.
    - A request that never left the machine (a connect timeout, a refused or
-     unreachable connection, a DNS failure) or a broker refusal (any 4xx, e.g.
-     insufficient margin) releases the symbol at once.
+     unreachable connection, a DNS failure, a proxy that could not be reached)
+     or a broker refusal (any 4xx, e.g. insufficient margin) releases the
+     symbol at once. A proxy that was reached but refused the tunnel is not
+     proof that nothing was sent, so that is looked up like a lost reply.
      Kite errors are classified by HTTP status, not by name: an
      `OrderException` with a 503 is looked up, not taken as a refusal.
 2. It polls `order_history` until the order reaches a terminal state, retrying
@@ -355,16 +387,21 @@ or duplicated:
      polled for 15 s, because the broker can still be creating the GTT. A
      matching GTT created since arming began is adopted, including one that
      has already triggered (then an alert says the exit has fired). A blind
-     retry would arm a second GTT that sells the whole position again. Both
-     book windows judge on their *latest* read: if it failed, polling goes on
-     (for at most one more window) until a read succeeds.
+     retry would arm a second GTT that sells the whole position again. The
+     poll judges on its *latest* read: if that failed, polling goes on (for at
+     most one more window) until a read succeeds.
    - A request that never left the machine is retried through the outage for
-     up to 15 s, without the book.
+     up to 15 s, without the book and without using up an attempt. Each outage
+     gets its own window, so a second outage after an ambiguous attempt is
+     retried too.
    - After any ambiguous attempt, the book is watched for another 15 s. A late
      second GTT raises `GTT DUPLICATE … DELETE ALL BUT GTT n`, or, if the
-     duplicate has already triggered, says the exit has fired.
-   - If the book cannot be read for the whole window, or every request failed
-     ambiguously, a `GTT STATE UNKNOWN` alert says a GTT may exist.
+     duplicate has already triggered, says the exit has fired. If the watch's
+     final read failed, `GTT n armed after an ambiguous failure … CHECK THE GTT
+     BOOK` says a duplicate could not be ruled out.
+   - If the book cannot be read at the end of the (extended) poll, or every
+     request failed ambiguously, a `GTT STATE UNKNOWN` alert says a GTT may
+     exist.
 5. Steps 1–4 run as one shielded task. Shutdown never interrupts it: an entry
    that fills during shutdown is protected once and reported. Once shutdown has
    begun, no new entry is sent.
@@ -494,6 +531,18 @@ lists every finding with its severity, verdict, fix and the test that pins it.
    - A host's own asyncio signal handlers were lost.
 
    These, plus a rate-limiter race found by the v1.4 test matrix, became v1.5.
+6. **v1.5, the fifth fix.** All four skeptics ran. 16 findings, none refuted,
+   2 medium and 14 low. Several skeptics showed that the finder's fix would
+   regress something, and the safer design was used:
+   - A second short outage after an ambiguous GTT attempt got no retry window.
+   - On uvloop, a host's signal handler was still swallowed. Two engines in one
+     loop could leave signals ignored for good.
+   - An NTP step of the host clock mid-session could cut a bar short, and one
+     late packet could undo the host-skew correction.
+   - A session's lost last bar was never restored, and the next open could
+     fire a breakout that had already happened.
+
+   These became v1.6.
 
 ---
 
@@ -510,6 +559,17 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 * **A latency rise during heartbeat-only silence** cannot be measured, since
   heartbeats carry no timestamp. A bar can then still close before a tail
   that is more than 2 s late.
+* **On uvloop, a host's own stop-signal callback is lost** after `main()`,
+  because uvloop cannot hand it back. The engine warns, and the signal is at
+  its default; re-register the callback.
+* **A host clock more than 30 s behind the exchange** gets every tick dropped,
+  with a critical log: fix the time sync and restart. Within 30 s the offset
+  is measured and corrected. A live run keeps the clock it started with, so
+  after NTP corrects the host mid-session, the run goes on correcting (and
+  warning about) its start-up offset until it is restarted.
+* **The last bars of a session that ends the run** are restored only by the
+  next run's history sync: the in-run back-fill of a session's lost tail runs
+  when the next session's first bar closes.
 * **Gap risk.** A stop gapped more than 2% through its trigger rests unfilled
   (see [Execution and risk](#execution-and-risk)).
 * **Sizing ignores margin and liquidity.** There is no check against available
@@ -532,7 +592,7 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 243 tests run offline in about 100 s. The slowest are real CLI runs that
+The 273 tests run offline in about 2 minutes. The slowest are real CLI runs that
 deliver SIGINT, SIGTERM and SIGHUP mid-entry and during exit, and a shutdown
 that must outlast v1.1's 10 s drain. They pass in seven configurations:
 - Python 3.10 with pandas 2.2 and numpy 1.26
@@ -548,8 +608,8 @@ Pandas `FutureWarning`s raised from engine code fail the suite.
 | File | Covers |
 | --- | --- |
 | `test_alpha.py` | Breakout conditions and crossing semantics, the exact stop/target math, true-range ATR, RVOL baselines and modes, session-defined bases, look-ahead freedom (including inside the base), the pinned real signal |
-| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, feed liveness in feed time, feed lag in both directions, the silent-socket watchdog, strict hole back-fill, thread safety, loop survival |
+| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, feed liveness in feed time, feed lag in both directions, clock skew, host clock steps and far-future stamps, the silent-socket watchdog, strict hole back-fill within and across sessions, thread safety, loop survival |
 | `test_execution.py` | Sizing caps, tick rounding, duplicates, future and stale signals, paper OCO mechanics incl. gaps, the halt report. No Kite dependency. |
-| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts and refused connections), broker refusals classified by HTTP status, transient errors, cancels that don't land, partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books. Skipped without `kiteconnect`. |
-| `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter (incl. wake-up order under clock jitter), the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads and bad timestamps, the session's last 30m/60m bar and special sessions, retry policy, strict back-fill, midnight lookback clamps, listing dates in any zone, orchestrator anchoring and error containment, collecting the suite without the Kite extra |
-| `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (incl. asyncio ones), `run()` from a worker thread |
+| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies, repeated outages), broker refusals classified by HTTP status, transient errors, cancels that don't land, partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books. Skipped without `kiteconnect`. |
+| `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter (incl. wake-up order under clock jitter), the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads and bad timestamps, the session's last 30m/60m bar and special sessions, retry policy, strict back-fill, midnight lookback clamps, listing dates in any zone, orchestrator anchoring and error containment, collecting and running the suite without the Kite extra |
+| `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (asyncio and uvloop, incl. handlers changed mid-run and `SA_RESTART`), several engines in one loop, `run()` from a worker thread |

@@ -28,6 +28,9 @@ edited by hand. The 145 bars present in both responses matched on every field
 
 * The vendor's last bar of each session is 15:10 or 15:15. The exchange's final
   15:20 and 15:25 bars are absent (sessions have 72–73 bars instead of 75).
+  The engine sees that gap before the next session's first bar, so the offline
+  demo logs it and does not evaluate its first tape bar (it has no broker to
+  back-fill from).
 * 5 bars carry `volume == 0` despite a non-zero range:
   2026-09-08 09:20, 2026-09-09 09:55, 2026-09-21 09:45 and 09:50, 2026-09-25 15:15.
   The engine leaves them out of the RVOL baseline, and with zero volume they

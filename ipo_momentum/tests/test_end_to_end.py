@@ -476,3 +476,247 @@ def test_when_the_vendor_cuts_the_listing_the_message_does_not_blame_the_lookbac
                                          as_of=datetime(2026, 9, 26, tzinfo=engine.IST))
     assert asyncio.run(orch.build_the_ground()) is False
     assert "History starts 2026-09-08" in caplog.text and "--max-lookback-days" not in caplog.text
+
+
+# ---------------------------------------------------------------- round 6: signals shared by engines and hosts
+HOST = """
+import asyncio, os, signal, sys
+sys.path.insert(0, {engine_dir!r})
+import engine
+ARGS = ["--source", "csv", "--csv", {csv!r}, "--no-simulate", "--run-seconds"]
+got = []
+
+
+def loop_callback(loop, signum):
+    handle = getattr(loop, "_signal_handlers", {{}}).get(signum)
+    return getattr(getattr(handle, "_callback", None), "__qualname__", None)
+
+
+async def delivered(signum, timeout=3.0):
+    before = len(got)
+    os.kill(os.getpid(), signum)
+    deadline = asyncio.get_running_loop().time() + timeout
+    while len(got) == before and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.02)
+    return got[before:]
+
+
+async def host():
+    loop = asyncio.get_running_loop()
+{body}
+
+
+{runner}
+"""
+
+
+def run_host(body, uvloop=False):
+    """``body`` runs as a host coroutine that embeds engine.main() in a fresh interpreter."""
+    runner = "import uvloop\nuvloop.install()\nasyncio.run(host())" if uvloop else "asyncio.run(host())"
+    code = HOST.format(engine_dir=str(Path(engine.__file__).parent), csv=str(FIXTURE),
+                       body=textwrap.indent(textwrap.dedent(body), "    "), runner=runner)
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=90)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_on_uvloop_the_engine_owns_the_signal_and_never_leaves_it_swallowed():
+    # v1.5 read the host's callback from asyncio's private table, which uvloop does not expose: it then
+    # re-installed uvloop's dispatcher with no entry behind it, and every later SIGTERM was swallowed.
+    # uvloop's callbacks cannot be read back, so the signal returns to its default, with a warning.
+    pytest.importorskip("uvloop")
+    code, out, err = run_host("""
+        loop.add_signal_handler(signal.SIGTERM, got.append, "host")
+        engine_run = asyncio.create_task(engine.main(ARGS + ["30"]))
+        await asyncio.sleep(1.0)
+        os.kill(os.getpid(), signal.SIGTERM)                          # stops the engine in order
+        print("main", await engine_run, "host got", got, flush=True)
+        print("after", signal.getsignal(signal.SIGTERM) == signal.SIG_DFL, flush=True)
+    """, uvloop=True)
+    assert code == 0, err
+    assert "main 143 host got []" in out and "after True" in out, out + err
+    assert "Signal 15 received: shutting down in order." in err
+    assert "cannot be read back, so the signal is back at its default" in err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+def test_a_host_that_stops_its_loop_on_sigterm_cannot_cut_the_shutdown_short(loop_kind):
+    # The engine owns the signal while it runs: chaining to the host's loop.stop would stop the loop in
+    # the middle of settling an entry.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code = textwrap.dedent(f"""
+        import asyncio, os, signal, sys
+        sys.path.insert(0, {str(Path(engine.__file__).parent)!r})
+        import engine
+        engine.configure_logging()
+        if {loop_kind!r} == "uvloop":
+            import uvloop
+            loop = uvloop.new_event_loop()
+        else:
+            loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.add_signal_handler(signal.SIGTERM, loop.stop)
+        task = loop.create_task(engine.main(["--source", "csv", "--csv", {str(FIXTURE)!r}, "--no-simulate",
+                                             "--run-seconds", "30"]))
+        loop.call_later(1.0, os.kill, os.getpid(), signal.SIGTERM)
+        task.add_done_callback(lambda _: loop.stop())
+        loop.call_later(20.0, loop.stop)                              # a stuck engine still ends the test
+        loop.run_forever()
+        print("done", task.done() and task.result(), flush=True)
+    """)
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    assert "done 143" in proc.stdout, proc.stdout + proc.stderr
+    assert "=== SYSTEM HALT ===" in proc.stderr
+
+
+@pytest.mark.skipif(not (sys.platform.startswith("linux") and os.uname().machine == "x86_64"),
+                    reason="reads glibc's x86_64 struct sigaction")
+def test_handing_a_signal_back_keeps_its_sa_restart_flag():
+    # asyncio's loop.add_signal_handler sets SA_RESTART; re-installing the same handler with signal.signal
+    # would clear it, and interrupted system calls would start failing with EINTR after main().
+    code, out, err = run_host("""
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+
+        class SigAction(ctypes.Structure):
+            _fields_ = [("handler", ctypes.c_void_p), ("mask", ctypes.c_ulong * 16), ("flags", ctypes.c_int),
+                        ("restorer", ctypes.c_void_p)]
+
+        def restart():
+            action = SigAction()
+            assert libc.sigaction(signal.SIGTERM, None, ctypes.byref(action)) == 0
+            return bool(action.flags & 0x10000000)
+
+        loop.add_signal_handler(signal.SIGTERM, got.append, "host")
+        before = restart()
+        await engine.main(ARGS + ["0.2"])
+        print("SA_RESTART", before, restart(), flush=True)
+    """)
+    assert code == 0, err
+    assert "SA_RESTART True True" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_one_stop_signal_stops_every_engine_in_the_loop_in_order():
+    # v1.5: the engine that started last took the signal alone, and whichever finished first handed the
+    # signal back, so a supervisor's stop killed the other engine outright.
+    code, out, err = run_host("""
+        loop.add_signal_handler(signal.SIGTERM, got.append, "host")
+        a = asyncio.create_task(engine.main(ARGS + ["0.5"]))
+        await asyncio.sleep(0.25)
+        b = asyncio.create_task(engine.main(ARGS + ["30"]))
+        print("a", await a, flush=True)
+        c = asyncio.create_task(engine.main(ARGS + ["30"]))
+        await asyncio.sleep(0.5)
+        os.kill(os.getpid(), signal.SIGTERM)                          # b and c are running; a has finished
+        print("b c", await b, await c, flush=True)
+        during = list(got)                                            # the engines had the signal
+        print("host got", during, "after", await delivered(signal.SIGTERM), flush=True)
+    """)
+    assert code == 0, err
+    assert "a 0" in out and "b c 143 143" in out, out + err
+    assert "host got [] after ['host']" in out, out + err
+    assert err.count("Signal 15 received: shutting down in order.") == 2
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_finished_engine_never_keeps_the_signal():
+    # v1.5 re-armed the finished engine's handler (which ignores signals during its shutdown) when the
+    # engine that started after it ended: SIGINT and SIGTERM were then ignored for good.
+    code, out, err = run_host("""
+        loop.add_signal_handler(signal.SIGTERM, got.append, "host")
+        a = asyncio.create_task(engine.main(ARGS + ["0.5"]))
+        await asyncio.sleep(0.25)
+        b = asyncio.create_task(engine.main(ARGS + ["1.5"]))
+        print("engines", await a, await b, flush=True)
+        print("after", loop_callback(loop, signal.SIGTERM), await delivered(signal.SIGTERM), flush=True)
+    """)
+    assert code == 0, err
+    assert "engines 0 0" in out and "after list.append ['host']" in out, out + err
+    assert "signal ignored" not in err, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_handler_the_host_replaces_during_a_run_is_kept():
+    code, out, err = run_host("""
+        loop.add_signal_handler(signal.SIGTERM, got.append, "old")
+        run = asyncio.create_task(engine.main(ARGS + ["0.6"]))
+        await asyncio.sleep(0.3)
+        loop.add_signal_handler(signal.SIGTERM, got.append, "new")
+        print("main", await run, "after", await delivered(signal.SIGTERM), flush=True)
+    """)
+    assert code == 0, err
+    assert "main 0 after ['new']" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_handler_the_host_removes_during_a_run_stays_removed():
+    code, out, err = run_host("""
+        loop.add_signal_handler(signal.SIGTERM, got.append, "host")
+        run = asyncio.create_task(engine.main(ARGS + ["0.6"]))
+        await asyncio.sleep(0.3)
+        loop.remove_signal_handler(signal.SIGTERM)
+        print("main", await run, "after", loop_callback(loop, signal.SIGTERM),
+              signal.getsignal(signal.SIGTERM) == signal.SIG_DFL, flush=True)
+    """)
+    assert code == 0, err
+    assert "main 0 after None True" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_live_plain_handler_beside_a_stale_loop_entry_comes_back_too():
+    # v1.5 restored only the loop entry, dropping the host's plain handler that was live beside it.
+    code, out, err = run_host("""
+        loop.add_signal_handler(signal.SIGTERM, got.append, "loop entry")
+        signal.signal(signal.SIGTERM, lambda signum, frame: got.append("plain handler"))
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(0.5)
+        before = sorted(got)
+        got.clear()
+        await engine.main(ARGS + ["0.3"])
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(0.5)
+        print("before", before, "after", sorted(got), flush=True)
+    """)
+    assert code == 0, err
+    assert "before ['loop entry', 'plain handler'] after ['loop entry', 'plain handler']" in out, out + err
+
+
+def test_when_both_the_lookback_and_the_vendor_cut_the_listing_the_message_names_both(caplog):
+    # v1.5 blamed only the vendor and printed the lookback's start as where the vendor's data begins.
+    class ShortVendor(engine.CsvReplayAdapter):
+        def history_cutoff(self, symbol=None):
+            return datetime(2026, 9, 10, tzinfo=engine.IST)
+
+    ad = ShortVendor({"SWIGGY": FIXTURE})
+    orch = engine.ProductionOrchestrator({"SWIGGY": datetime(2026, 6, 19, tzinfo=engine.IST)}, ad,
+                                         as_of=datetime(2026, 9, 26, tzinfo=engine.IST), max_lookback_days=10)
+    assert asyncio.run(orch.build_the_ground()) is False
+    assert ("The 10-day lookback starts 2026-09-17 and the source's history 2026-09-10, both after the "
+            "2026-06-19 listing") in caplog.text
+    assert "--max-lookback-days 17 starts at the source's earliest day" in caplog.text
+    orch17 = engine.ProductionOrchestrator({"SWIGGY": datetime(2026, 6, 19, tzinfo=engine.IST)}, ad,
+                                           as_of=datetime(2026, 9, 26, tzinfo=engine.IST), max_lookback_days=17)
+    caplog.clear()
+    assert asyncio.run(orch17.build_the_ground()) is False
+    assert "History starts 2026-09-10" in caplog.text and "lookback" not in caplog.text
+
+
+def test_the_live_router_judges_signal_ages_on_the_feeds_clock(monkeypatch):
+    # The router must get exchange_clock: with the plain wall clock, a host 20 s behind the exchange
+    # refuses every tick-closed signal as "not closed yet".
+    seen = []
+
+    def feed(api_key, access_token, tokens, tick_adapter, feed_dead):
+        oms = tick_adapter.bar_listeners[0].__self__
+        now = engine.datetime.now(engine.IST)
+        tick_adapter.note_feed_lag(now, -20.0)
+        seen.append((oms.clock() - now).total_seconds())
+        tick_adapter.loop.call_later(0.1, feed_dead.set)
+        return types.SimpleNamespace(close=lambda: None)
+
+    kite_env(monkeypatch, feed)
+    asyncio.run(engine.main(["--source", "kite", "--listing-date", "2026-09-08", "--live-feed", "--run-seconds", "30"]))
+    assert len(seen) == 1 and abs(seen[0] - 20.0) < 1.0
