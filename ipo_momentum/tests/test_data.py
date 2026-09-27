@@ -539,8 +539,9 @@ def test_a_special_sessions_forming_bar_is_still_dropped():
 
 
 def test_the_suite_collects_without_the_kite_extra(tmp_path):
-    # README's non-uv setup installs pandas, numpy and pytest only; v1.3 imported requests before the
-    # kiteconnect skip, so collection failed and no test ran at all.
+    # README's non-uv setup installs pandas, numpy and pytest only. v1.3 imported requests before the
+    # kiteconnect skip, so collection failed and no test ran at all; v1.4 skipped all of test_execution.py,
+    # sizing and paper tests included. Only the Kite gateway module may be skipped.
     (tmp_path / "sitecustomize.py").write_text(
         "import sys\n"
         "class Block:\n"
@@ -548,10 +549,14 @@ def test_the_suite_collects_without_the_kite_extra(tmp_path):
         "        if name.split('.')[0] in ('kiteconnect', 'requests'):\n"
         "            raise ModuleNotFoundError(f'No module named {name!r}', name=name)\n"
         "sys.meta_path.insert(0, Block())\n")
-    root = Path(engine.__file__).parent
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), str(root)]))
-    proc = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider",
-                           "-o", "pythonpath=", str(Path(__file__).parent / "test_execution.py")],
-                          env=env, capture_output=True, text=True, cwd=tmp_path, timeout=120)
-    assert proc.returncode in (0, 5), proc.stdout + proc.stderr           # 5: nothing collected, nothing broken
-    assert "error" not in proc.stdout.lower()
+    tests = Path(__file__).parent
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), str(Path(engine.__file__).parent), str(tests)]))
+    proc = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-rs", "-p", "no:cacheprovider",
+                           "-o", "pythonpath=", str(tests)], env=env, capture_output=True, text=True, cwd=tmp_path,
+                          timeout=120)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0 and "ERROR collecting" not in out and "Interrupted" not in out, out
+    assert "test_execution.py::test_quantity_risks_the_budget_and_respects_the_notional_cap" in out
+    assert "test_execution.py::test_the_halt_report_lists_fills_that_completed_during_shutdown" in out
+    assert "test_kite_gateway.py" in out and "could not import 'kiteconnect'" in out
+    assert "test_kite_gateway.py::" not in out                            # skipped as a whole, nothing else

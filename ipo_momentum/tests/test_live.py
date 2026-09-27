@@ -129,12 +129,13 @@ def test_joining_mid_session_does_not_dump_the_days_volume_into_one_bar():
     """Started 10:04:59; the first print (10:05:01) carries 5M shares traded since 09:15."""
     a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)), token_map={1234: "SWIGGY"},
                 started_at=ist(2026, 9, 28, 10, 4, 59))
-    for secs, cum in [(1, 5_000_000), (90, 5_004_000), (200, 5_010_000)]:
+    for secs, cum in [(1, 5_000_000), (90, 5_004_000), (200, 5_010_000), (330, 5_012_000), (420, 5_020_000)]:
         a.on_tick(engine.Tick("SWIGGY", 280.0, 0, ist(2026, 9, 28, 10, 5) + timedelta(seconds=secs), cumulative_volume=cum))
-    a.flush_due_bars(ist(2026, 9, 28, 10, 11))
-    bar = a.market_state["SWIGGY"].iloc[-1]
-    assert a.market_state["SWIGGY"].index[-1] == pd.Timestamp(ist(2026, 9, 28, 10, 5))   # complete bar, kept
-    assert bar["Volume"] == 10_000                                         # only what traded while we watched
+    a.flush_due_bars(ist(2026, 9, 28, 10, 16))
+    today = a.market_state["SWIGGY"][a.market_state["SWIGGY"].index >= pd.Timestamp(ist(2026, 9, 28))]
+    # The 10:05 bar's head (10:05:00-10:05:01) went into the baseline, so that bar is discarded (v1.4 kept it
+    # short); the next bar gets only what traded while we watched.
+    assert today.index.tolist() == [pd.Timestamp(ist(2026, 9, 28, 10, 10))] and today["Volume"].tolist() == [10_000]
 
 
 def test_ticks_for_a_symbol_without_history_are_ignored_not_fatal(caplog):
@@ -259,10 +260,13 @@ def test_reconnect_rebaselines_volume_and_discards_the_blind_bar():
 def test_a_late_feed_connect_does_not_dump_the_days_volume_into_one_bar():
     a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 5))
     a.mark_feed_reset(at=ist(2026, 9, 25, 11, 0, 0))                       # the websocket only got through at 11:00
-    a.on_tick(cum_tick(100.0, 4_200_000, ist(2026, 9, 25, 11, 0, 5)))
+    a.on_tick(cum_tick(100.0, 4_200_000, ist(2026, 9, 25, 11, 0, 5)))      # re-baselines: 11:00 is blind
     a.on_tick(cum_tick(100.1, 4_212_000, ist(2026, 9, 25, 11, 3, 0)))
-    a.flush_due_bars(ist(2026, 9, 25, 11, 6))
-    assert a.market_state["SWIGGY"].iloc[-1]["Volume"] == 12_000
+    a.on_tick(cum_tick(100.2, 4_215_000, ist(2026, 9, 25, 11, 5, 10)))
+    a.on_tick(cum_tick(100.3, 4_220_000, ist(2026, 9, 25, 11, 7, 0)))
+    a.flush_due_bars(ist(2026, 9, 25, 11, 11))
+    today = a.market_state["SWIGGY"][a.market_state["SWIGGY"].index >= pd.Timestamp(ist(2026, 9, 25))]
+    assert today.index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 11, 5))] and today["Volume"].tolist() == [8_000]
 
 
 def test_a_counter_going_backwards_is_rebaselined_not_reset_to_zero():
@@ -492,25 +496,28 @@ def test_a_zeroed_first_packet_after_a_reconnect_is_not_the_baseline():
 
 
 def test_the_print_after_a_glitch_keeps_its_trade_and_price():
-    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 59))   # joined mid-session
-    a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 5)))          # re-baselines
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 58))   # joined mid-session
+    a.on_tick(cum_tick(100.0, 990_000, ist(2026, 9, 25, 9, 59, 0)))            # re-baselines (09:55 is blind)
+    a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 5)))
     a.on_tick(cum_tick(100.0, 1_010_000, ist(2026, 9, 25, 10, 1, 0)))
     a.on_tick(cum_tick(100.0, 0, ist(2026, 9, 25, 10, 2, 0)))                  # a zeroed packet
     a.on_tick(cum_tick(97.0, 1_060_000, ist(2026, 9, 25, 10, 3, 0)))           # a real 50k trade at 97
     a.flush_due_bars(ist(2026, 9, 25, 10, 5, 3))
     bar = a.market_state["SWIGGY"].iloc[-1]
-    assert (bar["Low"], bar["Close"], bar["Volume"]) == (97.0, 97.0, 60_000.0)   # v1.3 lost the trade
+    assert (bar["Low"], bar["Close"], bar["Volume"]) == (97.0, 97.0, 70_000.0)   # v1.3 lost the trade
 
 
 def test_a_stall_across_a_bucket_end_does_not_credit_its_tail_twice():
     # The clock discards the stalled bar and the back-fill restores it; v1.3 also credited the stalled
-    # tail to the next live bar, so the tail was in history twice.
+    # tail to the next live bar, so the tail was in history twice. v1.4 re-baselined the counter but
+    # kept the next bar with its head swallowed by the new baseline; that bar is now discarded and
+    # back-filled too.
     history = pd.concat([session_history(24), make_bars([100.0] * 10, start=ist(2026, 9, 25, 9, 15))])
-    candle = make_bars([99.0], start=ist(2026, 9, 25, 10, 5))
-    candle["Volume"] = 280_000.0                                          # the exchange's 10:05 candle
+    candles = make_bars([99.0, 100.9], start=ist(2026, 9, 25, 10, 5))
+    candles["Volume"] = [280_000.0, 20_000.0]                            # the exchange's 10:05 and 10:10 candles
 
     async def backfill(sym, start, end):
-        return candle
+        return candles
 
     async def scenario():
         a = engine.LiveTickAdapter({"SWIGGY": history}, engine.AlphaEngine(), asyncio.Queue(),
@@ -524,15 +531,17 @@ def test_a_stall_across_a_bucket_end_does_not_credit_its_tail_twice():
         a.flush_due_bars(ist(2026, 9, 25, 10, 10, 2))                        # 10:05 discarded
         a.on_tick(cum_tick(99.2, 1_280_000, ist(2026, 9, 25, 10, 9, 58)))   # the stalled 250k burst: late
         a.note_feed_alive(at=ist(2026, 9, 25, 10, 10, 3))
-        a.on_tick(cum_tick(100.8, 1_285_000, ist(2026, 9, 25, 10, 10, 5)))
+        a.on_tick(cum_tick(100.8, 1_285_000, ist(2026, 9, 25, 10, 10, 5)))  # re-baselines: 10:10 is blind
         a.on_tick(cum_tick(101.0, 1_300_000, ist(2026, 9, 25, 10, 11, 0)))
-        a.on_tick(cum_tick(101.0, 1_301_000, ist(2026, 9, 25, 10, 15, 1)))  # closes 10:10: hole at 10:05
+        a.on_tick(cum_tick(101.0, 1_301_000, ist(2026, 9, 25, 10, 15, 1)))  # closes (discards) 10:10
+        a.on_tick(cum_tick(101.2, 1_321_000, ist(2026, 9, 25, 10, 17, 0)))
+        a.on_tick(cum_tick(101.3, 1_322_000, ist(2026, 9, 25, 10, 20, 1)))  # closes 10:15: hole 10:05-10:15
         await asyncio.gather(*a._backfills)
         return a.market_state["SWIGGY"]
 
     df = asyncio.run(scenario())
     today = df[df.index >= pd.Timestamp(ist(2026, 9, 25, 10, 5))]
-    assert today["Volume"].tolist() == [280_000.0, 15_000.0]                # v1.3: 280,000 then 270,000
+    assert today["Volume"].tolist() == [280_000.0, 20_000.0, 21_000.0]      # v1.3: 280,000 then 270,000
 
 
 def test_bars_close_in_feed_time_when_the_feed_lags():
@@ -591,3 +600,102 @@ def test_the_bar_clock_waits_for_ticks_already_received():
         return still_open, a.market_state["SWIGGY"].iloc[-1]["Close"]
 
     assert asyncio.run(scenario()) == (True, 100.3)
+
+
+# ---------------------------------------------------------------- round 5: feed time in both directions
+def kite_packet(cum, sent, price=100.0):
+    naive_local = sent.astimezone().replace(tzinfo=None)                   # KiteTicker's naive host-local time
+    return {"instrument_token": 1234, "last_price": price, "volume_traded": cum, "exchange_timestamp": naive_local}
+
+
+def test_a_lag_rise_seen_on_depth_updates_holds_the_bar_open(monkeypatch):
+    # v1.4 measured lag on trades only, so late depth updates kept proving liveness at the old lag and
+    # the bar closed before its tail arrived.
+    class SteppedClock(datetime):
+        FIXED = None
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.FIXED.astimezone(tz) if tz else cls.FIXED.replace(tzinfo=None)
+
+    monkeypatch.setattr(engine, "datetime", SteppedClock)
+
+    def receive(a, cum, sent, delay):
+        SteppedClock.FIXED = sent + timedelta(seconds=delay)
+        a.broker_on_ticks(None, [kite_packet(cum, sent)])
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"},
+                                   started_at=ist(2026, 9, 28, 10, 50))
+        receive(a, 1_000, ist(2026, 9, 28, 10, 59, 40), 0.3)              # re-baselines
+        receive(a, 1_200, ist(2026, 9, 28, 10, 59, 50), 0.3)              # a trade, 0.3 s late
+        receive(a, 1_200, ist(2026, 9, 28, 11, 0, 0), 4.0)                # a depth update, 4 s late
+        await asyncio.sleep(0)
+        while not a.tick_queue.empty():
+            a.on_tick(a.tick_queue.get_nowait())
+        return a.feed_lag
+
+    assert asyncio.run(scenario()) == 4.0                                 # v1.4: 0.3
+
+
+def test_a_tick_payload_proves_liveness_only_after_its_ticks_are_queued():
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"})
+        order = []
+        a.tick_queue.put_nowait = lambda t: order.append("tick")
+        a.note_feed_alive = lambda at=None: order.append("alive")
+        a.broker_on_ticks(None, [{"instrument_token": 1234, "last_price": 100.0, "volume_traded": 10}])
+        await asyncio.sleep(0)
+        return order
+
+    assert asyncio.run(scenario()) == ["tick", "alive"]                    # v1.4 stamped nothing here
+
+
+def test_only_heartbeats_and_text_stamp_liveness_from_on_message(monkeypatch):
+    # KiteTicker calls on_message before on_ticks for the same payload, so a tick payload stamped there
+    # could vouch for its own tail.
+    import kiteconnect
+
+    class FakeTicker:
+        MODE_FULL = "full"
+
+        def __init__(self, api_key, access_token):
+            pass
+
+        def connect(self, threaded=False):
+            pass
+
+    monkeypatch.setattr(kiteconnect, "KiteTicker", FakeTicker)
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop())
+        stamps = []
+        a.note_feed_alive = lambda at=None: stamps.append(at)
+        kws = engine.start_kite_feed("key", "token", [1234], a, asyncio.Event())
+        kws.on_message(kws, b"\x00" * 184, True)                         # a tick payload: stamped by on_ticks
+        kws.on_message(kws, b"\x00", True)                               # a heartbeat
+        kws.on_message(kws, '{"type": "order"}', False)                  # a text message
+        await asyncio.sleep(0)
+        return len(stamps)
+
+    assert asyncio.run(scenario()) == 2
+
+
+def test_a_host_clock_behind_the_exchange_is_corrected_not_ignored(caplog):
+    # v1.4 clamped negative lag to 0: bars closed S s late and the router misjudged signal ages by S.
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), require_feed_liveness=True)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 59))
+    a.note_feed_lag(ist(2026, 9, 25, 10, 0, 0), -19.7)                   # host clock 19.7 s slow
+    a.on_tick(tick(101.0, 100, ist(2026, 9, 25, 10, 0, 10)))
+    a.note_feed_alive(at=ist(2026, 9, 25, 10, 4, 44))                    # true 10:05:03.7
+    a.flush_due_bars(ist(2026, 9, 25, 10, 4, 45))                        # true 10:05:04.7: due
+    assert "SWIGGY" not in a.current_bars and a.market_state["SWIGGY"].index[-1] == pd.Timestamp(ist(2026, 9, 25, 10, 0))
+    assert "Host clock runs 19.7s behind the exchange" in caplog.text
+    clock = engine.exchange_clock(lambda: a)
+    assert abs((clock() - datetime.now(engine.IST)).total_seconds() - 19.7) < 1.0
+    a.feed_lag = 3.0                                                     # real latency is not removed
+    assert abs((clock() - datetime.now(engine.IST)).total_seconds()) < 1.0

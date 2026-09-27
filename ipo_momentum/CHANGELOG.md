@@ -1,11 +1,66 @@
 # Changelog
 
-## v1.5 (in progress)
+## v1.5 (2026-09-27)
 
-Found by the v1.4 test matrix, before round 5 reported. One run on Python
-3.10 / pandas 2.2 failed `test_limiter_serves_waiters_in_arrival_order`. That
-was not noise: under CPU load, the limiter served waiters out of order in 1–2
-of 300 runs, on both Python lines.
+v1.4 went through a fifth adversarial review on a frozen snapshot (`accab1d`),
+with the same four areas. Every skeptic ran. All 15 findings were reproduced by
+their skeptic: 14 confirmed, 1 with part of the claim overstated, none
+refuted. Two pairs are duplicates, which leaves the 13 defects below: no
+critical or high findings, 3 medium, 10 low. Where a skeptic showed that the
+finder's fix would regress something (never-sent GTTs, the snapshot's timing,
+negative lag), the skeptic's refined fix was used.
+
+Every v1.5 regression test fails on the v1.4 snapshot and passes here, except
+these controls:
+- the pre-existing `0`, `-5`, `1.5` and `nan` cases of
+  `test_the_lookback_must_be_a_positive_whole_number_of_days`;
+- `test_the_print_after_a_glitch_keeps_its_trade_and_price`, whose setup moved
+  its first print out of the bar it checks;
+- `test_the_suite_collects_without_the_kite_extra`, whose defect was in v1.4's
+  test-file layout: it fails with that layout.
+
+Verdict: ✔ confirmed by the independent skeptic, ◐ confirmed with part of the
+claim overstated. Severity is the skeptic's rating.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.4 defect | v1.5 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | The GTT-book poll and the duplicate watch counted the book as read if *any* read had succeeded. If only the first read got through, a GTT booked just after it was never seen, and a second whole-position GTT was armed, or a late duplicate went unreported. | Both windows judge on their latest read. After the deadline, the poll continues (for at most one more window) until a read succeeds, since a booked GTT stays in the book. The watch alerts whenever its final read failed. | `test_a_gtt_booked_while_the_book_is_unreadable_is_still_adopted`, `test_a_duplicate_watch_whose_last_read_failed_says_so` |
+| low | ✔ | A duplicate that had already **triggered** produced "DELETE ALL BUT GTT n", which means: keep the new GTT, over shares the fired one is already selling. | Then the alert says the exit has fired, and to delete the new GTT and check orders and holdings. | `test_a_duplicate_that_already_triggered_is_reported_as_a_fired_exit` |
+| low | ◐ | Only a connect timeout counted as never sent. A refused or unreachable connection, or a DNS failure (a plain `ConnectionError` whose reason is urllib3's `NewConnectionError`), was treated as a lost reply: the entry's symbol was blocked, and the GTT path gave up with "a GTT may exist". Overstated: the finder's fix, three quick retries, would have covered less of a short outage than today's 15 s window. | These errors count as never sent. The entry releases the symbol. The GTT is retried through the outage for up to `cancel_grace` without using up an attempt, and then "POSITION OPEN WITHOUT EXITS", not "state unknown". | `test_a_refused_connection_releases_the_symbol_without_a_lookup`, `test_a_gtt_is_retried_through_a_short_outage_that_refuses_connections`, `test_a_refused_gtt_request_that_outlasts_the_window_says_no_gtt_exists` |
+| low | ✔ | The 3-try GTT-book snapshot ran after the fill, so a slow book delayed the first GTT request by up to 24 s. | The snapshot is taken at the start of `execute()`, before the LTP check, so the LTP check and `place_order` stay back to back. No sleep follows the last try. | `test_kite_entry_then_gtt_oco_on_the_filled_quantity` (route order) |
+
+### Live feed
+
+| Sev | Verdict | v1.4 defect | v1.5 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | A re-baselining print (after a stall, a reconnect or a late join) swallowed whatever had traded earlier in its bucket. That bar was kept, with the wrong open and too little volume. A short bar is **not** fail-safe: it lowers the 20-bar RVOL baseline and can fake a later breakout, which the finder reproduced. | The bucket of a re-baselining print is blind. Its bar is discarded, and the next complete bar's back-fill restores the exchange's candle. | `test_a_stall_across_a_bucket_end_does_not_credit_its_tail_twice` (rewritten), `test_joining_mid_session_does_not_dump_the_days_volume_into_one_bar`, `test_a_late_feed_connect_does_not_dump_the_days_volume_into_one_bar` (both corrected) |
+| low | ✔ | Lag was measured only on trades, so a latency rise shown only by depth updates left a stale lag, and the bar closed before its tail arrived. KiteTicker also calls `on_message` before `on_ticks`, so a payload could vouch for its own tail. | Newer exchange updates after a trade in the current connection are sampled too. A tick payload proves liveness only after its ticks are queued, and `on_message` stamps only heartbeats and text. A lag rise during heartbeat-only silence stays undetectable, since heartbeats carry no timestamp (README, Known limitations). | `test_a_lag_rise_seen_on_depth_updates_holds_the_bar_open`, `test_a_tick_payload_proves_liveness_only_after_its_ticks_are_queued`, `test_only_heartbeats_and_text_stamp_liveness_from_on_message` |
+| low | ✔ | A host clock *behind* the exchange showed up as negative lag, which was clamped to 0 without a word. Bars then closed late, and the router misjudged signal ages by the skew: tick-closed signals were refused as "not closed yet", and old clock-closed ones were accepted. This predates v1.4. | The lag is kept signed, and a warning names the skew. Bars close in feed time in both directions. The live router's clock adds back a host lag, but not real latency, which does age a signal. | `test_a_host_clock_behind_the_exchange_is_corrected_not_ignored` |
+
+### Lifecycle and CLI
+
+| Sev | Verdict | v1.4 defect | v1.5 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | A host that had registered its own `loop.add_signal_handler` callbacks lost them to `main()`, and afterwards SIGINT and SIGTERM were swallowed, leaving only SIGKILL. | The host's loop callbacks are re-registered after the engine's are removed. | `test_a_hosts_own_loop_signal_handlers_survive_the_engine` |
+| low | ✔ | `run()` called from a worker thread raised `ValueError` after a complete run, discarding the exit code. | Restoring handlers outside the main thread is skipped. | `test_run_from_a_worker_thread_returns_the_exit_code` |
+| low | ✔ | A huge `--max-lookback-days` passed validation and then crashed with an `OverflowError` traceback (exit 1). | The flag takes 1 to 36500 days (exit 2 otherwise), and the orchestrator caps the lookback at 36500 days for library callers. | `test_the_lookback_must_be_a_positive_whole_number_of_days` (2 new cases), `test_a_huge_lookback_is_capped_not_a_crash` |
+| low | ✔ | With Yahoo, the exclusion message blamed the 180-day lookback and prescribed `--max-lookback-days`, which cannot get past Yahoo's own ~60 days. | An adapter declares its own history limit (`history_limit_days`), and when the vendor cut the listing, the message says the history starts later and offers only `--allow-partial-history`. | `test_when_the_vendor_cuts_the_listing_the_message_does_not_blame_the_lookback` |
+| low | ✔ | `--max-lookback-days` was ignored without `--listing-date`: demos always fetched 20 days. | Demos fetch at most `min(20, N)` days. | `test_a_demo_honours_a_shorter_lookback` |
+
+### Tests
+
+| Sev | Verdict | v1.4 defect | v1.5 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | Without `kiteconnect`, *all* of `test_execution.py` was skipped, including the sizing, paper-OCO and halt-report tests. The collection test accepted "nothing collected". | The Kite gateway tests moved to `test_kite_gateway.py`, and `test_execution.py` has no Kite dependency. The collection test collects the whole suite without the extra and asserts that the non-Kite tests are still there. | `test_the_suite_collects_without_the_kite_extra` |
+
+### Found by the v1.4 test matrix
+
+One run on Python 3.10 / pandas 2.2 failed
+`test_limiter_serves_waiters_in_arrival_order`. That was not noise: under CPU
+load the limiter served waiters out of order in 1–2 of 300 runs, on both
+Python lines.
 
 | Sev | v1.4 defect | Fix | Pinned by |
 | --- | --- | --- | --- |

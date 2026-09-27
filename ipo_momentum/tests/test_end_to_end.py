@@ -1,6 +1,7 @@
 """The whole pipeline through the real CLI entry points."""
 import asyncio
 import logging
+import os
 import queue
 import signal
 import subprocess
@@ -399,9 +400,79 @@ def test_the_lookback_can_reach_an_older_listing(tmp_path, caplog):
     assert asyncio.run(engine.main(args + ["--max-lookback-days", "400"])) == 0
 
 
-@pytest.mark.parametrize("value", ["0", "-5", "1.5", "nan"])
+@pytest.mark.parametrize("value", ["0", "-5", "1.5", "nan", "36501", "1000000"])
 def test_the_lookback_must_be_a_positive_whole_number_of_days(value, capsys):
     assert engine.build_arg_parser().parse_args(["--max-lookback-days", "400"]).max_lookback_days == 400
     with pytest.raises(SystemExit) as stop:
         engine.build_arg_parser().parse_args(["--max-lookback-days", value])
     assert stop.value.code == 2 and "argument --max-lookback-days" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- round 5: embedding hosts and lookback edges
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_hosts_own_loop_signal_handlers_survive_the_engine():
+    # v1.4 re-installed asyncio's no-op C handler after removing its own loop handler, so a host that had
+    # registered SIGTERM with loop.add_signal_handler could no longer be stopped by anything but SIGKILL.
+    async def host():
+        loop = asyncio.get_running_loop()
+        stopped = asyncio.Event()
+        loop.add_signal_handler(signal.SIGTERM, stopped.set)
+        try:
+            await engine.main(["--source", "csv", "--csv", str(FIXTURE), "--no-simulate", "--run-seconds", "0.2"])
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(stopped.wait(), 3)
+            return True
+        finally:
+            loop.remove_signal_handler(signal.SIGTERM)
+
+    saved = signal.getsignal(signal.SIGTERM)
+    try:
+        assert asyncio.run(host())
+    finally:
+        signal.signal(signal.SIGTERM, saved)
+
+
+def test_run_from_a_worker_thread_returns_the_exit_code():
+    # v1.4's run() restored signal handlers unconditionally, which raises outside the main thread.
+    code = textwrap.dedent(f"""
+        import sys, threading
+        sys.path.insert(0, {str(Path(engine.__file__).parent)!r})
+        import engine
+        result = []
+        worker = threading.Thread(target=lambda: result.append(engine.run(
+            ["--source", "csv", "--csv", {str(FIXTURE)!r}, "--no-simulate", "--run-seconds", "0.2"])))
+        worker.start()
+        worker.join()
+        print("RESULT", result)
+    """)
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    assert "RESULT [0]" in proc.stdout, proc.stdout + proc.stderr
+
+
+def test_a_huge_lookback_is_capped_not_a_crash(caplog):
+    # Library callers skip the CLI's bound; v1.4 overflowed the calendar (OverflowError, exit 1).
+    ad = engine.CsvReplayAdapter({"SWIGGY": FIXTURE})
+    orch = engine.ProductionOrchestrator({"SWIGGY": datetime(2026, 9, 8, tzinfo=engine.IST)}, ad,
+                                         as_of=datetime(2026, 9, 26, tzinfo=engine.IST), max_lookback_days=10 ** 9)
+    assert asyncio.run(orch.build_the_ground())
+
+
+def test_a_demo_honours_a_shorter_lookback(caplog):
+    # v1.4 always fetched the demo's 20 days, whatever --max-lookback-days said.
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    assert asyncio.run(engine.main(["--source", "csv", "--csv", str(FIXTURE), "--no-simulate", "--run-seconds", "0.1",
+                                    "--max-lookback-days", "3"])) == 0
+    assert "treating the first bar (2026-09-23 09:15) as the listing" in caplog.text
+
+
+def test_when_the_vendor_cuts_the_listing_the_message_does_not_blame_the_lookback(caplog):
+    # With Yahoo's ~60-day window, v1.4 said the 180-day lookback cut an older listing and prescribed
+    # --max-lookback-days, which cannot reach it.
+    class ShortVendor(engine.CsvReplayAdapter):
+        history_limit_days = 59
+
+    ad = ShortVendor({"SWIGGY": FIXTURE})
+    orch = engine.ProductionOrchestrator({"SWIGGY": datetime(2025, 12, 1, tzinfo=engine.IST)}, ad,
+                                         as_of=datetime(2026, 9, 26, tzinfo=engine.IST))
+    assert asyncio.run(orch.build_the_ground()) is False
+    assert "History starts 2026-09-08" in caplog.text and "--max-lookback-days" not in caplog.text
