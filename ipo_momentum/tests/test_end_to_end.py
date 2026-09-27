@@ -140,6 +140,17 @@ def test_ctrl_c_runs_the_orderly_shutdown_and_prints_the_halt_report():
     assert "PAPER FILL" in err and "=== SYSTEM HALT ===" in err and "Open SWIGGY: 2884 @ 289.83" in err
 
 
+@pytest.fixture(autouse=True)
+def no_orphaned_engines():
+    """A test that fails before its child exits must not leave an engine running (a `--run-seconds 0` one never stops)."""
+    yield
+    while Child.running:
+        proc = Child.running.pop()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
 class FixtureAsKite(engine.CsvReplayAdapter):
     """Stands in for ZerodhaKiteAdapter: serves the bundled bars whatever the requested window."""
 
@@ -201,11 +212,13 @@ def test_shutdown_waits_for_the_order_in_flight(monkeypatch, caplog):
 # ---------------------------------------------------------------- signals, in a real interpreter
 class Child:
     """engine.run(args) in a fresh interpreter after ``prelude``; stderr is read line by line."""
+    running = []                                                         # killed after each test (never orphaned)
 
     def __init__(self, prelude, *args):
         code = "\n".join(["import sys", f"sys.path.insert(0, {str(Path(engine.__file__).parent)!r})", "import engine",
                           textwrap.dedent(prelude), f"sys.exit(engine.run({list(args)!r}))"])
         self.proc = subprocess.Popen([sys.executable, "-c", code], stderr=subprocess.PIPE, text=True)
+        Child.running.append(self.proc)
         self.lines, self.log = queue.Queue(), []
         threading.Thread(target=self._pump, daemon=True).start()
 
@@ -230,7 +243,11 @@ class Child:
         raise AssertionError(f"{needle!r} was never logged:\n{''.join(self.log)}")
 
     def finish(self, timeout=60.0):
-        code = self.proc.wait(timeout=timeout)
+        try:
+            code = self.proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            raise AssertionError(f"still running {timeout:.0f}s after the stop:\n{''.join(self.log)}") from None
         while (line := self.lines.get(timeout=10)) is not None:
             self.log.append(line)
         return code, "".join(self.log)

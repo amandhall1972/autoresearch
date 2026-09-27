@@ -74,6 +74,12 @@ Existing tests changed:
   surely covered (GTT 700; …)", with no "covered by GTT".
 - `test_a_fill_during_shutdown_whose_gtt_had_fired_is_not_reported_as_exits_armed`
   also checks the halt report's line.
+- The suite restores SIGINT's default when it starts with SIGINT ignored. A
+  shell's background job (`pytest &`) starts that way, and the engine keeps an
+  ignored signal ignored, as under nohup. The first v1.12 matrix was launched
+  like that and failed the 12 SIGINT tests in every configuration.
+- A CLI child still running when its test ends is killed. A stop that never
+  arrived used to leave a `--run-seconds 0` engine running for good.
 
 ### Real-money safety: orders
 

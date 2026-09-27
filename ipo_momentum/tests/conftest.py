@@ -1,4 +1,5 @@
 import asyncio
+import signal
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -8,6 +9,12 @@ import pytest
 import engine
 
 FIXTURE = Path(__file__).resolve().parent.parent / "data" / "SWIGGY_5m_2026-09-08_2026-09-25.csv"
+
+# A shell starts a background job (`pytest &`, or a script run that way) with SIGINT ignored, and every process the
+# tests start inherits that. The engine keeps an ignored signal ignored, as under nohup, so the Ctrl-C tests would
+# fail for the way the suite was launched: give SIGINT back its default before any test runs.
+if signal.getsignal(signal.SIGINT) == signal.SIG_IGN:
+    signal.signal(signal.SIGINT, signal.default_int_handler)
 
 
 def ist(*args) -> datetime:
