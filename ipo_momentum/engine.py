@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.3)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.4)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -21,6 +21,7 @@ and the synthetic tape never runs alongside a live feed. Nothing here is investm
 
 import argparse
 import asyncio
+import collections
 import functools
 import ipaddress
 import json
@@ -87,6 +88,7 @@ class Tick:
     volume: int                                 # quantity traded since the previous tick
     timestamp: datetime                         # tz-aware IST
     cumulative_volume: Optional[int] = None     # day volume (Kite `volume_traded`); wins over `volume`
+    received: Optional[datetime] = None         # receive time, when `timestamp` is the exchange's own
 
 @dataclass
 class Signal:
@@ -216,7 +218,7 @@ def drop_incomplete_bars(df: pd.DataFrame, as_of: datetime, minutes: int) -> pd.
     """
     close = df.index.normalize() + pd.Timedelta(hours=SESSION_CLOSE.hour, minutes=SESSION_CLOSE.minute)
     end = df.index + pd.Timedelta(minutes=minutes)
-    end = end.where(end <= close, close)
+    end = end.where((end <= close) | (df.index >= close), close)   # a special session's bars keep their width
     return df[end <= pd.Timestamp(as_of)]
 
 
@@ -224,15 +226,16 @@ def drop_incomplete_bars(df: pd.DataFrame, as_of: datetime, minutes: int) -> pd.
 # 2. DATA HARMONIZATION & BROKER ADAPTERS
 # ==============================================================================
 def is_permanent_error(e: BaseException) -> bool:
-    """Errors a retry cannot fix: HTTP 4xx other than 429, and Kite refusals.
+    """Errors a retry cannot fix: HTTP 4xx other than 429, and Kite auth errors.
 
-    Kite reports MarginException, HoldingException, UserException and similar as a
-    GeneralException carrying the HTTP status, so kiteconnect errors are classified by
-    that status; OrderException means the broker refused the order.
+    The SDK builds every API error as ``ErrorType(message, code=<HTTP status>)``, and the type
+    (from the body) and the status are independent: Kite reports MarginException,
+    HoldingException and the like as a GeneralException with a 400, and an OrderException can
+    carry a 5xx. So kiteconnect errors are classified by their status, not their name.
     """
     if isinstance(e, urllib.error.HTTPError):
         return 400 <= e.code < 500 and e.code != 429
-    if type(e).__name__ in ("TokenException", "PermissionException", "InputException", "OrderException"):
+    if type(e).__name__ in ("TokenException", "PermissionException"):
         return True
     code = getattr(e, "code", None)
     if type(e).__module__.startswith("kiteconnect") and isinstance(code, int):
@@ -570,11 +573,17 @@ class ProductionOrchestrator:
                 logger.warning(f"[{symbol}] No listing date given: treating the first bar ({df.index[0]:%Y-%m-%d %H:%M}) "
                                f"as the listing, so the base and AVWAP are anchored there (demo semantics).")
             elif start_date > listing_date or df.index[0].date() != listing_date.date():
-                gap = (df.index[0].date() - listing_date.date()).days
-                msg = (f"[{symbol}] History starts {df.index[0]:%Y-%m-%d}, {gap} days after the "
-                       f"{listing_date:%Y-%m-%d} listing, so the IPO base and AVWAP anchor are unknown")
+                if start_date > listing_date:
+                    msg = (f"[{symbol}] The {self.max_lookback_days}-day lookback starts {start_date:%Y-%m-%d}, after "
+                           f"the {listing_date:%Y-%m-%d} listing, so the IPO base and AVWAP anchor are unknown")
+                    remedy = "--max-lookback-days to reach the listing, or --allow-partial-history to anchor at the first bar"
+                else:
+                    gap = (df.index[0].date() - listing_date.date()).days
+                    msg = (f"[{symbol}] History starts {df.index[0]:%Y-%m-%d}, {gap} days after the "
+                           f"{listing_date:%Y-%m-%d} listing, so the IPO base and AVWAP anchor are unknown")
+                    remedy = "--allow-partial-history to anchor at the first bar"
                 if not self.allow_partial_history:
-                    logger.error(f"{msg}; symbol excluded (--allow-partial-history to anchor at the first bar).")
+                    logger.error(f"{msg}; symbol excluded ({remedy}).")
                     continue
                 logger.warning(f"{msg}; anchoring at the first available bar as requested.")
             self.market_state[symbol] = df
@@ -722,6 +731,12 @@ class LiveTickAdapter:
         # heartbeat every second) after the bar's bucket ended; otherwise its tail may be missing.
         self.require_feed_liveness = require_feed_liveness
         self.last_alive: Optional[datetime] = None
+        # Receive time minus exchange time, the largest seen in the last minute: bars are closed and
+        # liveness judged in feed time, so feed latency or a fast host clock cannot cut a bar's tail.
+        self.feed_lag = 0.0
+        self._lag_samples: collections.deque = collections.deque()
+        self._lag_warned: Optional[datetime] = None
+        self._glitch_warned: set = set()                             # (symbol, day) already reported
 
     def _normalize(self, t: dict) -> Optional[Tick]:
         if 'instrument_token' in t:
@@ -745,17 +760,34 @@ class LiveTickAdapter:
     def broker_on_ticks(self, ws, ticks: list):
         """Websocket Callback. Accepts Kite payloads (instrument_token, last_price, volume_traded,
         exchange_timestamp) and simple dicts (symbol, price, volume, timestamp)."""
+        received = datetime.now(IST)
         for t in ticks:
             tick = self._normalize(t)
             if tick is None:
                 self.dropped_ticks += 1
                 continue
+            if t.get('exchange_timestamp') is not None and tick.timestamp.year >= 2000:
+                tick.received = received          # lets on_tick measure the feed's lag on real trades
             # Thread-safe dispatch from the broker's C-Thread to our Async Event Loop
             self.loop.call_soon_threadsafe(self.tick_queue.put_nowait, tick)
 
     def note_feed_alive(self, at: Optional[datetime] = None) -> None:
-        """Any message from the broker, heartbeats included. Must run on the event loop."""
+        """Any message from the broker, heartbeats included, stamped with its receive time.
+        Must run on the event loop."""
         self.last_alive = to_ist(at or datetime.now(IST))
+
+    def note_feed_lag(self, at: datetime, lag: float, window: timedelta = timedelta(seconds=60),
+                      grace: timedelta = timedelta(seconds=2)) -> None:
+        """Record how far receive time ran ahead of exchange time. Must run on the event loop."""
+        at = to_ist(at)
+        self._lag_samples.append((at, lag))
+        while self._lag_samples and self._lag_samples[0][0] < at - window:
+            self._lag_samples.popleft()
+        self.feed_lag = max(0.0, max(sample for _, sample in self._lag_samples))
+        if self.feed_lag > grace.total_seconds() and (self._lag_warned is None or at - self._lag_warned >= window):
+            self._lag_warned = at
+            logger.warning(f"Feed runs {self.feed_lag:.1f}s behind the host clock (latency or clock skew); "
+                           f"bars are closed that much later.")
 
     def mark_feed_down(self) -> None:
         """The broker feed dropped. Every forming bar misses its tail, and nothing opened before the
@@ -774,26 +806,29 @@ class LiveTickAdapter:
             bar['partial'] = True
 
     def _traded_quantity(self, tick: Tick) -> Tuple[int, bool]:
-        """(quantity to add to the bar, whether the cumulative counter was re-baselined)."""
+        """(quantity to add to the bar, whether the cumulative counter was re-baselined).
+
+        The day's counter never legitimately goes down, so the highest value seen today is a
+        high-water mark: a print below it (a zeroed or stale packet) is a glitch that is never
+        adopted as the baseline, in any feed epoch, however many arrive in a row.
+        """
         if tick.cumulative_volume is None:
             return max(0, tick.volume), False
         day, cum = tick.timestamp.date(), tick.cumulative_volume
         prev = self._cum_volume.get(tick.symbol)
-        if prev is not None and prev[0] == day and prev[2] == self._feed_epoch and prev[1] is not None:
-            if cum >= prev[1]:
-                self._cum_volume[tick.symbol] = (day, cum, self._feed_epoch)
-                return cum - prev[1], False
-            # A counter that goes backwards is a glitch. Adopting it as the baseline would make the next
-            # good print re-count the dip, so the baseline is invalidated and the next print re-baselines.
-            self._cum_volume[tick.symbol] = (day, None, self._feed_epoch)
+        same_day = prev is not None and prev[0] == day
+        if same_day and cum < prev[1]:
+            if (tick.symbol, day) not in self._glitch_warned:
+                self._glitch_warned.add((tick.symbol, day))
+                logger.warning(f"[{tick.symbol}] Volume counter went backwards ({cum:,} < {prev[1]:,}): treated as a "
+                               f"glitch. Prints stay uncounted until the counter passes {prev[1]:,}.")
             return 0, True
         self._cum_volume[tick.symbol] = (day, cum, self._feed_epoch)
-        if prev is not None and prev[0] == day and prev[2] == self._feed_epoch:
-            return 0, True                                           # first print after a glitch
-        # First print of the session, or the first since the feed (re)connected. The counter then holds
-        # trades we did not see; they belong to this bar only if we have been watching since the open.
-        new_session = prev is None or prev[0] != day
-        if new_session and self._feed_since <= datetime.combine(day, SESSION_OPEN, tzinfo=IST):
+        if same_day and prev[2] == self._feed_epoch:
+            return cum - prev[1], False
+        # First print of the session, or the first since the feed (re)connected or stalled. The counter then
+        # holds trades we did not see; they belong to this bar only if we have been watching since the open.
+        if not same_day and self._feed_since <= datetime.combine(day, SESSION_OPEN, tzinfo=IST):
             return cum, False
         return 0, True
 
@@ -830,6 +865,10 @@ class LiveTickAdapter:
         if self.market_time is None or tick.timestamp > self.market_time:
             self.market_time = tick.timestamp
         volume, _ = self._traded_quantity(tick)
+        if volume > 0 and tick.received is not None:
+            # Only a verified trade dates the feed: a (re)subscribe snapshot of a quiet name carries its
+            # last exchange time, which can be minutes old without the feed being late.
+            self.note_feed_lag(tick.received, (tick.received - tick.timestamp).total_seconds())
         if volume <= 0:
             # No verified trade: a quote or depth update, or a print that only (re)sets the volume
             # baseline. A bucket in which nothing verifiably traded has no bar (a later positive delta
@@ -933,13 +972,21 @@ class LiveTickAdapter:
 
     def flush_due_bars(self, now: datetime, grace: timedelta = timedelta(seconds=2)) -> None:
         """Close bars whose bucket has ended; without this, a bar waits for the *next* tick,
-        which never comes for an illiquid name or the session's final bar."""
-        now = to_ist(now)
+        which never comes for an illiquid name or the session's final bar. Both the deadline and
+        the liveness proof are judged in feed time (receive time minus the measured feed lag)."""
+        lag = timedelta(seconds=self.feed_lag)
+        now = to_ist(now) - lag
         width = timedelta(minutes=self.bar_minutes)
         for sym in [s for s, b in self.current_bars.items() if b['timestamp'] + width + grace <= now]:
             bar_end = self.current_bars[sym]['timestamp'] + width
-            if self.require_feed_liveness and (self.last_alive is None or self.last_alive < bar_end):
-                self.current_bars[sym]['partial'] = True   # the feed went quiet before the bucket ended
+            if self.require_feed_liveness and (self.last_alive is None or self.last_alive - lag < bar_end):
+                # The feed went quiet before the bucket ended: the bar's tail may be missing, and the
+                # counter already holds those trades. Discard the bar (the back-fill replaces it) and
+                # re-baseline the counter, or the next bar would be credited with the tail as well.
+                self.current_bars[sym]['partial'] = True
+                counter = self._cum_volume.get(sym)
+                if counter is not None:
+                    self._cum_volume[sym] = (counter[0], counter[1], -1)
             self.close_bar(sym)
 
     async def process_ticks(self):
@@ -957,6 +1004,8 @@ class LiveTickAdapter:
         clock = clock or (lambda: datetime.now(IST))
         while True:
             await asyncio.sleep(interval)
+            if not self.tick_queue.empty():
+                continue                  # ticks received earlier may still belong to a due bar's tail
             try:
                 self.flush_due_bars(clock())
             except Exception:
@@ -980,6 +1029,7 @@ class OrderGateway(ABC):
     def __init__(self):
         self.alerts: List[str] = []             # conditions an operator must act on
         self.late_fills: List[Fill] = []        # fills that completed after their caller was cancelled
+        self.stopping = False                   # shutdown began: send nothing new, stop waiting for fills
         self._inflight: set = set()
 
     @abstractmethod
@@ -1022,10 +1072,15 @@ class KiteOrderGateway(OrderGateway):
       unique tag, polled for ``cancel_grace`` seconds; if the order cannot be found or ruled
       out, OrderStateUnknown keeps the symbol blocked.
     * A timed-out entry is cancelled and polled until the exchange confirms a terminal state.
-      Whatever filled gets a GTT, including a partial fill whose cancel cannot be confirmed.
-    * GTT placement is idempotent: after an ambiguous failure the GTT book is checked, and a
-      matching GTT created since arming began is adopted instead of creating a second one that
-      would sell twice. GTTs already in the book beforehand (an earlier run's) are never adopted.
+      Once shutdown begins (``stopping``), the fill wait ends at once and the remainder is
+      cancelled. Whatever filled gets a GTT, including a partial fill whose cancel cannot be
+      confirmed.
+    * GTT placement is idempotent. The GTT book's ids are read before arming. After an ambiguous
+      failure the book is polled for ``cancel_grace`` seconds (the broker can still be creating
+      the GTT), and a matching GTT created since arming began is adopted, even one that has
+      already triggered, instead of creating a second one that would sell twice. After any
+      ambiguous attempt the book is watched once more for a late duplicate, which raises an
+      alert. GTTs already in the book beforehand (an earlier run's) are never adopted.
     """
     TERMINAL = ("COMPLETE", "REJECTED", "CANCELLED")
     NEVER_SENT = ("ConnectTimeout",)            # requests raised before the request left this machine
@@ -1042,11 +1097,14 @@ class KiteOrderGateway(OrderGateway):
         self.cancel_grace = cancel_grace
         self.stop_limit_buffer = stop_limit_buffer
         self.tick_size = tick_size
-        # Poll windows plus the SDK calls that can each take up to the client timeout: ltp, place,
-        # one overrun call in each of the 3 poll windows (tag lookup, fill wait, cancel wait),
-        # 3 cancels, the GTT-book snapshot, 3 GTT attempts and 3 GTT-book checks.
+        # An estimate of the worst case, used only to decide when shutdown reports "did not settle":
+        # the 6 poll windows (fill wait; tag lookup, cancel wait, 3 GTT-book polls and the duplicate
+        # watch at cancel_grace each), plus 18 SDK calls at the client timeout (ltp, place, 3 cancels,
+        # 3 snapshot tries, 3 GTT attempts, and one overrun call per poll window). requests bounds each
+        # connect and each socket read by that timeout, not a whole call, so a trickling reply can take
+        # longer; the entry is then still awaited, never interrupted.
         sdk_timeout = float(getattr(kite, "timeout", None) or 7.0)
-        self.settle_timeout = fill_timeout + 2 * cancel_grace + 15 * (sdk_timeout + poll_interval)
+        self.settle_timeout = fill_timeout + 6 * cancel_grace + 18 * (sdk_timeout + poll_interval)
 
     async def _poll_state(self, order_id: str) -> Optional[dict]:
         try:
@@ -1056,8 +1114,10 @@ class KiteOrderGateway(OrderGateway):
             return None
         return history[-1] if history else None
 
-    async def _wait_terminal(self, order_id: str, timeout: float) -> Tuple[Optional[dict], Optional[dict]]:
-        """(terminal state or None, last state seen) after polling for up to ``timeout`` seconds."""
+    async def _wait_terminal(self, order_id: str, timeout: float,
+                             interruptible: bool = False) -> Tuple[Optional[dict], Optional[dict]]:
+        """(terminal state or None, last state seen) after polling for up to ``timeout`` seconds,
+        or, if ``interruptible``, until shutdown begins."""
         deadline, last = time.monotonic() + timeout, None
         while True:
             state = await self._poll_state(order_id)
@@ -1065,7 +1125,7 @@ class KiteOrderGateway(OrderGateway):
                 last = state
                 if state.get('status') in self.TERMINAL:
                     return state, last
-            if time.monotonic() >= deadline:
+            if time.monotonic() >= deadline or (interruptible and self.stopping):
                 return None, last
             await asyncio.sleep(self.poll_interval)
 
@@ -1102,27 +1162,79 @@ class KiteOrderGateway(OrderGateway):
             await asyncio.sleep(self.poll_interval)
 
     async def _gtt_ids(self, sym: str) -> Optional[set]:
-        """Ids already in the GTT book before arming, or None if the book cannot be read."""
-        try:
-            return {str(g.get('id')) for g in await asyncio.to_thread(self.kite.get_gtts) or []}
-        except Exception as e:
-            logger.warning(f"[{sym}] GTT book read failed before arming: {e!r}.")
-            return None
+        """Ids of every GTT already in the book before arming (any status), or None if the book
+        cannot be read in 3 tries."""
+        for attempt in range(3):
+            try:
+                return {str(g.get('id')) for g in await asyncio.to_thread(self.kite.get_gtts) or []}
+            except Exception as e:
+                logger.warning(f"[{sym}] GTT book read failed before arming (attempt {attempt + 1}/3): {e!r}.")
+                await asyncio.sleep(self.poll_interval)
+        return None
 
-    async def _find_gtt(self, sym: str, plan: OrderPlan, quantity: int, exclude: set) -> Optional[str]:
-        """An active GTT, not in ``exclude``, that already protects this position (the reply to its
-        creation was lost)."""
+    @staticmethod
+    def _matching_gtts(gtts: Optional[list], sym: str, plan: OrderPlan, quantity: int,
+                       exclude: set) -> List[Tuple[str, str]]:
+        """(id, status) of the GTTs not in ``exclude`` that protect exactly this position and
+        exist or have already acted ('active' or 'triggered')."""
         want = [round(plan.stop_loss, 2), round(plan.target, 2)]
-        for g in await asyncio.to_thread(self.kite.get_gtts) or []:
+        found = []
+        for g in gtts or []:
             cond = g.get('condition') or {}
-            if g.get('status') != 'active' or cond.get('tradingsymbol') != sym or str(g.get('id')) in exclude:
+            if str(g.get('id')) in exclude or g.get('status') not in ('active', 'triggered') \
+                    or cond.get('tradingsymbol') != sym:
                 continue
             if [round(float(v), 2) for v in cond.get('trigger_values') or []] != want:
                 continue
             legs = g.get('orders') or []
             if legs and all(int(leg.get('quantity') or 0) == quantity for leg in legs):
-                return str(g['id'])
-        return None
+                found.append((str(g['id']), g.get('status')))
+        return found
+
+    async def _await_gtt(self, sym: str, plan: OrderPlan, quantity: int,
+                         exclude: set) -> Tuple[Optional[Tuple[str, str]], bool]:
+        """Poll the GTT book for ``cancel_grace`` seconds for a GTT that a request with a lost reply
+        may still create. (first match or None, whether any read succeeded)."""
+        deadline, readable = time.monotonic() + self.cancel_grace, False
+        while True:
+            try:
+                found = self._matching_gtts(await asyncio.to_thread(self.kite.get_gtts), sym, plan, quantity, exclude)
+                readable = True
+                if found:
+                    return found[0], True
+            except Exception as e:
+                logger.warning(f"[{sym}] GTT book read failed: {e!r}; retrying.")
+            if time.monotonic() >= deadline:
+                return None, readable
+            await asyncio.sleep(self.poll_interval)
+
+    async def _watch_duplicates(self, sym: str, plan: OrderPlan, quantity: int, order_id: str,
+                                trigger_id: str, known: set) -> None:
+        """After an ambiguous attempt, an earlier request's GTT can still land. Watch the book for
+        ``cancel_grace`` seconds and alert on any second GTT that sells the same shares."""
+        deadline, readable = time.monotonic() + self.cancel_grace, False
+        while True:
+            try:
+                dupes = self._matching_gtts(await asyncio.to_thread(self.kite.get_gtts), sym, plan, quantity,
+                                            known | {trigger_id})
+                readable = True
+                if dupes:
+                    ids = ", ".join(f"{i} ({status})" for i, status in dupes)
+                    self._alert(f"[{sym}] GTT DUPLICATE: {ids} also sell the {quantity} shares of order {order_id} "
+                                f"that GTT {trigger_id} protects. DELETE ALL BUT GTT {trigger_id}.")
+                    return
+            except Exception as e:
+                logger.warning(f"[{sym}] GTT book read failed: {e!r}; retrying.")
+            if time.monotonic() >= deadline:
+                if not readable:
+                    self._alert(f"[{sym}] GTT {trigger_id} armed after an ambiguous failure, but the GTT book could "
+                                f"not be read to rule out a duplicate. CHECK THE GTT BOOK.")
+                return
+            await asyncio.sleep(self.poll_interval)
+
+    def _alert(self, msg: str) -> None:
+        logger.critical(msg)
+        self.alerts.append(msg)
 
     async def _protect(self, plan: OrderPlan, order_id: str, state: dict) -> Optional[Fill]:
         k, sym = self.kite, plan.signal.symbol
@@ -1138,7 +1250,8 @@ class KiteOrderGateway(OrderGateway):
             {"transaction_type": k.TRANSACTION_TYPE_SELL, "quantity": filled, "order_type": k.ORDER_TYPE_LIMIT,
              "product": self.product, "price": plan.target},
         ]
-        trigger_id, known = None, await self._gtt_ids(sym)
+        known = await self._gtt_ids(sym)       # a match listed here belongs to someone else
+        trigger_id, ambiguous, error = None, False, None
         for attempt in range(3):
             try:
                 gtt = await asyncio.to_thread(
@@ -1149,35 +1262,44 @@ class KiteOrderGateway(OrderGateway):
                             f"/ target {plan.target:.2f}")
                 break
             except Exception as e:
+                error = e
                 logger.error(f"[{sym}] GTT attempt {attempt + 1}/3 failed: {e!r}")
                 if is_permanent_error(e):
                     break
-                # The request may have reached the broker: a blind retry would arm a second GTT that
-                # sells the whole position again. Adopt the existing one, or stop if the book is unreadable.
-                try:
-                    found = await self._find_gtt(sym, plan, filled, exclude=known or set())
-                except Exception as book_error:
-                    msg = (f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing failed ({e!r}) "
-                           f"and the GTT book could not be read ({book_error!r}). CHECK THE GTT BOOK.")
-                    logger.critical(msg)
-                    self.alerts.append(msg)
+                if type(e).__name__ in self.NEVER_SENT:
+                    await asyncio.sleep(self.poll_interval)     # nothing left this machine: safe to retry
+                    continue
+                # The request may have reached the broker, which can still be creating the GTT: a blind
+                # retry would arm a second one that sells the whole position again.
+                ambiguous = True
+                found, readable = await self._await_gtt(sym, plan, filled, exclude=known or set())
+                if found is None and readable:
+                    continue                                   # no GTT appeared in cancel_grace: retry
+                if found is None:
+                    self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing failed "
+                                f"({e!r}) and the GTT book could not be read for {self.cancel_grace:.0f}s. "
+                                f"CHECK THE GTT BOOK.")
                     return Fill(sym, filled, avg, order_id, None)
-                if found is not None and known is None:
-                    msg = (f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing failed ({e!r}); "
-                           f"GTT {found} matches this position, but the book was unreadable before arming, so it may "
-                           f"be an earlier one. CHECK THE GTT BOOK.")
-                    logger.critical(msg)
-                    self.alerts.append(msg)
+                if known is None:
+                    self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): placing failed "
+                                f"({e!r}); GTT {found[0]} matches this position, but the book was unreadable before "
+                                f"arming, so it may be an earlier one. CHECK THE GTT BOOK.")
                     return Fill(sym, filled, avg, order_id, None)
-                if found is not None:
-                    trigger_id = found
+                trigger_id, status = found
+                if status == 'triggered':
+                    self._alert(f"[{sym}] GTT {trigger_id} for {filled} shares (order {order_id}) had already TRIGGERED "
+                                f"when its lost reply was resolved: the exit has fired. CHECK ORDERS AND HOLDINGS.")
+                else:
                     logger.info(f"🛡️ [{sym}] GTT OCO {trigger_id} found in the GTT book; the lost reply is resolved.")
-                    break
-                await asyncio.sleep(self.poll_interval)
-        if trigger_id is None:
-            msg = f"[{sym}] POSITION OPEN WITHOUT EXITS: {filled} shares bought (order {order_id}) but no GTT could be placed."
-            logger.critical(msg)
-            self.alerts.append(msg)
+                break
+        if trigger_id is not None and ambiguous:
+            await self._watch_duplicates(sym, plan, filled, order_id, trigger_id, known or set())
+        if trigger_id is None and ambiguous:
+            self._alert(f"[{sym}] GTT STATE UNKNOWN for {filled} shares (order {order_id}): every GTT request failed "
+                        f"(last: {error!r}) and at least one may still have been created. CHECK THE GTT BOOK.")
+        elif trigger_id is None:
+            self._alert(f"[{sym}] POSITION OPEN WITHOUT EXITS: {filled} shares bought (order {order_id}) but no GTT "
+                        f"could be placed (last: {error!r}).")
         return Fill(sym, filled, avg, order_id, trigger_id)
 
     async def _enter_and_protect(self, plan: OrderPlan, tag: str) -> Optional[Fill]:
@@ -1194,9 +1316,10 @@ class KiteOrderGateway(OrderGateway):
             order_id = await self._find_by_tag(sym, tag, e)
         logger.info(f"[{sym}] Entry order {order_id} placed: BUY {plan.quantity} LIMIT {plan.entry_limit:.2f}")
 
-        terminal, last = await self._wait_terminal(order_id, self.fill_timeout)
+        terminal, last = await self._wait_terminal(order_id, self.fill_timeout, interruptible=True)
         if terminal is None:
-            logger.warning(f"[{sym}] Entry {order_id} not filled in {self.fill_timeout:.0f}s; cancelling remainder.")
+            why = "shutdown began" if self.stopping else f"not filled in {self.fill_timeout:.0f}s"
+            logger.warning(f"[{sym}] Entry {order_id} {why}; cancelling remainder.")
             terminal, last = await self._cancel_and_settle(sym, order_id, last)
         if terminal is None:
             # The cancel is unconfirmed: protect what is known to be bought, then keep the symbol blocked.
@@ -1236,6 +1359,10 @@ class KiteOrderGateway(OrderGateway):
         ltp = float((await asyncio.to_thread(k.ltp, key))[key]["last_price"])
         if not plan.stop_loss < ltp <= plan.entry_limit:
             logger.warning(f"[{sym}] Entry skipped: LTP {ltp:.2f} outside ({plan.stop_loss:.2f}, {plan.entry_limit:.2f}].")
+            return None
+
+        if self.stopping:
+            logger.warning(f"[{sym}] Entry not sent: shutdown began.")
             return None
 
         tag = f"ipm{uuid.uuid4().hex[:12]}"   # finds the order if the reply to place_order is lost
@@ -1485,7 +1612,8 @@ def start_kite_feed(api_key: str, access_token: str, tokens: List[int], tick_ada
         loop.call_soon_threadsafe(tick_adapter.mark_feed_down)      # the blind spot starts now
 
     kws.on_connect = on_connect
-    kws.on_message = lambda ws, payload, is_binary: loop.call_soon_threadsafe(tick_adapter.note_feed_alive)
+    kws.on_message = lambda ws, payload, is_binary: loop.call_soon_threadsafe(tick_adapter.note_feed_alive,
+                                                                              datetime.now(IST))
     kws.on_error = lambda ws, code, reason: logger.error(f"Kite websocket error {code}: {reason}")
     kws.on_close = on_close
     kws.on_reconnect = lambda ws, attempts: logger.warning(f"Kite websocket reconnecting (attempt {attempts}).")
@@ -1526,6 +1654,12 @@ def _non_negative(text: str) -> float:
         raise argparse.ArgumentTypeError("must be a finite number >= 0 (0 = until Ctrl-C)")
     return value
 
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be an integer >= 1")
+    return value
+
 def _positive(text: str) -> float:
     value = float(text)
     if not math.isfinite(value) or value <= 0:
@@ -1541,6 +1675,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="IPO listing date YYYY-MM-DD; required for --source kite (default for yahoo/csv demos: "
                         "the first bar of the last 20 days)")
     p.add_argument("--base-sessions", type=int, help="define the IPO base as the first N sessions (default: first 150 bars)")
+    p.add_argument("--max-lookback-days", type=_positive_int, default=180,
+                   help="fetch history from at most this many days back, for every source (default: 180)")
     p.add_argument("--risk-per-trade", type=_positive, default=15_000.0, help="rupees lost if the stop is hit")
     p.add_argument("--max-position-value", type=_positive, default=1_000_000.0, help="rupee cap on a position's notional")
     p.add_argument("--rvol-threshold", type=_positive, default=2.0)
@@ -1572,7 +1708,18 @@ def _config_error(args: argparse.Namespace) -> Optional[str]:
         return "--base-sessions must be at least 1."
     return None
 
-async def main(argv: Optional[List[str]] = None) -> int:
+STOP_SIGNALS = [s for s in (getattr(signal, n, None) for n in ("SIGINT", "SIGTERM", "SIGHUP")) if s is not None]
+
+def _deliver_signal(loop: asyncio.AbstractEventLoop, callback: Callable[[int], None], signum: int, frame) -> None:
+    """A plain signal handler (where the loop cannot own signals) that hands over thread-safely."""
+    try:
+        loop.call_soon_threadsafe(callback, signum)
+    except RuntimeError:        # the loop has already closed
+        pass
+
+async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> int:
+    """The engine. With ``hold_signals`` (run() does this), stop signals stay routed to the
+    ignoring shutdown handler after main() returns, until the caller restores them."""
     args = build_arg_parser().parse_args(argv)
     logger.info("=== INITIALIZING INSTITUTIONAL ENGINE ===")
 
@@ -1605,6 +1752,7 @@ async def main(argv: Optional[List[str]] = None) -> int:
         as_of = datetime.now(timezone.utc)
 
     orchestrator = ProductionOrchestrator({args.symbol: args.listing_date}, broker_adapter, as_of=as_of,
+                                          max_lookback_days=args.max_lookback_days,
                                           allow_partial_history=args.allow_partial_history)
 
     if not await orchestrator.build_the_ground():
@@ -1662,63 +1810,77 @@ async def main(argv: Optional[List[str]] = None) -> int:
     def on_stop_signal(signum: int):
         nonlocal stop_signal
         if shutting_down or stop_signal is not None:
-            logger.warning(f"Signal {signum} received; shutdown already in progress (orders in flight are settling).")
+            logger.warning(f"Signal {signum} received; shutdown already in progress, signal ignored.")
             return
         stop_signal = signum
+        oms.accepting, gateway.stopping = False, True    # before anything else can run
         logger.warning(f"Signal {signum} received: shutting down in order.")
         runtime.cancel()
 
     # Ctrl-C, `kill`/systemd/docker stop and a closed terminal all take the orderly path below, so an
-    # entry in flight is always settled. Where the loop cannot own signals (Windows), a plain handler
-    # hands the signal to the loop thread-safely.
-    hooked, restore = [], []
-    for signum in [x for x in (getattr(signal, n, None) for n in ("SIGINT", "SIGTERM", "SIGHUP")) if x is not None]:
+    # entry in flight is always settled. A signal the parent ignored (nohup, a background job) stays
+    # ignored, and each replaced handler is restored afterwards. Where the loop cannot own signals
+    # (Windows), a plain handler hands the signal to the loop thread-safely.
+    hooked, replaced = [], []
+    for signum in STOP_SIGNALS:
+        previous = signal.getsignal(signum)
+        if previous == signal.SIG_IGN:
+            continue
         try:
             loop.add_signal_handler(signum, on_stop_signal, signum)
-            hooked.append(signum)
+            hooked.append((signum, previous))
         except (NotImplementedError, RuntimeError, ValueError):
             try:
-                restore.append((signum, signal.signal(signum, lambda n, f: loop.call_soon_threadsafe(on_stop_signal, n))))
+                signal.signal(signum, functools.partial(_deliver_signal, loop, on_stop_signal))
+                replaced.append((signum, previous))
             except (ValueError, OSError):   # not the main thread, or not supported on this platform
                 pass
 
     try:
-        # Workers loop forever; one finishing early means it crashed, and the engine must not run half-blind.
-        done, _ = await asyncio.wait({runtime, *workers}, return_when=asyncio.FIRST_COMPLETED)
-        for t in workers:
-            if t in done:
-                exit_code = 1
-                logger.critical(f"Worker '{t.get_name()}' stopped unexpectedly: {t.exception()!r}. Shutting down.")
-    except asyncio.CancelledError:
-        stop_signal = stop_signal or getattr(signal, "SIGINT", 2)   # cancelled from outside (no handler)
-    finally:
-        shutting_down = True
-        # 1. Stop everything that can produce ticks or signals.
-        if feed is not None:
-            feed.close()
-        for t in [runtime, *helpers, tick_worker, clock_worker, *workers[3:]]:
-            t.cancel()
-        await asyncio.gather(runtime, *helpers, tick_worker, clock_worker, *workers[3:], return_exceptions=True)
-        await ticker.cancel_backfills()
-        if ticker.tick_queue.qsize():
-            logger.info(f"{ticker.tick_queue.qsize()} queued ticks discarded at shutdown.")
-        # 2. Let the order in flight settle. An entry that may exist at the broker runs as a shielded
-        #    task, so even interrupting the router cannot abandon it; its outcome is reported below.
-        oms.accepting = False
         try:
-            await asyncio.wait_for(oms_queue.join(), timeout=oms.settle_timeout)
-        except asyncio.TimeoutError:
-            exit_code = 1
-            logger.critical(f"The order router did not settle within {oms.settle_timeout:.0f}s; "
-                            f"waiting for the entry in flight to finish on its own deadlines.")
-        oms_worker.cancel()
-        await asyncio.gather(oms_worker, return_exceptions=True)
-        await gateway.wait_inflight()
-        for signum in hooked:
-            loop.remove_signal_handler(signum)
-        for signum, previous in restore:
-            signal.signal(signum, previous)
+            # Workers loop forever; one finishing early means it crashed, and the engine must not run half-blind.
+            done, _ = await asyncio.wait({runtime, *workers}, return_when=asyncio.FIRST_COMPLETED)
+            for t in workers:
+                if t in done:
+                    exit_code = 1
+                    logger.critical(f"Worker '{t.get_name()}' stopped unexpectedly: {t.exception()!r}. Shutting down.")
+        except asyncio.CancelledError:
+            stop_signal = stop_signal or getattr(signal, "SIGINT", 2)   # cancelled from outside (no handler)
+        finally:
+            shutting_down = True
+            oms.accepting, gateway.stopping = False, True    # before the first await
+            # 1. Stop everything that can produce ticks or signals.
+            if feed is not None:
+                feed.close()
+            for t in [runtime, *helpers, tick_worker, clock_worker, *workers[3:]]:
+                t.cancel()
+            await asyncio.gather(runtime, *helpers, tick_worker, clock_worker, *workers[3:], return_exceptions=True)
+            await ticker.cancel_backfills()
+            if ticker.tick_queue.qsize():
+                logger.info(f"{ticker.tick_queue.qsize()} queued ticks discarded at shutdown.")
+            # 2. Let the order in flight settle: the gateway stops waiting for fills, cancels what is
+            #    working and protects what filled. An entry that may exist at the broker runs as a
+            #    shielded task, so even interrupting the router cannot abandon it.
+            try:
+                await asyncio.wait_for(oms_queue.join(), timeout=oms.settle_timeout)
+            except asyncio.TimeoutError:
+                exit_code = 1
+                logger.critical(f"The order router did not settle within {oms.settle_timeout:.0f}s; "
+                                f"waiting for the entry in flight to finish on its own deadlines.")
+            oms_worker.cancel()
+            await asyncio.gather(oms_worker, return_exceptions=True)
+            await gateway.wait_inflight()
+        return _halt_report(oms, gateway, ticker, exit_code, stop_signal)
+    finally:
+        if not hold_signals:
+            for signum, _ in hooked:
+                loop.remove_signal_handler(signum)
+            for signum, previous in hooked + replaced:
+                if previous is not None:        # None: a handler installed outside Python
+                    signal.signal(signum, previous)
 
+def _halt_report(oms: "ExecutionRouter", gateway: OrderGateway, ticker: LiveTickAdapter, exit_code: int,
+                 stop_signal: Optional[int]) -> int:
     logger.info("=== SYSTEM HALT ===")
     logger.info(f"Final Inventory State: {oms.active_inventory or '{}'}")
     for f in oms.fills + gateway.late_fills:
@@ -1728,6 +1890,9 @@ async def main(argv: Optional[List[str]] = None) -> int:
         state = " | STOP TRIGGERED, LIMIT UNFILLED" if pos.stop_triggered else ""
         logger.info(f"   Open {pos.symbol}: {pos.quantity} @ {pos.entry_price:.2f} | stop {pos.stop_loss:.2f} | "
                     f"target {pos.target:.2f}{state}")
+    for f in gateway.late_fills:
+        logger.info(f"   Open {f.symbol}: {f.quantity} @ {f.average_price:.2f} | filled during shutdown | "
+                    f"exits: {f.exit_order_id or 'NONE'}")
     for pos in oms.closed_positions:
         logger.info(f"   Closed {pos.symbol}: {pos.exit_reason} @ {pos.exit_price:.2f} | P&L ₹{pos.pnl:,.0f}")
     if ticker.dropped_ticks:
@@ -1741,12 +1906,27 @@ async def main(argv: Optional[List[str]] = None) -> int:
     return 128 + int(stop_signal) if stop_signal is not None else 0
 
 def run(argv: Optional[List[str]] = None) -> int:
+    """CLI entry. Stop signals stay owned by the engine until asyncio.run has finished its teardown
+    (which can wait seconds for a worker thread), so a late signal cannot replace main()'s result."""
     configure_logging()
+    saved = {signum: signal.getsignal(signum) for signum in STOP_SIGNALS}
+    result: List[int] = []
+
+    async def engine_main() -> int:
+        result.append(await main(argv, hold_signals=True))
+        return result[0]
+
     try:
-        return asyncio.run(main(argv))
+        return asyncio.run(engine_main())
     except KeyboardInterrupt:
+        if result:
+            return result[0]                  # main() had finished; only the teardown was interrupted
         logger.info("Graceful exit invoked by Operator.")
         return 130
+    finally:
+        for signum, previous in saved.items():
+            if previous is not None:
+                signal.signal(signum, previous)
 
 if __name__ == "__main__":
     sys.exit(run())

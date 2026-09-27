@@ -7,7 +7,6 @@ import threading
 
 import pandas as pd
 import pytest
-import requests
 
 import engine
 from conftest import ist
@@ -113,6 +112,7 @@ def test_paper_fill_is_labelled_as_simulated(caplog):
 
 # ---------------------------------------------------------------- Kite gateway on the real SDK
 kiteconnect = pytest.importorskip("kiteconnect")
+import requests  # noqa: E402 - installed with kiteconnect; without it the whole module is skipped
 
 
 class StubKite(kiteconnect.KiteConnect):
@@ -123,11 +123,20 @@ class StubKite(kiteconnect.KiteConnect):
 
     def __init__(self, order_states, gtt_error=None, ltp=290.0, place_error=None, place_reached=False,
                  orders_result=None, cancel_results=None, gtt_results=None, gtt_created_before_error=False,
-                 gtt_book=None, gtt_book_failures=0, orders_script=None):
+                 gtt_book=None, gtt_book_failures=0, orders_script=None, gtt_book_fail_reads=(),
+                 gtt_hidden_reads=0, gtt_lands_on_next_place=False, gtt_created_status="active",
+                 state_after_cancel=None):
         super().__init__(api_key="test_key", access_token="test_token")
         self.gtt_created_before_error = gtt_created_before_error
         self.gtt_book = gtt_book                  # GTTs that predate this entry, or an Exception: unreadable
-        self.gtt_book_failures = gtt_book_failures                        # the first N book reads fail
+        self.gtt_book_fail_reads = set(range(gtt_book_failures)) | set(gtt_book_fail_reads)   # read #s that fail
+        self.gtt_reads = 0
+        self.gtt_hidden_reads = gtt_hidden_reads      # a lost-reply GTT is booked only after this many reads
+        self.gtt_lands_on_next_place = gtt_lands_on_next_place   # ... or only when the next request arrives
+        self.gtt_created_status = gtt_created_status
+        self.hidden_gtts = []
+        self.state_after_cancel = state_after_cancel  # once a cancel arrives, order.info reports this
+        self.cancelled = False
         self.created_gtts = []
         self.orders_script = list(orders_script) if orders_script else None
         self.order_states = list(order_states)
@@ -164,25 +173,43 @@ class StubKite(kiteconnect.KiteConnect):
                 return self.orders_result
             return [{"order_id": "260928000000001", "tag": self.placed_tag}] if self.place_reached else []
         if route == "order.info":
+            if self.cancelled and self.state_after_cancel is not None:
+                return [self.state_after_cancel]
             return [self._next(self.order_states)]
         if route == "order.cancel":
+            self.cancelled = True
             return self._next(self.cancel_results)
         if route == "gtt.place":
+            if self.gtt_lands_on_next_place:
+                self.created_gtts.extend(self.hidden_gtts)
+                self.hidden_gtts = []
             result = self.gtt_results.pop(0) if len(self.gtt_results) > 1 else self.gtt_results[0]
             if isinstance(result, Exception) and not self.gtt_created_before_error:
                 raise result
-            gid = 700 + len(self.created_gtts)
+            gid = 700 + len(self.created_gtts) + len(self.hidden_gtts)
+            if not isinstance(result, Exception):
+                gid = result.get("trigger_id", gid)
             condition, legs = json.loads(params["condition"]), json.loads(params["orders"])
-            self.created_gtts.append({"id": gid, "status": "active", "condition": condition, "orders": legs})
+            gtt = {"id": gid, "status": self.gtt_created_status, "condition": condition, "orders": legs}
             if isinstance(result, Exception):
+                if self.gtt_lands_on_next_place or self.gtt_hidden_reads:
+                    self.hidden_gtts.append(gtt)                          # booked later than the reply was lost
+                else:
+                    self.created_gtts.append(gtt)
                 raise result                                              # created, but the reply was lost
-            return dict(result, trigger_id=result.get("trigger_id", gid))
+            self.created_gtts.append(gtt)
+            return dict(result, trigger_id=gid)
         if route == "gtt":
+            read, self.gtt_reads = self.gtt_reads, self.gtt_reads + 1
             if isinstance(self.gtt_book, Exception):
                 raise self.gtt_book
-            if self.gtt_book_failures > 0:
-                self.gtt_book_failures -= 1
+            if read in self.gtt_book_fail_reads:
                 raise KE.NetworkException("Gateway timed out", code=504)
+            if self.hidden_gtts and not self.gtt_lands_on_next_place:
+                self.gtt_hidden_reads -= 1
+                if self.gtt_hidden_reads <= 0:
+                    self.created_gtts.extend(self.hidden_gtts)
+                    self.hidden_gtts = []
             return list(self.gtt_book or []) + self.created_gtts
         raise AssertionError(f"unexpected route {route}")
 
@@ -446,8 +473,10 @@ def test_an_entry_interrupted_by_shutdown_still_settles_and_its_fill_is_protecte
 def test_a_gtt_that_was_never_created_is_retried():
     kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
                     gtt_results=[KE.NetworkException("Gateway timed out", code=504), {"trigger_id": 778}])
-    fill = asyncio.run(fast_gateway(kite).execute(kite_plan()))
-    assert fill.exit_order_id == "778" and kite.routes()[-3:] == ["gtt.place", "gtt", "gtt.place"]
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "778" and kite.routes().count("gtt.place") == 2
+    assert [g["id"] for g in kite.created_gtts] == [778] and gw.alerts == []
 
 
 def test_a_lost_gtt_reply_adopts_the_existing_gtt_instead_of_arming_a_second():
@@ -482,7 +511,7 @@ def test_an_identical_gtt_from_an_earlier_run_is_never_adopted():
 def test_a_lost_gtt_reply_after_an_unreadable_snapshot_is_reported_not_guessed():
     kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
                     gtt_results=[requests.exceptions.ReadTimeout("read timed out"), {"trigger_id": 999}],
-                    gtt_created_before_error=True, gtt_book_failures=1)
+                    gtt_created_before_error=True, gtt_book_failures=3)          # all 3 snapshot tries fail
     gw = fast_gateway(kite)
     fill = asyncio.run(gw.execute(kite_plan()))
     assert fill.exit_order_id is None and len(kite.created_gtts) == 1     # no second GTT either
@@ -558,6 +587,116 @@ def test_a_partial_fill_whose_cancel_is_unconfirmed_is_still_protected_and_recor
     assert "800 shares already bought are covered by GTT 777" in r.unresolved[0]
 
 
+def test_a_gtt_booked_after_the_first_book_read_is_adopted():
+    # v1.3 read the book once, straight after the lost reply, and then armed a second whole-position GTT.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[requests.exceptions.ReadTimeout("read timed out"), {"trigger_id": 999}],
+                    gtt_created_before_error=True, gtt_hidden_reads=3)
+    gw = fast_gateway(kite, cancel_grace=5, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "700" and [g["id"] for g in kite.created_gtts] == [700] and gw.alerts == []
+
+
+def test_a_gtt_booked_after_the_retry_is_reported_as_a_duplicate():
+    # The broker books the lost request's GTT only after the engine stopped waiting and retried.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[requests.exceptions.ReadTimeout("read timed out"), {"trigger_id": 999}],
+                    gtt_created_before_error=True, gtt_lands_on_next_place=True)
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "999" and sorted(g["id"] for g in kite.created_gtts) == [700, 999]
+    assert gw.alerts == ["[SWIGGY] GTT DUPLICATE: 700 (active) also sell the 2941 shares of order 260928000000001 "
+                         "that GTT 999 protects. DELETE ALL BUT GTT 999."]
+
+
+def test_when_every_gtt_request_fails_ambiguously_the_alert_says_one_may_exist():
+    # v1.3 said "no GTT could be placed" although each lost request may have created one.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Gateway timed out", code=504)])
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id is None and kite.routes().count("gtt.place") == 3
+    assert "GTT STATE UNKNOWN for 2941 shares" in gw.alerts[0] and "may still have been created" in gw.alerts[0]
+
+
+def test_a_lost_reply_gtt_that_already_triggered_is_adopted_not_rearmed():
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[requests.exceptions.ReadTimeout("read timed out"), {"trigger_id": 999}],
+                    gtt_created_before_error=True, gtt_created_status="triggered")
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "700" and kite.routes().count("gtt.place") == 1   # v1.3 armed a second GTT
+    assert "GTT 700 for 2941 shares" in gw.alerts[0] and "already TRIGGERED" in gw.alerts[0]
+
+
+def test_a_gtt_request_that_never_left_is_retried_without_the_book():
+    # v1.3 needed the book after a connect timeout, and an outage that also hid the book ended protection.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[requests.exceptions.ConnectTimeout("connect timed out"), {"trigger_id": 778}],
+                    gtt_book=KE.NetworkException("Gateway timed out", code=504))
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "778" and gw.alerts == []
+
+
+def test_one_failed_book_read_after_an_ambiguous_failure_does_not_end_protection():
+    # v1.3 gave up for good when the single read after a 429 failed; the book is now polled.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Too many requests", code=429), {"trigger_id": 778}],
+                    gtt_book_fail_reads={1})                              # read 0 is the snapshot
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "778" and gw.alerts == [] and [g["id"] for g in kite.created_gtts] == [778]
+
+
+def test_a_5xx_order_exception_is_looked_up_not_taken_as_a_refusal():
+    # The SDK sets the class from the body and the code from the HTTP status: an OrderException can be a 503.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    place_error=KE.OrderException("Order request timed out", code=503), place_reached=True)
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert "orders" in kite.routes() and [f.quantity for f in r.fills] == [2941]   # v1.3 released the symbol
+
+
+def test_shutdown_stops_waiting_for_the_fill_and_cancels_the_remainder_at_once():
+    # v1.3 kept waiting the full 30 s fill window, longer than `docker stop` allows before SIGKILL.
+    polled = threading.Event()
+
+    class SignallingKite(StubKite):
+        def _request(self, route, *args, **kwargs):
+            if route == "order.info":
+                polled.set()
+            return super()._request(route, *args, **kwargs)
+
+    kite = SignallingKite([{"status": "OPEN", "filled_quantity": 300, "average_price": 290.2}],
+                          state_after_cancel={"status": "CANCELLED", "filled_quantity": 300, "average_price": 290.2})
+
+    async def scenario():
+        gw = fast_gateway(kite, fill_timeout=30, poll_interval=0.01, cancel_grace=5)
+        task = asyncio.create_task(gw.execute(kite_plan()))
+        assert await asyncio.to_thread(polled.wait, 5)
+        gw.stopping = True
+        return await asyncio.wait_for(task, 5)
+
+    fill = asyncio.run(scenario())
+    assert "order.cancel" in kite.routes() and fill.quantity == 300 and fill.exit_order_id == "777"
+
+
+def test_no_entry_is_sent_once_shutdown_began():
+    kite = StubKite([OPEN])
+    gw = fast_gateway(kite)
+    gw.stopping = True
+    assert asyncio.run(gw.execute(kite_plan())) is None and kite.routes() == ["market.quote.ltp"]
+
+
+def test_the_halt_report_lists_fills_that_completed_during_shutdown(caplog):
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    gw = engine.PaperGateway()
+    gw.late_fills.append(engine.Fill("SWIGGY", 800, 290.2, "260928000000001", "777"))
+    ticker = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None)
+    code = engine._halt_report(router(gateway=gw), gw, ticker, exit_code=0, stop_signal=None)
+    assert "Open SWIGGY: 800 @ 290.20 | filled during shutdown | exits: 777" in caplog.text and code == 0
+
+
 @pytest.mark.parametrize("error,permanent", [
     (KE.GeneralException("Insufficient funds", code=400), True),          # MarginException arrives like this
     (KE.GeneralException("Holdings not found", code=400), True),          # HoldingException, UserException, ...
@@ -568,6 +707,8 @@ def test_a_partial_fill_whose_cancel_is_unconfirmed_is_still_protected_and_recor
     (KE.NetworkException("Gateway timed out", code=504), False),
     (KE.DataException("Unparsable response", code=502), False),
     (KE.GeneralException("Internal error", code=500), False),
+    (KE.OrderException("Order request timed out", code=503), False),       # v1.3: permanent by name
+    (KE.OrderException("Too many requests", code=429), False),
     (requests.exceptions.ReadTimeout("read timed out"), False),
 ])
 def test_broker_refusals_are_permanent_and_outages_are_not(error, permanent):

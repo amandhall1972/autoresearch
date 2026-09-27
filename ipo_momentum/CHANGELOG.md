@@ -1,5 +1,60 @@
 # Changelog
 
+## v1.4 (2026-09-27)
+
+v1.3 went through a fourth adversarial review on a frozen snapshot (`af8816f`),
+with the same four areas: orders, live feed, lifecycle, and data and docs. This
+time every skeptic ran. All 16 findings were reproduced by their skeptic: 14
+confirmed, 2 with part of the claim overstated, none refuted. Again, most are
+gaps in the previous round's own fixes.
+
+Every v1.4 regression test fails on the v1.3 snapshot and passes here, except
+these controls:
+- the ten unchanged cases of `test_broker_refusals_are_permanent_and_outages_are_not`;
+- `test_a_gtt_that_was_never_created_is_retried`, a v1.3 pin whose assertions
+  were loosened for the new book polling;
+- `test_the_suite_collects_without_the_kite_extra`, whose defect was in v1.3's
+  *test file*: it fails with that file.
+
+Verdict: ✔ confirmed by the independent skeptic, ◐ confirmed with part of the
+claim overstated. Severity is the skeptic's rating.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.3 defect | v1.4 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ✔ | GTT idempotency read the book **once**, straight after an ambiguous failure. A GTT the broker booked a moment later still got a second whole-position GTT, with no alert. With three late 504s, three GTTs existed while the alert said "no GTT could be placed". | After an ambiguous failure the book is polled for `cancel_grace`, through read errors, before any retry. After any ambiguous attempt the book is watched once more, and a late duplicate raises `GTT DUPLICATE … DELETE ALL BUT GTT n`. If every request failed ambiguously, the alert says a GTT may exist. | `test_a_gtt_booked_after_the_first_book_read_is_adopted`, `test_a_gtt_booked_after_the_retry_is_reported_as_a_duplicate`, `test_when_every_gtt_request_fails_ambiguously_the_alert_says_one_may_exist` |
+| medium | ✔ | Adoption looked only at `active` GTTs. A lost-reply GTT that had already **triggered** was ignored, and a second one was armed on shares already being sold. | A triggered match is adopted and never re-armed, with an alert that the exit has fired. | `test_a_lost_reply_gtt_that_already_triggered_is_adopted_not_rearmed` |
+| medium | ✔ | One failed book read after any GTT failure ended protection for the run. That included a connect timeout, which never left the machine, and a 429. | A connect timeout is retried without the book. The book poll tolerates read errors and gives up only if no read in `cancel_grace` succeeded. The pre-arming snapshot is tried 3 times. | `test_a_gtt_request_that_never_left_is_retried_without_the_book`, `test_one_failed_book_read_after_an_ambiguous_failure_does_not_end_protection` |
+| low | ✔ | `OrderException` and `InputException` were permanent by name, whatever the HTTP status. A 503 `OrderException` therefore skipped the tag lookup and released the symbol. | Only auth errors are classified by name; every other Kite error by its HTTP status. | `test_a_5xx_order_exception_is_looked_up_not_taken_as_a_refusal`, `test_broker_refusals_are_permanent_and_outages_are_not` (2 new cases) |
+| low | ◐ | `settle_timeout` assumed each SDK call ends within the client timeout, but `requests` applies it per connect and per socket read. A fill that completed during shutdown also had no `Open` line in the halt report. Overstated: the overrun path is by design (the entry is awaited, never interrupted). | The budget is documented as an estimate and now covers the GTT polls. The halt report lists fills completed during shutdown as open positions. Per-call `wait_for` was rejected: abandoning a worker thread would bring back the duplicate-GTT race. | `test_the_halt_report_lists_fills_that_completed_during_shutdown` |
+
+### Real-money safety: lifecycle
+
+| Sev | Verdict | v1.3 defect | v1.4 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ✔ | After a stop signal, the entry in flight still waited out its 30 s fill window. `docker stop` (SIGKILL after 10 s by default) killed the engine with the LIMIT BUY working: no cancel, no GTT, no report. This is not a regression: v1.2 waited too, and died at once on SIGTERM. | A stop signal sets the gateway's `stopping` flag at once. The fill wait ends, the remainder is cancelled, and whatever filled gets its GTT. No new entry is sent. README documents the supervisor stop grace. | `test_shutdown_stops_waiting_for_the_fill_and_cancels_the_remainder_at_once`, `test_no_entry_is_sent_once_shutdown_began`, `test_shutdown_tells_the_gateway_to_stop_waiting_for_fills` |
+| medium | ✔ | The new SIGHUP/SIGTERM hooks overrode an inherited `SIG_IGN`, so an engine started with `nohup` stopped when the SSH session dropped. Afterwards `SIG_DFL` replaced whatever handler had been there. | A signal the parent ignored stays ignored, and replaced handlers are restored. | `test_nohup_is_honoured`, `test_handlers_the_engine_replaced_are_restored_afterwards` |
+| low | ✔ | The signal handlers were released before the halt report and before `asyncio.run`'s teardown, which can wait seconds for a worker thread. A signal then turned exit 1 into 130, or killed the process. | `run()` keeps the stop signals owned (and ignored) until `asyncio.run` has returned, then restores them. `main()`'s result is kept. | `test_a_signal_during_teardown_cannot_replace_the_result` (2 cases) |
+| low | ✔ | `accepting` was cleared only after two awaits, so a back-fill landing at shutdown could still enter a position. | It is cleared in the signal handler, and as the first statement of shutdown. | `test_shutdown_stops_taking_signals_before_anything_can_yield` |
+
+### Live feed
+
+| Sev | Verdict | v1.3 defect | v1.4 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | v1.3's counter-glitch fix adopted the next print unchecked. Two zeroed packets in a row, or one right after a reconnect, still credited the whole day's volume to one bar and could fake a breakout. The recovery trade's price was also dropped. | A per-day high-water mark: a print below it never becomes the baseline, in any feed epoch. The recovery print keeps its trade and its price. | `test_consecutive_zeroed_packets_never_become_the_baseline`, `test_a_zeroed_first_packet_after_a_reconnect_is_not_the_baseline`, `test_the_print_after_a_glitch_keeps_its_trade_and_price`, `test_a_counter_going_backwards_is_rebaselined_not_reset_to_zero` (corrected) |
+| medium | ✔ | A feed stall across a bucket end discarded that bar and back-filled it, but also credited the stalled tail to the next live bar, so the tail was in history twice. | A liveness failure also re-baselines that symbol's volume counter. | `test_a_stall_across_a_bucket_end_does_not_credit_its_tail_twice` |
+| low | ◐ | Liveness and bar closing compared host receive time with exchange-time buckets. More than 2 s of feed lag, or a fast host clock, let a bar close without its last prints. Overstated: it predates v1.3 (v1.2 behaves identically) and needs more than 2 s of skew. | Feed lag is measured on verified trades from their exchange timestamps (the maximum over a minute; a subscribe snapshot's stale timestamp is not lag), and closing and liveness are judged in feed time. Heartbeats are stamped with their receive time. The bar clock never closes a bar while received ticks are still queued. | `test_bars_close_in_feed_time_when_the_feed_lags`, `test_the_feed_lag_is_measured_on_trades_not_on_snapshots`, `test_the_bar_clock_waits_for_ticks_already_received` |
+
+### Data, CLI and documentation
+
+| Sev | Verdict | v1.3 defect | v1.4 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | v1.3's 15:30 cap made every bar that starts at or after 15:30 count as complete at once. A Kite fetch during a special session (Muhurat trading) stored its forming candle as a bar. | Only bars that start before the close are capped. | `test_a_special_sessions_forming_bar_is_still_dropped` |
+| low | ✔ | `test_execution.py` imported `requests` before its `kiteconnect` skip, so README's non-uv setup (pandas, numpy, pytest) collected nothing at all. | `requests` is imported after the skip. | `test_the_suite_collects_without_the_kite_extra` |
+| low | ✔ | "Every v1.3 regression test fails on v1.2 except seven controls" missed the corrected shutdown pin, which pins a v1.1 defect and so passes on v1.2. | Reworded below. | — |
+| low | ✔ | README and CHANGELOG called the 180 days "Kite's" limit. It is the engine's own `max_lookback_days`, for every source, with no CLI flag, and the exclusion message blamed the history. | Documented correctly. `--max-lookback-days` sets it, and the exclusion names the lookback. | `test_the_lookback_can_reach_an_older_listing`, `test_the_lookback_must_be_a_positive_whole_number_of_days` (4 cases), `test_orchestrator_excludes_symbols_whose_history_misses_the_listing` |
+
 ## v1.3 (2026-09-27)
 
 v1.2 went through a third adversarial review on a frozen snapshot (`6af258c`).
@@ -16,7 +71,10 @@ that fails only because a new API is missing did not count as a reproduction.
 Every v1.3 regression test fails on the v1.2 snapshot and passes here, except
 seven controls that pin error classifications v1.2 already had right (the
 `InputException`, `TokenException`, 429, 504, `DataException`, 500 and
-`ReadTimeout` cases of `test_broker_refusals_are_permanent_and_outages_are_not`).
+`ReadTimeout` cases of `test_broker_refusals_are_permanent_and_outages_are_not`),
+and the corrected `test_shutdown_waits_for_the_order_in_flight`, which pins the
+v1.1 shutdown defect: it fails on v1.1 and passes on v1.2. (The last clause was
+added in v1.4.)
 
 Verdict: ✔ confirmed by the independent skeptic, ◐ confirmed with part of the
 claim overstated, ● skeptic did not run; reproduced against the v1.2 snapshot
@@ -40,7 +98,7 @@ before fixing. Severity is the skeptic's rating for ✔/◐ and the finder's for
 | --- | --- | --- | --- | --- |
 | medium | ● | SIGTERM and SIGHUP (`kill`, `systemctl`/`docker stop`, a closed SSH session) killed the process mid-entry: no cancel, no GTT, no report. Reproduced: exit −15, no fill, no report. | SIGINT, SIGTERM and SIGHUP all take the orderly shutdown and exit `128 + N`. | `test_kill_and_hangup_settle_the_entry_in_flight_like_ctrl_c` (2 cases) |
 | medium | ● | Where the loop cannot own signals (Windows), Ctrl-C relied on `asyncio.run`. Python 3.10 cancelled every task, the entry in flight included; 3.11 lost the halt report to a second Ctrl-C. Reproduced on both with the loop handler disabled. | A plain signal handler hands the signal to the loop thread-safely. Further signals during shutdown are logged and ignored. | `test_without_loop_signal_handlers_ctrl_c_still_settles_and_a_second_one_is_ignored` |
-| medium | ● | The listing check compared dates only, and both lookback clamps (Kite's 180 days, Yahoo's 59) kept the time of day. A clamp landing inside the listing session was accepted with the listing morning, usually the heaviest bars, missing from the base and AVWAP. A listing date in another time zone shifted by a day. | Clamps start at the next 00:00 IST, and a clamped start after the listing excludes the symbol. A listing date is its own calendar date in any zone. | `test_a_lookback_clamp_never_starts_inside_the_listing_session`, `test_yahoos_window_clamp_snaps_to_the_next_midnight`, `test_a_listing_date_means_its_own_calendar_date_in_any_zone` (2 cases) |
+| medium | ● | The listing check compared dates only, and both lookback clamps (the engine's 180-day `max_lookback_days`, and Yahoo's 59 days) kept the time of day. A clamp landing inside the listing session was accepted with the listing morning, usually the heaviest bars, missing from the base and AVWAP. A listing date in another time zone shifted by a day. | Clamps start at the next 00:00 IST, and a clamped start after the listing excludes the symbol. A listing date is its own calendar date in any zone. | `test_a_lookback_clamp_never_starts_inside_the_listing_session`, `test_yahoos_window_clamp_snaps_to_the_next_midnight`, `test_a_listing_date_means_its_own_calendar_date_in_any_zone` (2 cases) |
 | low | ● | A signal during a failing shutdown turned exit 1 into 130. Reproduced: 130. | Failures outrank signals. | `test_a_failed_shutdown_exits_1_even_when_a_signal_started_it` |
 | low | ● | `--run-seconds nan` passed validation and ran forever. Negative risk, cap and reward, and a NaN RVOL threshold, ran, rejected or never fired every signal, and exited 0. | Numeric flags must be finite and > 0 (≥ 0 for `--run-seconds`), else exit 2. | `test_numeric_arguments_must_be_finite_and_in_range` (6 cases) |
 

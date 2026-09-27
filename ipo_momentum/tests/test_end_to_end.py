@@ -13,6 +13,7 @@ import urllib.error
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import engine
@@ -290,3 +291,117 @@ engine.ExecutionRouter.settle_timeout = property(lambda self: 0.5)
     code, err = child.finish()
     assert code == 1, err
     assert "did not settle within" in err and "=== SYSTEM HALT ===" in err
+
+
+# ---------------------------------------------------------------- round 4: shutdown timing and signal ownership
+def test_shutdown_tells_the_gateway_to_stop_waiting_for_fills(monkeypatch, caplog):
+    # v1.3 let a live entry wait out its 30 s fill window after a stop request, longer than
+    # `docker stop` allows (SIGKILL after 10 s); the gateway now cancels the remainder at once.
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+
+    class RestingOrder(engine.PaperGateway):
+        async def execute(self, plan):
+            for _ in range(600):                                          # up to 30 s, like the fill window
+                if self.stopping:
+                    return engine.Fill(plan.signal.symbol, 500, plan.signal.entry_price, "LIVE-1", "777")
+                await asyncio.sleep(0.05)
+            return None
+
+    monkeypatch.setattr(engine, "PaperGateway", RestingOrder)
+    started = time.monotonic()
+    code = asyncio.run(engine.main(["--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "3.5"]))
+    assert code == 0 and time.monotonic() - started < 8
+    assert "Fill SWIGGY: 500 @ 289.83 (order LIVE-1, exits: 777)" in caplog.text
+
+
+def test_shutdown_stops_taking_signals_before_anything_can_yield(monkeypatch):
+    # v1.3 cleared `accepting` only after two awaits, so a back-fill landing then could still enter.
+    seen = {}
+
+    def feed(api_key, access_token, tokens, tick_adapter, feed_dead):
+        oms = tick_adapter.bar_listeners[0].__self__
+        tick_adapter.loop.call_later(0.3, feed_dead.set)
+        return types.SimpleNamespace(close=lambda: seen.update(accepting=oms.accepting))   # shutdown's first step
+
+    kite_env(monkeypatch, feed)
+    assert asyncio.run(engine.main(["--source", "kite", "--listing-date", "2026-09-08", "--live-feed",
+                                    "--run-seconds", "30"])) == 1
+    assert seen == {"accepting": False}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_handlers_the_engine_replaced_are_restored_afterwards():
+    # v1.3's loop.remove_signal_handler left SIG_DFL behind, dropping an embedding host's handlers.
+    def host_handler(signum, frame):
+        pass
+
+    saved = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
+    try:
+        signal.signal(signal.SIGTERM, host_handler)
+        signal.signal(signal.SIGHUP, host_handler)
+        asyncio.run(engine.main(["--source", "csv", "--csv", str(FIXTURE), "--no-simulate", "--run-seconds", "0.2"]))
+        assert signal.getsignal(signal.SIGTERM) is host_handler and signal.getsignal(signal.SIGHUP) is host_handler
+    finally:
+        for s, previous in saved.items():
+            signal.signal(s, previous)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
+def test_nohup_is_honoured():
+    # nohup starts the engine with SIGHUP ignored so a dropped SSH session cannot stop it; v1.3 overrode that.
+    child = Child(SLOW_PAPER.format(latency=3.0) + "import signal\nsignal.signal(signal.SIGHUP, signal.SIG_IGN)\n", *DEMO)
+    child.wait_for("[OMS DISPATCH]")
+    child.proc.send_signal(signal.SIGHUP)
+    child.wait_for("PAPER FILL")                                         # still running ~3 s later
+    child.proc.send_signal(signal.SIGTERM)
+    code, err = child.finish()
+    assert code == 143, err
+    assert "Signal 1 received" not in err and "Signal 15 received: shutting down in order." in err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
+@pytest.mark.parametrize("signame", ["SIGINT", "SIGTERM"])
+def test_a_signal_during_teardown_cannot_replace_the_result(signame):
+    # asyncio.run waits for worker threads after main() returns; v1.3 had already released the signals,
+    # so a signal then turned the result into 130 or a kill.
+    prelude = """
+import asyncio, time
+_cancel_backfills = engine.LiveTickAdapter.cancel_backfills
+async def cancel_backfills(self):
+    asyncio.get_running_loop().run_in_executor(None, time.sleep, 3)   # a worker thread still running
+    await _cancel_backfills(self)
+engine.LiveTickAdapter.cancel_backfills = cancel_backfills
+"""
+    child = Child(prelude, "--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "4")
+    child.wait_for("=== SYSTEM HALT ===")
+    time.sleep(0.5)
+    child.proc.send_signal(getattr(signal, signame))
+    code, err = child.finish()
+    assert code == 0, err
+    assert "shutdown already in progress, signal ignored" in err
+
+
+def listing_csv(tmp_path):
+    """The bundled bars with a first session re-dated to 2026-03-02, 207 days before the data ends."""
+    bars = pd.read_csv(FIXTURE)
+    first = bars[bars["datetime_ist"].str.startswith("2026-09-08")].copy()
+    first["datetime_ist"] = first["datetime_ist"].str.replace("2026-09-08", "2026-03-02")
+    path = tmp_path / "SWIGGY_5m_2026-03-02_2026-09-25.csv"
+    pd.concat([first, bars]).to_csv(path, index=False)
+    return path
+
+
+def test_the_lookback_can_reach_an_older_listing(tmp_path, caplog):
+    csv = str(listing_csv(tmp_path))
+    args = ["--source", "csv", "--csv", csv, "--listing-date", "2026-03-02", "--no-simulate", "--run-seconds", "0.1"]
+    assert asyncio.run(engine.main(args)) == 1
+    assert "The 180-day lookback starts" in caplog.text and "--max-lookback-days to reach the listing" in caplog.text
+    assert asyncio.run(engine.main(args + ["--max-lookback-days", "400"])) == 0
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "1.5", "nan"])
+def test_the_lookback_must_be_a_positive_whole_number_of_days(value, capsys):
+    assert engine.build_arg_parser().parse_args(["--max-lookback-days", "400"]).max_lookback_days == 400
+    with pytest.raises(SystemExit) as stop:
+        engine.build_arg_parser().parse_args(["--max-lookback-days", value])
+    assert stop.value.code == 2 and "argument --max-lookback-days" in capsys.readouterr().err

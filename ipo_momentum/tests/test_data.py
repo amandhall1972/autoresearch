@@ -4,6 +4,7 @@ import importlib.util
 import inspect
 import io
 import json
+import os
 import subprocess
 import sys
 import time
@@ -11,6 +12,7 @@ import urllib.error
 import zoneinfo
 from itertools import pairwise
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -208,9 +210,15 @@ def test_csv_missing_file_is_an_error_not_a_crash(tmp_path, caplog):
 def test_orchestrator_excludes_symbols_whose_history_misses_the_listing(caplog):
     # SWIGGY actually listed on 2024-11-13; the fixture starts 664 days later, so no IPO base exists.
     ad = engine.CsvReplayAdapter({"SWIGGY": FIXTURE})
-    orch = engine.ProductionOrchestrator({"SWIGGY": ist(2024, 11, 13)}, ad, as_of=ist(2026, 9, 26))
+    orch = engine.ProductionOrchestrator({"SWIGGY": ist(2024, 11, 13)}, ad, as_of=ist(2026, 9, 26), max_lookback_days=1000)
     assert asyncio.run(orch.build_the_ground()) is False and orch.market_state == {}
-    assert "664 days after the 2024-11-13 listing" in caplog.text and "symbol excluded" in caplog.text
+    assert "History starts 2026-09-08, 664 days after the 2024-11-13 listing" in caplog.text
+    assert "symbol excluded" in caplog.text
+    caplog.clear()
+    orch = engine.ProductionOrchestrator({"SWIGGY": ist(2024, 11, 13)}, ad, as_of=ist(2026, 9, 26))
+    assert asyncio.run(orch.build_the_ground()) is False                  # the lookback, not the data, cut it
+    assert "The 180-day lookback starts 2026-03-31, after the 2024-11-13 listing" in caplog.text
+    assert "--max-lookback-days to reach the listing" in caplog.text
 
     orch = engine.ProductionOrchestrator({"SWIGGY": ist(2024, 11, 13)}, ad, as_of=ist(2026, 9, 26),
                                          allow_partial_history=True)
@@ -488,3 +496,30 @@ def test_a_listing_date_means_its_own_calendar_date_in_any_zone(zone):
     orch = engine.ProductionOrchestrator({"SWIGGY": listing}, ad, as_of=ist(2026, 9, 26))
     assert asyncio.run(orch.build_the_ground())                          # v1.2 excluded the Tokyo date
     assert orch.market_state["SWIGGY"].index[0] == pd.Timestamp(ist(2026, 9, 8, 9, 15))   # v1.2 (New York): 09:30
+
+
+def test_a_special_sessions_forming_bar_is_still_dropped():
+    # v1.3's 15:30 cap made every bar starting at or after 15:30 look complete (Muhurat trading, 18:00-19:00).
+    bars = pd.DataFrame({c: [1.0] * 4 for c in engine.OHLCV},
+                        index=pd.DatetimeIndex([ist(2024, 11, 1, 18, m) for m in (0, 5, 10, 15)]))
+    kept = engine.drop_incomplete_bars(bars, ist(2024, 11, 1, 18, 17), 5)
+    assert [t.strftime("%H:%M") for t in kept.index] == ["18:00", "18:05", "18:10"]
+
+
+def test_the_suite_collects_without_the_kite_extra(tmp_path):
+    # README's non-uv setup installs pandas, numpy and pytest only; v1.3 imported requests before the
+    # kiteconnect skip, so collection failed and no test ran at all.
+    (tmp_path / "sitecustomize.py").write_text(
+        "import sys\n"
+        "class Block:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] in ('kiteconnect', 'requests'):\n"
+        "            raise ModuleNotFoundError(f'No module named {name!r}', name=name)\n"
+        "sys.meta_path.insert(0, Block())\n")
+    root = Path(engine.__file__).parent
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), str(root)]))
+    proc = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider",
+                           "-o", "pythonpath=", str(Path(__file__).parent / "test_execution.py")],
+                          env=env, capture_output=True, text=True, cwd=tmp_path, timeout=120)
+    assert proc.returncode in (0, 5), proc.stdout + proc.stderr           # 5: nothing collected, nothing broken
+    assert "error" not in proc.stdout.lower()

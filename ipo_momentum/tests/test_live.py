@@ -269,8 +269,8 @@ def test_a_counter_going_backwards_is_rebaselined_not_reset_to_zero():
     a = adapter(started_at=ist(2026, 9, 25, 9, 0))
     assert a._traded_quantity(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0))) == (1_000_000, False)
     assert a._traded_quantity(cum_tick(100.0, 999_990, ist(2026, 9, 25, 10, 1))) == (0, True)   # v1.1: 999,990
-    # v1.2 adopted the glitch value as the baseline and re-counted the dip on the next print (510).
-    assert a._traded_quantity(cum_tick(100.0, 1_000_500, ist(2026, 9, 25, 10, 2))) == (0, True)
+    # v1.2 adopted the glitch value as the baseline and re-counted the dip (510); v1.3 dropped the 500.
+    assert a._traded_quantity(cum_tick(100.0, 1_000_500, ist(2026, 9, 25, 10, 2))) == (500, False)
     assert a._traded_quantity(cum_tick(100.0, 1_000_800, ist(2026, 9, 25, 10, 3))) == (300, False)
 
 
@@ -470,3 +470,124 @@ def test_the_feed_watchdog_tolerates_quiet_evenings_and_fresh_heartbeats(monkeyp
     busy = adapter(history=session_history(24))
     busy.note_feed_alive(at=SessionClock.FIXED - timedelta(seconds=1))
     asyncio.run(watch_briefly(busy))
+
+
+def test_consecutive_zeroed_packets_never_become_the_baseline():
+    # v1.3 invalidated the baseline on a dip but adopted the next print unchecked: a second zeroed packet
+    # became the baseline and the next good print was credited with the whole day's volume.
+    a = adapter(started_at=ist(2026, 9, 25, 10, 58))
+    q = [a._traded_quantity(cum_tick(100.0, c, ist(2026, 9, 25, 11, 0, s)))
+         for s, c in [(1, 4_000_000), (2, 4_001_000), (3, 0), (4, 0), (5, 4_002_000), (6, 4_003_000)]]
+    assert q == [(0, True), (1_000, False), (0, True), (0, True), (1_000, False), (1_000, False)]
+
+
+def test_a_zeroed_first_packet_after_a_reconnect_is_not_the_baseline():
+    a = adapter(started_at=ist(2026, 9, 25, 9, 0))
+    a._traded_quantity(cum_tick(100.0, 4_000_000, ist(2026, 9, 25, 10, 0)))
+    a.mark_feed_down()
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 2))
+    assert a._traded_quantity(cum_tick(100.0, 0, ist(2026, 9, 25, 10, 2, 1))) == (0, True)
+    assert a._traded_quantity(cum_tick(100.0, 4_011_000, ist(2026, 9, 25, 10, 2, 2))) == (0, True)   # v1.3: 4,011,000
+    assert a._traded_quantity(cum_tick(100.0, 4_012_000, ist(2026, 9, 25, 10, 2, 3))) == (1_000, False)
+
+
+def test_the_print_after_a_glitch_keeps_its_trade_and_price():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 59))   # joined mid-session
+    a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 5)))          # re-baselines
+    a.on_tick(cum_tick(100.0, 1_010_000, ist(2026, 9, 25, 10, 1, 0)))
+    a.on_tick(cum_tick(100.0, 0, ist(2026, 9, 25, 10, 2, 0)))                  # a zeroed packet
+    a.on_tick(cum_tick(97.0, 1_060_000, ist(2026, 9, 25, 10, 3, 0)))           # a real 50k trade at 97
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 3))
+    bar = a.market_state["SWIGGY"].iloc[-1]
+    assert (bar["Low"], bar["Close"], bar["Volume"]) == (97.0, 97.0, 60_000.0)   # v1.3 lost the trade
+
+
+def test_a_stall_across_a_bucket_end_does_not_credit_its_tail_twice():
+    # The clock discards the stalled bar and the back-fill restores it; v1.3 also credited the stalled
+    # tail to the next live bar, so the tail was in history twice.
+    history = pd.concat([session_history(24), make_bars([100.0] * 10, start=ist(2026, 9, 25, 9, 15))])
+    candle = make_bars([99.0], start=ist(2026, 9, 25, 10, 5))
+    candle["Volume"] = 280_000.0                                          # the exchange's 10:05 candle
+
+    async def backfill(sym, start, end):
+        return candle
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": history}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), started_at=ist(2026, 9, 25, 9, 0),
+                                   backfill=backfill, require_feed_liveness=True)
+        a.mark_feed_reset(at=ist(2026, 9, 25, 10, 4, 30))
+        a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 4, 40)))  # re-baselines
+        a.on_tick(cum_tick(99.5, 1_010_000, ist(2026, 9, 25, 10, 5, 10)))
+        a.on_tick(cum_tick(99.0, 1_030_000, ist(2026, 9, 25, 10, 7, 0)))
+        a.note_feed_alive(at=ist(2026, 9, 25, 10, 9, 56))                   # then the feed stalls
+        a.flush_due_bars(ist(2026, 9, 25, 10, 10, 2))                        # 10:05 discarded
+        a.on_tick(cum_tick(99.2, 1_280_000, ist(2026, 9, 25, 10, 9, 58)))   # the stalled 250k burst: late
+        a.note_feed_alive(at=ist(2026, 9, 25, 10, 10, 3))
+        a.on_tick(cum_tick(100.8, 1_285_000, ist(2026, 9, 25, 10, 10, 5)))
+        a.on_tick(cum_tick(101.0, 1_300_000, ist(2026, 9, 25, 10, 11, 0)))
+        a.on_tick(cum_tick(101.0, 1_301_000, ist(2026, 9, 25, 10, 15, 1)))  # closes 10:10: hole at 10:05
+        await asyncio.gather(*a._backfills)
+        return a.market_state["SWIGGY"]
+
+    df = asyncio.run(scenario())
+    today = df[df.index >= pd.Timestamp(ist(2026, 9, 25, 10, 5))]
+    assert today["Volume"].tolist() == [280_000.0, 15_000.0]                # v1.3: 280,000 then 270,000
+
+
+def test_bars_close_in_feed_time_when_the_feed_lags():
+    # With the feed 3 s behind the host clock, a heartbeat received at 11:05:01 was sent at 11:04:58:
+    # v1.3 took it as proof that the 11:00 bar was complete and dropped its last print as late.
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), require_feed_liveness=True)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 59))
+    a.note_feed_lag(ist(2026, 9, 25, 11, 0, 3), 3.0)
+    a.on_tick(tick(101.0, 100, ist(2026, 9, 25, 11, 0, 0)))
+    a.note_feed_alive(at=ist(2026, 9, 25, 11, 5, 1))
+    a.flush_due_bars(ist(2026, 9, 25, 11, 5, 2, 500000))
+    assert "SWIGGY" in a.current_bars                                     # not yet due in feed time
+    a.on_tick(tick(100.3, 100, ist(2026, 9, 25, 11, 4, 59, 500000)))      # the tail, received 3 s late
+    a.note_feed_alive(at=ist(2026, 9, 25, 11, 5, 4))
+    a.flush_due_bars(ist(2026, 9, 25, 11, 5, 5, 500000))
+    assert a.market_state["SWIGGY"].iloc[-1]["Close"] == 100.3 and a.dropped_ticks == 0
+
+
+def test_the_feed_lag_is_measured_on_trades_not_on_snapshots(monkeypatch):
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    now = SessionClock.FIXED
+
+    def kite_tick(cum, sent):
+        naive_local = sent.astimezone().replace(tzinfo=None)             # KiteTicker's naive host-local time
+        return {"instrument_token": 1234, "last_price": 100.0, "volume_traded": cum, "exchange_timestamp": naive_local}
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"},
+                                   started_at=ist(2026, 9, 28, 10, 50))
+        a.broker_on_ticks(None, [kite_tick(1_000, now - timedelta(minutes=4))])   # subscribe snapshot: stale
+        a.broker_on_ticks(None, [kite_tick(1_000, now - timedelta(seconds=30))])  # no trade
+        a.broker_on_ticks(None, [kite_tick(1_200, now - timedelta(seconds=3))])   # a trade, sent 3 s ago
+        for _ in range(3):
+            a.on_tick(await a.tick_queue.get())
+        return a.feed_lag
+
+    assert asyncio.run(scenario()) == 3.0
+
+
+def test_the_bar_clock_waits_for_ticks_already_received():
+    # A tick still queued may be the tail of a due bar; closing first would drop it as late.
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), started_at=ist(2026, 9, 25, 9, 0))
+        a.on_tick(tick(101.0, 100, ist(2026, 9, 25, 11, 0, 0)))
+        a.tick_queue.put_nowait(tick(100.3, 100, ist(2026, 9, 25, 11, 4, 59)))
+        clock = asyncio.create_task(a.bar_clock(interval=0.01, clock=lambda: ist(2026, 9, 25, 11, 5, 3)))
+        await asyncio.sleep(0.05)
+        still_open = "SWIGGY" in a.current_bars                           # v1.3 closed it without the tail
+        a.on_tick(a.tick_queue.get_nowait())
+        await asyncio.sleep(0.05)
+        clock.cancel()
+        await asyncio.gather(clock, return_exceptions=True)
+        return still_open, a.market_state["SWIGGY"].iloc[-1]["Close"]
+
+    assert asyncio.run(scenario()) == (True, 100.3)
