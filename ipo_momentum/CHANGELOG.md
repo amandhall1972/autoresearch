@@ -1,5 +1,83 @@
 # Changelog
 
+## v1.9 (2026-09-27)
+
+v1.8 went through a ninth adversarial review on a frozen snapshot
+(`bf43ba6`), with the same four areas. Every skeptic ran. 12 findings, no
+duplicates, none refuted: 9 confirmed, 3 with part of the claim overstated.
+None is critical or high: 1 medium, 11 low. Three times the skeptic's
+refinement replaced the finder's fix:
+- R9-SR-1: the finder's reclaim re-took a route that only finished, held
+  runs were left on. It then displaced the host's own handler and swallowed
+  every later stop. A route is re-taken only while an engine still runs on it.
+- R9-LT-2: the finder adopted a zero counter whenever the packet's last trade
+  predated 09:15 today. A stale pre-open snapshot of a name that *had* traded
+  then brought R8's fake 42x RVOL back. The skeptic's rule needs an earlier
+  day's last trade *and* no bar of today.
+- R9-SR-3: the warning covers the uvloop path too, not only asyncio's table.
+
+Every v1.9 regression test fails on the v1.8 snapshot and passes here
+(`test_the_fast_modules_pass_without_the_kite_extra` fails there too, because
+it runs the fast modules, which include the new feed tests). The exceptions
+are these controls:
+- `test_a_transient_error_while_polling_for_a_lost_reply_gtt_still_extends_the_poll`:
+  only a permanent error ends the GTT poll early;
+- `test_a_zero_counter_is_adopted_only_when_nothing_says_the_name_traded_today`
+  (three cases): the refinement's guard. The earlier-day case fails with the
+  finder's version of the fix;
+- `test_a_route_left_to_held_runs_is_not_taken_back_from_the_host_after_its_guard`:
+  fails with the finder's reclaim;
+- the pins for v1.8 guards that no test covered (R9-TD-2, R9-TD-3, R9-TD-4):
+  `test_one_stamp_just_over_the_limit_does_not_stop_a_synced_host`,
+  `test_a_just_over_drop_an_hour_ago_does_not_stop_a_host_that_drifted_close_to_the_limit`,
+  `test_the_default_steady_clock_consults_the_wall_clock_where_the_monotonic_clock_misses_a_suspend`,
+  `test_on_uvloop_a_re_take_keeps_the_warning_that_the_hosts_callback_was_lost`,
+  and the wakeup-fd check added to
+  `test_a_plain_handler_or_ignore_the_host_sets_during_a_run_is_kept[asyncio]`.
+  Each fails on the mutation that removes its guard: the straddle stop's skew
+  band, its 60 s recency window, the wall-clock detection off Linux, the
+  uvloop "lost" carry on a re-take, the wakeup-fd reset.
+
+Existing tests changed:
+- `hooked()` fails the test if the engine exits before hooking, and the
+  flags pin and the held-run pin assert that their engines ran (R9-TD-5).
+  Each now fails on an engine that exits before hooking, which let the pins
+  pass with their fixes reverted.
+- The last two signal tests that slept a fixed second before signalling wait
+  for the hook too.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.8 defect | v1.9 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | v1.8 ended the re-check loop on a permanent error, but the two other GTT-book loops on the ambiguous path did not. After an expired session (`TokenException`, 403), the lost-reply poll read the book for two windows (30 s by default) and the duplicate watch for one. Neither alert named the error, only the earlier 504. | A permanent error ends both loops at once, and the alerts name it: `placing failed (…) and the GTT book could not be read (TokenException(…))`, and `GTT n armed after an ambiguous failure, but the GTT book could not be read (TokenException(…)) to rule out a duplicate`. Transient errors keep the extended poll. | `test_a_permanent_error_while_polling_for_a_lost_reply_gtt_ends_the_poll_and_is_named`, `test_a_permanent_error_during_the_duplicate_watch_ends_the_watch_and_is_named`, `test_a_transient_error_while_polling_for_a_lost_reply_gtt_still_extends_the_poll` (control) |
+
+### Live feed
+
+| Sev | Verdict | v1.8 defect | v1.9 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | R8-TD-9's fix filed every zeroed-stamp print 2 s early, whether or not a bar was open for the grace to protect. Received just after a bucket boundary, such a print did three things v1.7 did not. It marked the previous bucket blind when it re-baselined the counter, so the new bar was kept short (wrong Open and Volume). It opened a bar for a bucket in which nothing traded. And received just after 09:15:00, it was dropped as pre-open, so the opening bar lost its Open and High (which feed the ATR). The skeptic added a fourth: just after a bar opened, it was dropped as out of order. | A zeroed stamp is filed at feed time. Only if that falls within the bar clock's 2 s grace after the end of a bar that is still open does it join that bar, which keeps R8-TD-9's guarantee. A counter it re-baselines blinds the bucket of its feed time. | `test_a_zeroed_first_print_after_a_join_blinds_its_own_bucket_not_the_previous_one`, `test_a_zeroed_trade_with_no_bar_open_makes_no_bar_for_the_bucket_before_it`, `test_a_zeroed_opening_print_is_not_dropped_as_pre_open`, `test_a_zeroed_print_just_after_a_bar_opened_joins_it`; `test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen` still holds |
+| low | ◐ | Since R8, a zero counter is never adopted after a blind spot. So a name that had not traded today, after a late join, reconnect or far-ahead drop, re-baselined on its first trade: its first traded bar was discarded and back-filled, and a breakout on it was never evaluated. v1.7 signalled. Overstated: the rule was documented (its cost was not), the trigger needs an illiquid name, and a missed signal is fail-safe. | A zero counter is adopted when the packet itself proves the name has not traded today (a real `last_trade_time` from an earlier day) *and* no bar of today is known (forming, closed or in the synced history). Then no bucket is blind. The residual case (first trades during an outage, then a stale snapshot) is listed under Known limitations. | `test_a_name_not_traded_today_keeps_its_first_traded_bar_after_a_join`, `test_only_a_zero_counter_with_an_earlier_days_last_trade_marks_a_name_untraded`, `test_a_zero_counter_is_adopted_only_when_nothing_says_the_name_traded_today` (control) |
+
+### Lifecycle
+
+| Sev | Verdict | v1.8 defect | v1.9 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ◐ | v1.8's fix for an engine that starts under a host's `SIG_IGN` guard joins the route that exists. But that route no longer received the signal if the host had re-registered or removed its own callback mid-run (both supported). Once the guard was lifted, a supervisor's stop went to the host's callback, or killed the process, with the engine's entry in flight. Overstated: the finder's third case (a guard after a held run the host had taken back) is the documented `nohup` rule. | An engine that joins under `SIG_IGN` starts a reclaim task. Once the host lifts the ignore, whatever it restores, the engines take the signal back within 50 ms (`RECLAIM_POLL`) if it no longer reaches them. The skeptic's refinement: only while an engine still runs on the route. | `test_an_engine_that_joins_under_sig_ign_a_route_the_host_took_back_still_gets_the_signal` (re-register and remove, asyncio and uvloop), `test_a_route_left_to_held_runs_is_not_taken_back_from_the_host_after_its_guard` (control) |
+| low | ✔ | On asyncio, `main(hold_signals=True)` could not be released as its docstring said ("until the caller restores them"). The handler a host with its own loop callback saves is asyncio's one shared `_sighandler_noop`, so restoring it changed nothing. The held run kept the signal, the host's callback was never re-armed, and every later stop was "ignored". | `engine.release_signals(loop=None)` hands back what finished held runs still hold. Engines still running keep the signal, and the last one out hands back as usual. main()'s docstring and the README point to it. | `test_release_signals_hands_back_what_a_held_run_kept` |
+| low | ◐ | If the last engine ended while the host ignored a signal, the signal was handed back ignored. The handler the host had saved when it set `SIG_IGN` was the engine's, and restoring it swallowed every later SIGTERM, and on 3.11 Ctrl-C even after `asyncio.run` returned. Overstated: v1.7 did the same, the hand-back follows the documented rule, and no engine is at risk. | A warning says the signal is handed back ignored and names what to restore (what was there before the engine started). The hand-back is unchanged: keeping the table entry would let asyncio's `loop.close()` reset the host's `SIG_IGN` (the R8-SR-4 concern). The README says the same. | `test_an_engine_that_ends_inside_the_hosts_ignore_says_what_to_restore` (asyncio and uvloop) |
+
+### Tests and docs
+
+| Sev | Verdict | v1.8 defect | v1.9 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | R9-TD-1: on asyncio, a plain handler the host set mid-run loses `SA_RESTART` if another engine starts after it and re-takes the signal. The README promised its flags and listed the loss only for uvloop. It cannot be read back in pure Python. | Documented: README (signals, Known limitations) and the v1.8 R8-SR-4 row. | documentation |
+| low | ✔ | R9-TD-2: the straddle stop's skew band and its 60 s recency window were unpinned; removing either passed every test. | Pinned: a synced host with one stamp 31 s ahead, and a host now 29 s behind whose only just-over drop was an hour ago, both keep running. | `test_one_stamp_just_over_the_limit_does_not_stop_a_synced_host`, `test_a_just_over_drop_an_hour_ago_does_not_stop_a_host_that_drifted_close_to_the_limit` |
+| low | ✔ | R9-TD-3: the rule that turns on `wall_gain` off Linux (a default `time.monotonic`) was unpinned on every platform; forcing it off passed every test. | Pinned with the platform's own default. | `test_the_default_steady_clock_consults_the_wall_clock_where_the_monotonic_clock_misses_a_suspend` |
+| low | ✔ | R9-TD-4: the uvloop "lost" carry on a re-take and the asyncio wakeup-fd reset were unpinned. Without the reset, a later signal wrote its byte into whatever file reused the closed self-pipe's fd. | Pinned. | `test_on_uvloop_a_re_take_keeps_the_warning_that_the_hosts_callback_was_lost`, `test_a_plain_handler_or_ignore_the_host_sets_during_a_run_is_kept[asyncio]` |
+| low | ✔ | R9-TD-5: two v1.8 pins passed with their fixes reverted when the engine exited before hooking, since `hooked()` returned silently and the pins discarded `main()`'s result. | `hooked()` fails the test on an early exit, and both pins assert their results. | `test_a_plain_handler_set_mid_run_keeps_its_flags`, `test_a_held_engine_is_not_carried_into_a_later_run_once_the_host_restores_its_handler` |
+| low | ✔ | R9-TD-6: four statements in the v1.8 CHANGELOG about test changes were wrong (see the note there). | Corrected. The two remaining fixed-delay signal tests now wait for the hook. | documentation |
+
 ## v1.8 (2026-09-27)
 
 v1.7 went through an eighth adversarial review on a frozen snapshot
@@ -33,15 +111,19 @@ these controls:
   bar back. The test keeps that property pinned.
 
 Existing tests changed:
-- The child-process signal tests now wait until the engine has hooked its
-  signals, instead of sleeping a fixed time (R8-TD-4).
+- The mid-run signal tests that raced start-up now wait until the engine has
+  hooked its signals, instead of sleeping a fixed time (R8-TD-4). Two
+  single-engine tests kept a fixed 1 s margin (converted in v1.9).
 - The far-ahead watchdog test is bounded, so a regression fails instead of
   hanging (R8-TD-3).
 - The steady-clock name pin reads `steady_clock.<locals>.now`.
-- The no-extra guard now rejects only skips for want of `kiteconnect`
+- The no-extra guard stays strict: the suspend test no longer skips
   (R8-TD-5).
-- v1.7's uvloop SA_RESTART and Y+P expectations were dropped: uvloop keeps
-  its documented limits (R8-SR-4).
+
+(Four statements in this section about test changes were corrected in v1.9,
+R9-TD-6: a bullet about the no-extra guard and one about dropped uvloop
+expectations described changes that were not in v1.8, and two overstated
+how widely the signal tests wait and how far the platform skips go.)
 
 Verdict: ✔ confirmed by the independent skeptic, ◐ confirmed with part of the
 claim overstated. Severity is the skeptic's rating.
@@ -68,15 +150,15 @@ claim overstated. Severity is the skeptic's rating.
 | medium | ✔ | An engine that started while the host had a stop signal at `SIG_IGN` (say, around spawning workers) was left out of the route. Once the host restored its handler, a supervisor's stop reached only the other engines, and the next one killed it mid-run. The skeptic added a worse variant: if the other engine ended inside the window, the stop was swallowed silently. | The engine joins the existing route while the signal is ignored (nohup is still honoured: nothing is taken). It is reached once the host restores the signal, and a later re-take carries it along. | `test_an_engine_that_starts_while_the_host_ignores_the_signal_still_gets_it_later` (asyncio and uvloop) |
 | low | ✔ | A re-take carried a finished `main(hold_signals=True)` callback along. After that, the host's restored handler was never handed back, and every later stop was "ignored". The finder rated it medium; the skeptic rated it low, since `run()` can never reach it. | A held callback is marked, and is not carried into a re-take. | `test_a_held_engine_is_not_carried_into_a_later_run_once_the_host_restores_its_handler` |
 | low | ✔ | A re-take after the host changed only its plain handler recorded the engine's own dispatcher as the host's loop callback. The host's callback was lost, the stale entry later reset the host's handler when the loop closed, and on uvloop the warning was lost. | The re-take keeps the pre-run loop callback and the uvloop "lost" flag the host did not change. | `test_a_re_take_keeps_the_hosts_pre_run_loop_callback` |
-| low | ◐ | Hand-back re-installed a plain handler the host set mid-run, clearing its `SA_RESTART`, and on uvloop it also removed a loop callback registered before it. Overstated: v1.6 was worse, and PEP 475 hides EINTR from Python code. | On asyncio only our table entry is changed, and the handler stays exactly as set, flags included. uvloop keeps v1.7's path and its documented limits. | `test_a_plain_handler_set_mid_run_keeps_its_flags` |
+| low | ◐ | Hand-back re-installed a plain handler the host set mid-run, clearing its `SA_RESTART`, and on uvloop it also removed a loop callback registered before it. Overstated: v1.6 was worse, and PEP 475 hides EINTR from Python code. | On asyncio only our table entry is changed, and the handler stays exactly as set, flags included (unless a later engine re-took the signal after the host set it, as v1.9 documents: R9-TD-1). uvloop keeps v1.7's path and its documented limits. | `test_a_plain_handler_set_mid_run_keeps_its_flags` |
 
 ### Tests and docs
 
 | Sev | Verdict | v1.7 defect | v1.8 fix | Pinned by |
 | --- | --- | --- | --- | --- |
-| low | ✔ | R8-TD-2: the suspend pin passed with `CLOCK_MONOTONIC`, because on a host that never slept the two clocks agree. | The pin simulates an hour's suspend. It is platform-neutral: elsewhere it checks the fallback, so the suite has no platform skip. | `test_the_steady_clock_keeps_counting_through_a_suspend` (control) |
+| low | ✔ | R8-TD-2: the suspend pin passed with `CLOCK_MONOTONIC`, because on a host that never slept the two clocks agree. | The pin simulates an hour's suspend. It is platform-neutral: elsewhere it checks the fallback, so the fast modules have no platform skip. | `test_the_steady_clock_keeps_counting_through_a_suspend` (control) |
 | low | ✔ | R8-TD-3: the far-ahead watchdog test hung instead of failing when its fix was reverted. | Bounded (it fails within 2 s). | `test_a_run_whose_every_tick_is_far_ahead_stops_instead_of_running_blind` |
-| low | ✔ | R8-TD-4: the mid-run signal tests raced engine start-up with fixed sleeps. One failed under load, and one passed on v1.6. | They wait until the engine has hooked its signals, or has exited. | the signal tests in `test_end_to_end.py` |
+| low | ✔ | R8-TD-4: the mid-run signal tests raced engine start-up with fixed sleeps. One failed under load, and one passed on v1.6. | The mid-run signal tests that raced start-up wait until the engine has hooked its signals (two single-engine tests kept a fixed 1 s margin until v1.9). | the signal tests in `test_end_to_end.py` |
 | low | ✔ | R8-TD-5: the no-extra guard asserted "no skips", and the Linux-only suspend test broke it on macOS and Windows. | The suspend test no longer skips, and the guard stays strict. | `test_the_fast_modules_pass_without_the_kite_extra` |
 | low | ✔ | R8-TD-6: the receive-date keying of the re-baselined counter was unpinned. | Pinned (a control since R8-LT-3's guard, see above). | `test_a_corrupt_stamp_dated_another_day_does_not_credit_the_day_to_one_bar` |
 | low | ✔ | R8-TD-9: a zeroed-stamp print stamped only by the last minute's largest lag could still close a bar early when latency rose at a bucket boundary. Its last genuine print was then dropped, changing the bar's Close. | The fallback subtracts the bar clock's own grace (`BAR_CLOSE_GRACE`, shared with `flush_due_bars`), so such a print cannot close a bar before the bar clock would. | `test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen` |

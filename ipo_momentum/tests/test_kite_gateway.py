@@ -773,3 +773,58 @@ def test_a_permanent_error_while_rechecking_the_book_ends_the_loop_and_is_named(
     fill = asyncio.run(gw.execute(kite_plan()))
     assert fill.exit_order_id is None and reads["n"] == 1 and kite.gtt_places == 2
     assert "GTT STATE UNKNOWN" in gw.alerts[-1] and "TokenException" in gw.alerts[-1]
+
+
+# ---------------------------------------------------------------- round 9: every GTT-book loop stops on a permanent error
+def expiring_book(kite, after_places, token):
+    """From the ``after_places``-th GTT request on, every GTT book read answers ``token``; returns the count."""
+    reads = {"n": 0}
+    original = kite._request
+
+    def request(route, method, *args, **kwargs):
+        if route == "gtt" and kite.gtt_places >= after_places:
+            reads["n"] += 1
+            raise token
+        return original(route, method, *args, **kwargs)
+
+    kite._request = request
+    return reads
+
+
+def test_a_permanent_error_while_polling_for_a_lost_reply_gtt_ends_the_poll_and_is_named():
+    # v1.8 polled an expired session's book for two windows after the 504, then blamed only the 504.
+    token = KE.TokenException("Incorrect `api_key` or `access_token`.", code=403)
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Gateway timed out", code=504), {"trigger_id": 778}])
+    reads = expiring_book(kite, 1, token)
+    gw = fast_gateway(kite, cancel_grace=1.0, poll_interval=0.05)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id is None and reads["n"] == 1 and kite.gtt_places == 1
+    assert gw.alerts == ["[SWIGGY] GTT STATE UNKNOWN for 2941 shares (order 260928000000001): placing failed "
+                         "(NetworkException('Gateway timed out')) and the GTT book could not be read "
+                         "(TokenException('Incorrect `api_key` or `access_token`.')). CHECK THE GTT BOOK."]
+
+
+def test_a_permanent_error_during_the_duplicate_watch_ends_the_watch_and_is_named():
+    # v1.8 kept reading for the whole watch and said only that the book "could not be read at the end".
+    token = KE.TokenException("Incorrect `api_key` or `access_token`.", code=403)
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Gateway timed out", code=504), {"trigger_id": 778}])
+    reads = expiring_book(kite, 2, token)                                  # the session dies once 778 is armed
+    gw = fast_gateway(kite, cancel_grace=1.0, poll_interval=0.05)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "778" and reads["n"] == 1 and kite.gtt_places == 2
+    assert gw.alerts == ["[SWIGGY] GTT 778 armed after an ambiguous failure, but the GTT book could not be read "
+                         "(TokenException('Incorrect `api_key` or `access_token`.')) to rule out a duplicate. "
+                         "CHECK THE GTT BOOK."]
+
+
+def test_a_transient_error_while_polling_for_a_lost_reply_gtt_still_extends_the_poll():
+    # Control: only a permanent error ends the poll early; a 504 book keeps it going a second window.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[KE.NetworkException("Gateway timed out", code=504), {"trigger_id": 778}])
+    reads = expiring_book(kite, 1, KE.NetworkException("Gateway timed out", code=504))
+    gw = fast_gateway(kite, cancel_grace=0.2, poll_interval=0.02)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id is None and reads["n"] >= 15 and kite.gtt_places == 1
+    assert len(gw.alerts) == 1 and "GTT STATE UNKNOWN for 2941 shares" in gw.alerts[0]

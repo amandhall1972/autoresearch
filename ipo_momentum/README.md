@@ -213,13 +213,28 @@ last one ends:
   had, including callbacks registered with `loop.add_signal_handler` and a
   plain handler set beside one.
 - Whatever the host sets while engines run (a loop callback, a plain handler,
-  `SIG_IGN`) is what is handed back (on asyncio, a plain handler with its own
-  flags; see Known limitations for uvloop). An
-  engine that starts after such a change takes the signal back for its own run
-  (a signal the host set to `SIG_IGN` stays ignored, as under `nohup`: the
-  engine joins and gets it once the host restores it); what the host had
-  before the change is kept for the hand-back. An engine held by `main(hold_signals=True)` keeps the signal only
-  until the host takes it back.
+  `SIG_IGN`) is what is handed back. On asyncio a plain handler keeps its own
+  flags, unless an engine started after the host set it: that engine displaced
+  it, and it comes back without `SA_RESTART` (see Known limitations, also for
+  uvloop). An engine that starts after such a change takes the signal back for
+  its own run; what the host had before the change is kept for the hand-back.
+- A signal the host sets to `SIG_IGN` while engines run (a common guard around
+  spawning workers) stays ignored, as under `nohup`: an engine that starts
+  inside the guard joins the running ones. Once the host lifts the ignore,
+  whatever it restores, the engines take the signal back within 50 ms
+  (`RECLAIM_POLL`) if it no longer reaches them, for instance because the host
+  had re-registered or removed its own callback before the guard. An engine that
+  starts under `SIG_IGN` while no engine runs stays unhooked, as under `nohup`.
+- If the last engine ends inside such a guard, the signal is handed back
+  ignored, with a warning: the handler the host saved when it set `SIG_IGN` was
+  the engine's, and restoring it would swallow every later stop (and Ctrl-C).
+  Restore what was there before the engine started; the warning names it.
+- An engine held by `main(hold_signals=True)` keeps the signal after it returns,
+  until the host calls `engine.release_signals()` (engines still running keep
+  it; the last one out hands back as usual) or takes the signal back with
+  `signal.signal` or `loop.add_signal_handler` (the next engine then drops the
+  held one). Restoring a handler saved from `signal.getsignal()` is not enough on
+  asyncio, whose process-level handler is one shared function for every callback.
 - uvloop's callbacks cannot be read back. A host callback it held for a stop
   signal before the run is therefore lost: the engine logs a warning, and the
   signal is back at its default (never silently swallowed). Re-register it
@@ -271,10 +286,12 @@ Trailing stays the default because it is the original strategy's definition.
   zeroed exchange time, which the SDK parses as 1970, also falls back to
   receive time (and is not a lag sample). KiteTicker's naive host-local
   datetimes are converted to IST. A zeroed stamp's receive time is taken in
-  feed time (corrected by the feed's lag) less the bar clock's 2 s grace, which
-  errs early: such a print cannot close a bar before the bar clock would, even
-  when latency has just risen, though before the new bucket's first genuine
-  print it can join the previous, still-open bar (within about the lag + 2 s).
+  feed time (corrected by the feed's lag). If that falls within the bar clock's
+  2 s grace after the end of a bar that is still open, the print joins that bar:
+  it cannot close a bar before the bar clock would, even when latency has just
+  risen. Otherwise it stays in its own bucket, so it never opens a bar for a
+  bucket that had no trades, is never dropped as pre-open when it arrives just
+  after 09:15, and a counter it re-baselines blinds its own bucket.
 * **The 30 s rule.** A tick stamped more than 30 s ahead of the host clock is
   dropped with a critical log before it moves the lag or the market time: the
   exchange cannot stamp a print in the future, so either the stamp is corrupt
@@ -307,6 +324,12 @@ Trailing stays the default because it is the original strategy's definition.
     is a high-water mark. A print below it (a zeroed or stale packet) is a
     glitch. It is never adopted as the baseline, in any feed epoch, however many
     arrive in a row, and the next good print is credited normally.
+  - A zero counter after a blind spot is no baseline either (the next print
+    re-baselines again), unless the name has provably not traded today: the
+    packet's own `last_trade_time` is from an earlier day and no bar of today is
+    known (forming, closed or in the synced history). Then the zero hid nothing,
+    so it is the baseline and no bucket is blind: an illiquid name's first
+    traded bar is kept whole, and a breakout on it is evaluated.
   - The first print of a day counts from zero only if the feed was up at 09:15,
     judged in exchange time.
   - LTP-mode ticks carry no volume and make no bars; the feed uses full mode.
@@ -417,7 +440,8 @@ or duplicated:
      has already triggered (then an alert says the exit has fired). A blind
      retry would arm a second GTT that sells the whole position again. The
      poll judges on its *latest* read: if that failed, polling goes on (for at
-     most one more window) until a read succeeds.
+     most one more window) until a read succeeds. A read that fails for good
+     (an expired session) ends the poll at once, and the alert names it.
    - A request that never left the machine is retried through the outage for
      up to 15 s without using up an attempt. Each outage gets its own window,
      so a second outage after an ambiguous attempt is retried too; after an
@@ -430,8 +454,9 @@ or duplicated:
    - After any ambiguous attempt, the book is watched for another 15 s. A late
      second GTT raises `GTT DUPLICATE … DELETE ALL BUT GTT n`, or, if the
      duplicate has already triggered, says the exit has fired. If the watch's
-     final read failed, `GTT n armed after an ambiguous failure … CHECK THE GTT
-     BOOK` says a duplicate could not be ruled out.
+     final read failed, or a read failed for good (the alert then names the
+     error and the watch ends at once), `GTT n armed after an ambiguous failure
+     … CHECK THE GTT BOOK` says a duplicate could not be ruled out.
    - If the book cannot be read at the end of the (extended) poll, or every
      request failed ambiguously, a `GTT STATE UNKNOWN` alert says a GTT may
      exist.
@@ -511,7 +536,7 @@ not evidence of an edge in either direction.
 
 ## How it was reviewed
 
-Eight adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
+Nine adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
 lists every finding with its severity, verdict, fix and the test that pins it.
 
 1. **v1.0, the original file.** Four reviewers, one per area (live path, alpha,
@@ -596,6 +621,20 @@ lists every finding with its severity, verdict, fix and the test that pins it.
      and the signal tests raced engine start-up under load.
 
    These became v1.8.
+9. **v1.8, the eighth fix.** All four skeptics ran. 12 findings, none refuted
+   (3 partly overstated), 1 medium and 11 low:
+   - An engine that joined under a host's `SIG_IGN` guard was never reached if
+     the host had displaced or removed the running engines' signal first: once
+     the guard was lifted, a supervisor's stop could kill it mid-entry.
+   - A held `main()` could not be released by restoring the saved handler on
+     asyncio; an engine that ended inside a guard left the host a handler that
+     swallows every stop.
+   - The zeroed-stamp grace moved prints that no open bar needed it for; an
+     illiquid name lost its first traded bar after a late join.
+   - Two GTT-book loops kept polling an expired session; five v1.8 guards had
+     no pin, and the CHANGELOG misdescribed four test changes.
+
+   These became v1.9.
 
 ---
 
@@ -616,7 +655,18 @@ lists every finding with its severity, verdict, fix and the test that pins it.
   because uvloop cannot hand it back. The engine warns, and the signal is at
   its default; re-register the callback. For the same reason, a plain handler
   the host sets mid-run is re-installed on hand-back (without `SA_RESTART`),
-  and a loop callback registered before it in the same run is removed.
+  and a loop callback registered before it in the same run is removed. On
+  asyncio the same happens to a plain handler the host set mid-run if another
+  engine starts after it: that engine displaces it, and it comes back without
+  `SA_RESTART`.
+* **A stop sent within 50 ms of a host lifting a `SIG_IGN` guard** can miss the
+  engines if the host had displaced or removed their signal before the guard:
+  they take it back on their next check (`RECLAIM_POLL`). No event marks a
+  `signal.signal()` call, so the engine polls.
+* **An untraded name's zero counter is trusted** when its packet dates the last
+  trade to an earlier day and no bar of today is known. If a name first traded
+  while the feed was down and a stale pre-open snapshot then arrives before any
+  bar of today is known, the trades since the outage are credited to one bar.
 * **A host clock about 30 s or more behind the exchange** stops the run
   (exit 1) within seconds: every tick is dropped, or the stamps straddle the
   limit. A supervisor restart keeps failing until the time sync is fixed. Within 30 s
@@ -653,7 +703,7 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 312 tests run offline in about 2.5 minutes. The slowest are real CLI runs that
+The 336 tests run offline in about 2.5 minutes. The slowest are real CLI runs that
 deliver SIGINT, SIGTERM and SIGHUP mid-entry and during exit, and a shutdown
 that must outlast v1.1's 10 s drain. They pass in seven configurations:
 - Python 3.10 with pandas 2.2 and numpy 1.26
@@ -669,8 +719,8 @@ Pandas `FutureWarning`s raised from engine code fail the suite.
 | File | Covers |
 | --- | --- |
 | `test_alpha.py` | Breakout conditions and crossing semantics, the exact stop/target math, true-range ATR, RVOL baselines and modes, session-defined bases, look-ahead freedom (including inside the base), the pinned real signal |
-| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, feed liveness in feed time, feed lag in both directions, clock skew, host clock steps, suspends, far-future stamps and the 30 s rule, the silent-socket watchdog, strict hole back-fill within and across sessions, thread safety, loop survival |
+| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, zeroed stamps and untraded names, feed liveness in feed time, feed lag in both directions, clock skew, host clock steps, suspends, far-future stamps and the 30 s rule and its straddle stop, the silent-socket watchdog, strict hole back-fill within and across sessions, thread safety, loop survival |
 | `test_execution.py` | Sizing caps, tick rounding, duplicates, future and stale signals, paper OCO mechanics incl. gaps, the halt report. No Kite dependency. |
-| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies and refused tunnels, repeated outages, GTTs booked during an outage), broker refusals classified by HTTP status, transient errors, cancels that don't land, partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books. Skipped without `kiteconnect`. |
+| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies and refused tunnels, repeated outages, GTTs booked during an outage), broker refusals classified by HTTP status, transient errors, cancels that don't land, partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books (incl. an expired session). Skipped without `kiteconnect`. |
 | `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter (incl. wake-up order under clock jitter), the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads and bad timestamps, the session's last 30m/60m bar and special sessions, retry policy, strict back-fill, midnight lookback clamps, listing dates in any zone, orchestrator anchoring and error containment, collecting and running the suite without the Kite extra |
-| `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (asyncio and uvloop, incl. handlers changed mid-run and `SA_RESTART`), several engines in one loop incl. one started after the host took a signal back, `run()` from a worker thread |
+| `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (asyncio and uvloop, incl. handlers changed mid-run and `SA_RESTART`), several engines in one loop incl. one started after the host took a signal back or under its `SIG_IGN` guard, held runs and `release_signals()`, `run()` from a worker thread |
