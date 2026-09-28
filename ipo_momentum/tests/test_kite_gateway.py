@@ -1101,3 +1101,64 @@ def test_a_stop_handled_after_the_entry_was_scheduled_but_before_it_ran_sends_no
     monkeypatch.setattr(engine.uuid, "uuid4", uuid4)
     assert asyncio.run(gw.execute(kite_plan())) is None
     assert "order.place" not in kite.routes()
+
+
+# ---------------------------------------------------------------- round 14: refused tunnels adopt nothing
+EARLIER_GTT = {"id": 650, "status": "active", "condition": {"tradingsymbol": "SWIGGY", "trigger_values": [286.2, 300.7]},
+               "orders": [{"quantity": 2941}, {"quantity": 2941}]}
+
+
+def test_after_refused_tunnels_alone_an_identical_earlier_gtt_is_neither_adopted_nor_reported():
+    # A refused tunnel carried nothing to Kite, so no GTT of this entry can exist. With the snapshot unreadable, v1.13
+    # took an earlier run's identical GTT for a possible one of its own: GTT STATE UNKNOWN with two attempts unused,
+    # and the new shares were left without exits.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused_tunnel(), {"trigger_id": 999}], gtt_book=[EARLIER_GTT], gtt_book_failures=3)
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == ("999", False) and gw.alerts == []
+    assert kite.gtt_places == 2
+
+
+def test_after_refused_tunnels_alone_a_foreign_gtt_booked_since_the_snapshot_is_not_adopted():
+    # Someone else's identical GTT booked after the snapshot: v1.13 adopted it as this entry's exit.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused_tunnel(), {"trigger_id": 999}])
+    original = kite._request
+
+    def request(route, method, *args, **kwargs):
+        if route == "gtt" and kite.gtt_places and EARLIER_GTT not in kite.created_gtts:
+            kite.created_gtts.append(EARLIER_GTT)
+        return original(route, method, *args, **kwargs)
+
+    kite._request = request
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == ("999", False) and gw.alerts == []
+
+
+def test_a_foreign_match_does_not_cut_short_the_poll_after_a_refused_tunnel():
+    # The poll after a refused tunnel spaces the attempts to ride out a proxy outage; an identical earlier GTT in the
+    # book must not end it at the first read, or three refused tunnels would burn every attempt at once.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused_tunnel(), {"trigger_id": 999}], gtt_book=[EARLIER_GTT], gtt_book_failures=3)
+    gw = fast_gateway(kite, cancel_grace=0.2, poll_interval=0.01)
+    places = []
+    original = kite._request
+
+    def request(route, method, *args, **kwargs):
+        if route == "gtt.place":
+            places.append(engine.time.monotonic())
+        return original(route, method, *args, **kwargs)
+
+    kite._request = request
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id == "999" and places[1] - places[0] >= 0.2
+
+
+def test_a_429_on_place_order_is_looked_up_by_its_tag_and_keeps_the_symbol_blocked():
+    # A rate limit is not a refusal: the entry is looked up like a lost reply (README: "any 4xx other than 429").
+    kite = StubKite([OPEN], place_error=KE.NetworkException("Too many requests", code=429))
+    r = run_router(router(gateway=fast_gateway(kite)), [sig(), sig()])
+    assert r.active_inventory == {"SWIGGY"} and "orders" in kite.routes()
+    assert kite.routes().count("order.place") == 1 and "never appeared in the order book" in r.unresolved[0]

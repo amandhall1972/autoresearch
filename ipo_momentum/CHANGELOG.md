@@ -1,5 +1,98 @@
 # Changelog
 
+## v1.14 (2026-09-28)
+
+v1.13 went through a fourteenth adversarial review on a frozen snapshot
+(`c556e10`), with the same four areas. Every finder and skeptic completed.
+There were 10 findings, with no duplicates, and all were confirmed; none was
+overstated or refuted. 3 are medium and 7 low. Where the fix is not the
+finder's:
+- R14-FEED-1: the finder would still have kept the long spill bar and the short
+  bar after it. v1.14 discards both, as it does a partial bar, so the strict
+  back-fill restores the exchange's two bars before the next bar is evaluated.
+  That also covers a spill bar that is partial (a reconnect mid-bucket), which
+  v1.13 did not record. The bar after a spill bar is recognised by its exact
+  time, which fixes R14-FEED-2 as well.
+- R14-ORDERS-1: the finder cleared a match after the poll returned. A foreign
+  match then ended the poll at its first read, so three refused tunnels used up
+  every attempt at once. Instead, the poll after refused tunnels alone waits out
+  its whole window and never returns a match.
+- R14-DATA-DOCS-1: the proof corrects for the host only when a second lag
+  sample backs the offset, which is narrower than the finder's change. Nothing
+  changes with two samples or more.
+- R14-DATA-DOCS-2: docs only. The samples show no upper bound on how far a host
+  runs behind, so no margin can close this, and treating every bar an unstamped
+  print opens as a spill bar would skip far more bars. The limitation is
+  documented as a fake-signal risk on a host behind the exchange.
+- R14-DATA-DOCS-5: the harness resets SIGHUP and SIGTERM in the children it
+  starts, not in pytest itself, so a `nohup` run of the operator's own is still
+  honoured.
+
+Every v1.14 regression test fails on the v1.13 snapshot and passes here, on
+Python 3.11 and 3.10. `test_the_fast_modules_pass_without_the_kite_extra` fails
+there too, because it runs the fast modules. The exceptions are these controls:
+- `test_a_forward_stamp_alone_in_the_lag_window_does_not_prove_an_unstamped_prints_bucket[True]`:
+  with a second sample the proof was already right.
+- The asyncio cases of
+  `test_a_child_that_lifted_a_guard_after_the_host_moved_to_a_loop_callback_gets_the_default_after_its_engine`
+  (v1.13's pin), now also run through `run()`.
+- The pins for v1.13 rules that no test covered:
+  - `test_an_open_bar_after_a_hole_joined_by_a_print_that_may_be_the_next_buckets_is_not_evaluated`
+    (the spill rule on the back-fill path, with a control);
+  - `test_a_429_on_place_order_is_looked_up_by_its_tag_and_keeps_the_symbol_blocked`
+    (the behaviour the README misstated).
+
+  Each fails on the mutation that removes its rule.
+- The harness change. Under `nohup`, the v1.13 harness fails
+  `test_kill_and_hangup_settle_the_entry_in_flight_like_ctrl_c[SIGHUP]` and
+  `test_release_signals_from_another_thread_refuses_before_changing_anything`,
+  and the v1.14 harness passes them.
+
+Every v1.14 rule was also mutated on a copy, and each mutant failed its pins:
+- the spill discard removed (6 tests);
+- the bar after a spill bar kept (3);
+- that bar matched by position rather than by time (1);
+- a partial spill bar not recorded (1);
+- the lone-sample proof guard removed (1);
+- the poll after refused tunnels adopting again (3);
+- the uvloop dispatcher mapping in the child removed (2).
+
+Existing tests changed:
+- `test_a_child_that_lifted_a_guard_after_the_host_moved_to_a_loop_callback_gets_the_default_after_its_engine`
+  runs on asyncio and uvloop, through `main()` and `run()`.
+- `Child`, `HOST` and `SCRIPT` start their interpreters with SIGHUP and SIGTERM
+  at their defaults, as a normal launch gives them.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.13 defect | v1.14 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | A refused tunnel carried nothing to Kite, yet the book poll after it could still adopt a matching GTT. Suppose the pre-arming snapshot was unreadable and an identical earlier GTT was in the book. The loop then raised GTT STATE UNKNOWN and stopped with two attempts unused, leaving the new shares without exits. With a readable snapshot, someone else's identical GTT booked since could be adopted silently as this entry's exit. It predates v1.13. | After refused tunnels alone, the poll waits out its window (so it still rides out the outage) but never returns a match. | `test_after_refused_tunnels_alone_an_identical_earlier_gtt_is_neither_adopted_nor_reported`, `test_after_refused_tunnels_alone_a_foreign_gtt_booked_since_the_snapshot_is_not_adopted`, `test_a_foreign_match_does_not_cut_short_the_poll_after_a_refused_tunnel` |
+| low | ✔ | The README said any 4xx on `place_order` releases the symbol at once. A 429 (rate limit) is instead looked up by its tag, which keeps the symbol blocked if the order never shows. That is the safe behaviour, but it was undocumented. | Docs: "any 4xx other than 429". | `test_a_429_on_place_order_is_looked_up_by_its_tag_and_keeps_the_symbol_blocked` |
+
+### Live feed
+
+| Sev | Verdict | v1.13 defect | v1.14 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | R13-FEED-2's fix skipped evaluating a spill bar and the bar after it, but kept both in history. The spill bar held the print's shares, and the next bar was short by exactly those shares. The short bar lowered later RVOL baselines, in trailing mode at bar N+21 and in time-of-day mode in later sessions, so a breakout the exchange's bars never show still fired. A spill bar that was also partial (a reconnect) was not recorded at all, and the short bar after it was even evaluated. This predates v1.13. | Both bars are discarded (logged), a partial spill bar included, and the strict back-fill restores the exchange's two bars before the next bar is evaluated. | `test_a_spill_bar_and_the_next_are_replaced_by_the_brokers_so_no_short_bar_stays_in_history` (with and without a reconnect) |
+| low | ✔ | The next-bar skip compared only the bar before it in history. When the back-fill of an empty bucket after a spill bar returned nothing, a genuine bar two or more buckets later was skipped, with a log blaming the spill bar's close. This included the next session's opening bar. It is a v1.13 regression. | The bar after a spill bar is matched by its exact time. | `test_a_bar_after_an_empty_bucket_that_follows_a_spill_bar_is_evaluated` |
+
+### Lifecycle
+
+| Sev | Verdict | v1.13 defect | v1.14 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | Take a uvloop host that registered a loop callback mid-run. The handler a `SIG_IGN` guard saved around the fork is that callback's own dispatcher of the parent's loop, not the engines'. A child that lifted the guard with it got that dead dispatcher back from its own engine (`main()` or `run()`) and ignored every later stop. v1.13's inherited-map fix covered asyncio only. | The child's inherited map also records the parent's loop. A handler bound to that loop, other than the engines' dispatcher, stands for the default. | `test_a_child_that_lifted_a_guard_after_the_host_moved_to_a_loop_callback_gets_the_default_after_its_engine[*-uvloop]` |
+
+### Tests and docs
+
+| Sev | Verdict | v1.13 defect | v1.14 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | The README said the proof's guard means "a stamp up to 30 s ahead cannot prove a bucket". It did prove one when the forward-stamped update was the window's only lag sample, which is common on an illiquid name. The engine read that sample as the host's offset, and the stamp then proved an unstamped print's bucket, so the print's shares were counted twice in an evaluated bar. | The proof corrects for the host only when a second lag sample backs the offset; the README says "ahead of the print's receipt". | `test_a_forward_stamp_alone_in_the_lag_window_does_not_prove_an_unstamped_prints_bucket` (and a control with a second sample) |
+| medium | ✔ | The v1.13 limitation said an unstamped print near a boundary "costs signals, never fakes one". On a host running behind the exchange, a print faster than every lag sample of the minute, by more than their truncation, is still filed a bucket early. With no bar open, its bar is evaluated. | Docs: a new Known limitations entry for this residual (keep the host's clock synced), with a pointer from the live-bar section. | (docs) |
+| low | ✔ | The v1.13 spill skip on the back-fill path had no pin: removing it passed all 454 tests. | Pinned (the v1.14 discard now covers that path). | `test_an_open_bar_after_a_hole_joined_by_a_print_that_may_be_the_next_buckets_is_not_evaluated` |
+| low | ✔ | The rewritten boundary limitation misstated its window. With no bar open, a late packet does not widen it. The open-bar spill window runs to the bar clock's close, which is wider by the 2 s grace. On a host running ahead, the documented formula gives a time before receipt. | Docs: the entry and the live-bar section state the actual bounds. | (docs) |
+| low | ✔ | The suite was not independent of how it is launched. Under `nohup pytest`, two SIGHUP tests failed, because the harness restored only SIGINT. | The harness starts every engine interpreter with SIGHUP and SIGTERM at their defaults. | the two SIGHUP tests, under `nohup` |
+
 ## v1.13 (2026-09-27)
 
 v1.12 went through a thirteenth adversarial review on a frozen snapshot

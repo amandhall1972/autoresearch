@@ -25,6 +25,14 @@ def cli(*args, timeout=60):
     return subprocess.run([sys.executable, engine.__file__, *args], capture_output=True, text=True, timeout=timeout)
 
 
+# A child gets the stop signals at their defaults, as a normal launch would give it, however pytest itself was started
+# (under nohup every child would inherit SIGHUP ignored, which the engine keeps ignored). A test that wants a signal
+# ignored sets it after this.
+DEFAULT_STOPS = """import signal
+for _stop in filter(None, (getattr(signal, "SIGHUP", None), signal.SIGTERM)):
+    signal.signal(_stop, signal.SIG_DFL)"""
+
+
 def test_offline_run_on_real_bars_trades_the_simulated_breakout():
     proc = cli("--source", "csv", "--csv", str(FIXTURE), "--run-seconds", "4.5")
     log = proc.stderr
@@ -215,8 +223,8 @@ class Child:
     running = []                                                         # killed after each test (never orphaned)
 
     def __init__(self, prelude, *args):
-        code = "\n".join(["import sys", f"sys.path.insert(0, {str(Path(engine.__file__).parent)!r})", "import engine",
-                          textwrap.dedent(prelude), f"sys.exit(engine.run({list(args)!r}))"])
+        code = "\n".join([DEFAULT_STOPS, "import sys", f"sys.path.insert(0, {str(Path(engine.__file__).parent)!r})",
+                          "import engine", textwrap.dedent(prelude), f"sys.exit(engine.run({list(args)!r}))"])
         self.proc = subprocess.Popen([sys.executable, "-c", code], stderr=subprocess.PIPE, text=True)
         Child.running.append(self.proc)
         self.lines, self.log = queue.Queue(), []
@@ -496,7 +504,7 @@ def test_when_the_vendor_cuts_the_listing_the_message_does_not_blame_the_lookbac
 
 
 # ---------------------------------------------------------------- round 6: signals shared by engines and hosts
-HOST = """
+HOST = DEFAULT_STOPS + """
 import asyncio, os, signal, sys
 sys.path.insert(0, {engine_dir!r})
 import engine
@@ -1027,7 +1035,7 @@ def test_on_uvloop_a_re_take_keeps_the_warning_that_the_hosts_callback_was_lost(
 
 
 # ---------------------------------------------------------------- round 10: hosts that drive their own loop, fork, or thread
-SCRIPT = """
+SCRIPT = DEFAULT_STOPS + """
 import asyncio, gc, os, signal, sys
 sys.path.insert(0, {engine_dir!r})
 import engine
@@ -1775,10 +1783,16 @@ def test_a_forked_helper_does_not_get_back_a_plain_handler_the_host_replaced_wit
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
-def test_a_child_that_lifted_a_guard_after_the_host_moved_to_a_loop_callback_gets_the_default_after_its_engine():
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("via", ["main", "run"])
+def test_a_child_that_lifted_a_guard_after_the_host_moved_to_a_loop_callback_gets_the_default_after_its_engine(
+        loop_kind, via):
     # The same asyncio case through the child's inherited map: its engine hands back what the host had, and that is the
-    # default (the loop callback cannot run here), not the plain handler the host had replaced.
-    code, out, err = run_host("""
+    # default (the loop callback cannot run here), not the plain handler the host had replaced. On uvloop the saved
+    # handler is the host callback's own dispatcher of the parent's loop, not the engines': v1.13 handed that back.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host(f"""
         import time
         flags = []
         signal.signal(signal.SIGTERM, lambda signum, frame: flags.append(signum))   # the host's own, before the run
@@ -1789,8 +1803,11 @@ def test_a_child_that_lifted_a_guard_after_the_host_moved_to_a_loop_callback_get
         r, w = os.pipe()
         pid = os.fork()
         if pid == 0:
-            signal.signal(signal.SIGTERM, old)                         # the saved handler: the shared dispatcher
-            asyncio.run(engine.main(ARGS + ["0.3"]))
+            signal.signal(signal.SIGTERM, old)                         # the saved handler (on asyncio, the shared one)
+            if {via!r} == "run":
+                engine.run(ARGS + ["0.3"])
+            else:
+                asyncio.run(engine.main(ARGS + ["0.3"]))
             os.write(w, b"x")
             time.sleep(5)
             os._exit(7)
@@ -1798,7 +1815,7 @@ def test_a_child_that_lifted_a_guard_after_the_host_moved_to_a_loop_callback_get
         await loop.run_in_executor(None, os.read, r, 1)
         os.kill(pid, signal.SIGTERM)
         _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
-        print("helper", os.waitstatus_to_exitcode(status), "a", await a, flush=True)
-    """)
+        print("helper", os.waitstatus_to_exitcode(status), "host", got, "a", await a, flush=True)
+    """, uvloop=(loop_kind == "uvloop"))
     assert code == 0, out + err
-    assert "helper -15 a 0" in out, out + err
+    assert "helper -15 host [] a 0" in out, out + err
