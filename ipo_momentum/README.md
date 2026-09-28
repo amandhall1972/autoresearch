@@ -6,7 +6,8 @@ closes above its post-IPO base on heavy volume, and routes risk-sized orders to 
 paper broker or to Zerodha Kite.
 
 ```
-python engine.py --source csv      # fully offline, on real SWIGGY bars: history -> ticks -> signal -> order
+python engine.py --source csv          # fully offline, on real SWIGGY bars: history -> ticks -> signal -> order
+python screener.py --source csv SWIGGY # where each listing stands against the breakout rule: no orders, no feed
 ```
 
 > **Paper execution is the default.** Real orders need
@@ -21,15 +22,16 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 1. [Quick start](#quick-start)
 2. [What happened when the original file was run](#what-happened-when-the-original-file-was-run)
 3. [Run modes and safety rules](#run-modes-and-safety-rules)
-4. [Architecture](#architecture)
-5. [Strategy specification](#strategy-specification)
-6. [Live bar synthesis](#live-bar-synthesis)
-7. [Execution and risk](#execution-and-risk)
-8. [CLI reference](#cli-reference)
-9. [Validation on real data](#validation-on-real-data)
-10. [How it was reviewed](#how-it-was-reviewed)
-11. [Known limitations](#known-limitations)
-12. [Tests](#tests)
+4. [Screening several IPOs](#screening-several-ipos)
+5. [Architecture](#architecture)
+6. [Strategy specification](#strategy-specification)
+7. [Live bar synthesis](#live-bar-synthesis)
+8. [Execution and risk](#execution-and-risk)
+9. [CLI reference](#cli-reference)
+10. [Validation on real data](#validation-on-real-data)
+11. [How it was reviewed](#how-it-was-reviewed)
+12. [Known limitations](#known-limitations)
+13. [Tests](#tests)
 
 ---
 
@@ -39,7 +41,8 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 cd ipo_momentum
 uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest, uvloop (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 563 tests, ~5 min, fully offline
+uv run python screener.py --source csv SWIGGY   # the screener, on the same data
+uv run pytest                       # 601 tests, ~5 min, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
@@ -59,6 +62,7 @@ the two container PID 1 tests; the rest pass), then
 | Zerodha history + simulated tape | `python engine.py --source kite --listing-date YYYY-MM-DD` |
 | Zerodha live ticks, paper orders | `python engine.py --source kite --listing-date YYYY-MM-DD --live-feed --run-seconds 0` |
 | Zerodha live ticks, **real orders** | `python engine.py --source kite --listing-date YYYY-MM-DD --live-feed --live-orders --expect-ip <static IP> --run-seconds 0` |
+| Screen several listings, no orders | `python screener.py SYMBOL=YYYY-MM-DD ...` or `--universe ipos.csv`, any source (see [Screening several IPOs](#screening-several-ipos)) |
 
 Kite modes need `KITE_API_KEY` and `KITE_ACCESS_TOKEN` in the environment.
 Real orders also need a funded account.
@@ -160,6 +164,89 @@ Without `--listing-date` (Yahoo and CSV demos only), the first bar of the last
 20 days is treated as the listing, as in v1.0's demo, and the run says so. SWIGGY
 actually listed on 2024-11-13. With that date and the bundled data, the engine
 refuses to trade.
+
+---
+
+## Screening several IPOs
+
+`screener.py` answers "which of these listings is near, at or past its
+breakout?" for a list of symbols, with the engine's own adapters, anchoring
+rules and `AlphaEngine`. It reads each symbol's history, judges its **last
+closed bar** and prints one ranked row per symbol. It sends no orders and opens
+no live feed; run `engine.py` on a symbol to trade it.
+
+```bash
+python screener.py --source csv SWIGGY                          # bundled real bars, offline
+python screener.py SWIGGY=2024-11-13 ATHERENERG=2025-05-06      # Yahoo history (5m bars reach back ~60 days)
+python screener.py --universe ipos.csv --source kite            # Zerodha history, any age (KITE_API_KEY, KITE_ACCESS_TOKEN)
+python screener.py --universe ipos.csv --json screen.json --csv-out screen.csv
+```
+
+The universe file lists one symbol per line as `SYMBOL`, `SYMBOL=YYYY-MM-DD`
+or `SYMBOL,YYYY-MM-DD`; a `symbol,listing_date` header, further columns, blank
+lines and `#` comments are skipped. Give every symbol its listing date: the
+IPO base and AVWAP are anchored there, and a history that does not reach the
+listing is reported as `NO_DATA` with the reason (Yahoo serves about 60 days
+of 5-minute bars; Kite reaches back further). `--allow-partial-history`
+anchors such a symbol at its first bar instead, as for the engine. Without a
+date, the first bar fetched is treated as the listing (demo semantics) and the
+log says so.
+
+On the bundled data:
+
+```
+Symbol  Status  Last bar           Close  Base high   Gap%   AVWAP  RVOL  Sessions  Signals  Last signal       Note
+------  ------  ----------------  ------  ---------  -----  ------  ----  --------  -------  ----------------  ----------------------------------------------------------
+SWIGGY  FAILED  2026-09-25 15:15  264.85     285.55  -7.25  277.04  0.00        13        1  2026-09-23 09:15  breakout 2026-09-23 09:15, close back at or below the base
+```
+
+| Status | Meaning |
+| --- | --- |
+| `BREAKOUT` | The rule fired on the last closed bar: a close above the base high after a close at or below it, above the AVWAP, on more than `--rvol-threshold` times the baseline volume. The row carries the engine's stop and target for that bar. |
+| `HOLDING` | It fired within the last `--recent-sessions` sessions (default 3) and the close is still above the base high. |
+| `SETUP` | No signal in that window; the close is within `--near-pct` (default 3%) below the base high, or at it, and above the AVWAP. |
+| `ABOVE` | The close is above the base high but nothing fired in the window: it crossed on thin volume, or before the window. |
+| `FAILED` | It fired within the window and the close is back at or below the base high. |
+| `BELOW` | The base is complete and none of the above holds; the note says how far below, and whether at or under the AVWAP. |
+| `BASE` | The IPO base (the first 150 bars, or `--base-sessions` sessions) or the 20-bar volume baseline after it is not complete. |
+| `NO_DATA` | The history could not be read or does not reach the listing; the note is the log's first error for the symbol. |
+
+Rows are ranked in that order and, within a status, by the close nearest to
+(or furthest above) the base high. `Gap%` is the close against the base high;
+`Signals` counts every bar since the listing on which the rule fired (a later
+re-cross counts again); `RVOL` and `AVWAP` are the last bar's. Every figure is
+the `AlphaEngine`'s own, on bars up to and including the last closed one, so a
+`BREAKOUT` is what the engine would have traded on that bar. `--json` and
+`--csv-out` write the same rows with ISO times, plus the parameters and the
+as-of time.
+
+Time is kept as the engine keeps it: Yahoo history is read up to now, Kite
+history up to a bar before now (Kite serves the running candle), and CSV files
+up to a bar after the newest bar in any of them, so a screen of the bundled
+data reads the same on any date. A stale file or feed shows in `Last bar`.
+
+Exit codes: `0` when at least one symbol was read (whatever its status), `1`
+when none was or a report could not be written, `2` for a bad configuration
+(no symbols, a date not `YYYY-MM-DD`, a symbol listed twice, a missing universe
+file or CSV directory, missing Kite credentials), `130` on Ctrl-C.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `SYMBOL[=YYYY-MM-DD] ...` | | Symbols on the command line, each with its listing date |
+| `--universe PATH` | | A file of symbols (format above), merged with the command line; a symbol in both is an error |
+| `--source {yahoo,csv,kite}` | `yahoo` | Historical data source, as for the engine |
+| `--csv-dir DIR` | bundled `data/` | For `--source csv`: `SYMBOL_*.csv` or `SYMBOL.csv` per symbol (the newest by name when there are several) |
+| `--base-sessions N` | off (first 150 bars) | Define the IPO base as the first N sessions |
+| `--max-lookback-days N` | `180` | Fetch history from at most N days back |
+| `--allow-partial-history` | off | Screen symbols whose history does not reach the listing |
+| `--rvol-threshold` / `--rvol-mode` | `2.0` / `trailing` | Volume filter, as for the engine |
+| `--risk-reward` | `3.0` | A `BREAKOUT` row's target distance, in multiples of its risk |
+| `--recent-sessions N` | `3` | The window, in sessions, for `HOLDING` and `FAILED` |
+| `--near-pct X` | `3.0` | A close within X% below the base high is a `SETUP` |
+| `--json PATH` / `--csv-out PATH` | | Also write the rows as JSON / CSV |
+
+The screener never constructs a gateway, a router or a live feed, and a test
+pins that its source names none of them.
 
 ---
 
@@ -708,7 +795,9 @@ closed at 278.50:
 | current logic | 284.95 (1.5 ATR, the *closer* stop) | 291.70 | 3,471 sh (notional-capped) | stopped on the next bar, ≈ −₹5,900 at the signal price (≤ −₹10,934 at the limit) |
 
 This is one trade. It verifies the pipeline end to end on real prints. It is
-not evidence of an edge in either direction.
+not evidence of an edge in either direction. `python screener.py --source csv
+SWIGGY` reads the same bars as `FAILED`: that one signal, and a close 7.25%
+below the base by the last bar (a test pins the row).
 
 ---
 
@@ -1115,7 +1204,7 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 563 tests run offline in about 5 minutes, whichever way they are launched (a shell background job or `nohup` included: pytest gives SIGINT back its default, and the `Child`, `HOST` and `SCRIPT` harnesses start their interpreters with SIGHUP and SIGTERM at their defaults). The slowest are real CLI runs that
+The 601 tests run offline in about 5 minutes, whichever way they are launched (a shell background job or `nohup` included: pytest gives SIGINT back its default, and the `Child`, `HOST` and `SCRIPT` harnesses start their interpreters with SIGHUP and SIGTERM at their defaults). The slowest are real CLI runs that
 deliver SIGINT, SIGTERM and SIGHUP mid-entry and during exit, and a shutdown
 that must outlast v1.1's 10 s drain. They pass in seven configurations (on
 Python 3.10, six of them are skipped as above):
@@ -1137,3 +1226,4 @@ Pandas `FutureWarning`s raised from engine code fail the suite.
 | `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies, refused tunnels, unanswered CONNECTs and stalled TLS handshakes, repeated outages, GTTs booked during an outage), broker refusals classified by HTTP status, transient errors, cancels that don't land (and why, when named), partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books (incl. an expired session), unknown and fired GTT states reported as such, refused tunnels that leave no GTT (incl. a proxy outage that also hides the book, or restarts in between), are reported as soon as the last is refused and start no duplicate watch, an expired session named after refused tunnels, an identical earlier or foreign GTT never adopted after refused tunnels alone, nor after a later ambiguous attempt once a book read after the tunnel showed it, a 429 on the entry looked up by its tag, a stop handled before an already scheduled entry ran. Skipped without `kiteconnect`. |
 | `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter (incl. wake-up order under clock jitter), the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads and bad timestamps, the session's last 30m/60m bar and special sessions, retry policy, strict back-fill, midnight lookback clamps, listing dates in any zone, orchestrator anchoring and error containment, collecting and running the suite without the Kite extra |
 | `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (asyncio and uvloop, incl. handlers changed mid-run and `SA_RESTART`), several engines in one loop incl. one started after the host took a signal back or under its `SIG_IGN` guard, held runs and `release_signals()` (incl. between runs, from another thread, and a loop closed unreleased on asyncio, uvloop or without loop signals, then `main()`, `run()` or an engine in a thread), forked workers and helpers before, during and after their own engine (incl. Ctrl-C, a host's plain handler or mid-run loop callback, a guard lifted with the saved handler, and a worker forked before any engine hooked), `run()` from a worker thread (and its warning that no stop signal reaches it), a stop while an engine starts (alone, beside running engines, and as a container's PID 1, incl. one before `main()` and one while `python engine.py` loads its imports), an engine that started inside a host's `SIG_IGN` guard or while the host set its own handler takes the signal as its run begins, the Kite start-up history stopping a bar before the host clock |
+| `test_screener.py` | The screener: every status and its boundaries (the near-pct edge, a close at the base high, a re-cross after a dip, a window counted in sessions, no volume baseline), the ranking, the universe file, the CSV directory and as-of rules, the root cause kept for an unread symbol, the table, JSON and CSV reports, the CLI's exit codes, the bundled data's reading, the Yahoo history limit, Ctrl-C, that no reading looks past its bar, and that the source names no order or feed code |

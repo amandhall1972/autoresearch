@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.19 (2026-09-28)
+
+A screener, `screener.py`, on top of the engine, added after the review loop
+was stopped at v1.18 (round 19 was cancelled). No engine logic changed in this
+release, only the banner's version. The screener reads several listings'
+history through the engine's adapters and `ProductionOrchestrator` (the same
+anchoring rules: a history that does not reach the listing is `NO_DATA` unless
+`--allow-partial-history`), judges each symbol's last closed bar with the same
+`AlphaEngine`, and prints one ranked row per symbol: `BREAKOUT`, `HOLDING`,
+`SETUP`, `ABOVE`, `FAILED`, `BELOW`, `BASE` or `NO_DATA`, with the last bar's
+close, the base high, the gap to it, AVWAP, RVOL, the sessions and signals since
+the listing and, for a `BREAKOUT`, the engine's stop and target. Symbols come
+from the command line (`SYMBOL=YYYY-MM-DD`) or a universe file; `--json` and
+`--csv-out` write the rows. It sends no orders and opens no feed. See the
+README, "Screening several IPOs".
+
+Tests: 601 (was 563). `tests/test_screener.py` covers every status and its
+boundaries (the near-pct edge, a close at the base high, a re-cross after a
+dip, a window counted in sessions, no volume baseline), the ranking, the
+universe file, the CSV directory and as-of rules, the root cause kept for an
+unread symbol, the table, JSON and CSV reports, the CLI's exit codes, the
+bundled data's reading (the failed 2026-09-23 09:15 breakout of the README's
+Validation section), the Yahoo history limit, Ctrl-C, that no reading looks
+past its bar, and that the screener's source names no order or feed code. The
+suite passes on the same seven configurations as v1.18.
+
 ## v1.18 (2026-09-28)
 
 v1.17 went through an eighteenth adversarial review on a frozen snapshot
