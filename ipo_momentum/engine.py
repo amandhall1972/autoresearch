@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.14)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.15)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -832,6 +832,8 @@ class LiveTickAdapter:
         # A bucket in which the volume counter was re-baselined lost its head to the baseline.
         self._blind_bucket: Dict[str, Tuple[datetime, datetime]] = {}   # first and last bucket, inclusive
         self._spill_next: Dict[str, datetime] = {}   # the bar after one that may hold a print of its bucket
+        self._held: Dict[str, List[Tuple[datetime, pd.Series]]] = {}   # discarded spill-pair bars, for the paper OCO
+        self._discarded_from: Dict[str, datetime] = {}   # the first bar discarded since the last one kept
 
     def _normalize(self, t: dict) -> Optional[Tick]:
         if 'instrument_token' in t:
@@ -901,16 +903,6 @@ class LiveTickAdapter:
         0. Latency is not part of it: a late signal really is older."""
         samples = sorted(sample for _, sample in self._lag_samples)
         return min(0.0, samples[len(samples) // 2]) if samples else 0.0
-
-    def _receipt_skew(self) -> float:
-        """How far the host runs behind, for a print's latest possible time (<= 0). clock_skew's median includes the
-        latency, which hides an offset smaller than it; the lowest sample (latency + truncation - offset) comes
-        closer. One forward-stamped packet cannot drag it: it is never more than 1 s (a stamp's truncation) below
-        the upper median."""
-        samples = sorted(sample for _, sample in self._lag_samples)
-        if not samples:
-            return 0.0
-        return min(0.0, max(samples[0], samples[len(samples) // 2] - 1.0))
 
     def note_feed_lag(self, at: datetime, lag: float, window: timedelta = timedelta(seconds=60),
                       grace: timedelta = timedelta(seconds=2)) -> None:
@@ -1059,15 +1051,15 @@ class LiveTickAdapter:
         if tick.unstamped and tick.arrived is not None:
             # Prints queued ahead of this one may have raised the lag since the broker thread read it.
             tick.timestamp = tick.arrived - timedelta(seconds=self.feed_lag)
-            # Feed time errs early (the lag includes the stamps' truncation); the latest it can have traded is
-            # its receive time on the exchange's clock, as near as the lag samples tell it, and at least a
-            # stamp's truncation past its feed time (a host behind the exchange leaves only one bound).
-            # A lone lag sample cannot tell a host behind the exchange from a forward-stamped packet, which would then
-            # prove its own bucket: the proof corrects for the host only when another sample backs the offset.
-            proof_by = max(tick.arrived - timedelta(seconds=self._receipt_skew()), tick.timestamp + timedelta(seconds=1)) \
-                if len(self._lag_samples) >= 2 else tick.arrived
+            # A stamp proves the print's bucket only if it is no later than the print's receipt. No number of lag
+            # samples tells a host behind the exchange from forward-stamped packets, which would then prove their own
+            # bucket: on a host behind, this leaves more bars unproven (a missed signal, never a fake one).
+            proof_by = tick.arrived
+            # Feed time errs early (the lag includes the stamps' truncation). Each sample is latency + truncation
+            # minus the host's offset, so the latest it can have traded is a second minus the lowest sample past its
+            # receipt, and never before its receipt.
             lowest = min((sample for _, sample in self._lag_samples), default=0.0)
-            latest = max(proof_by, tick.arrived + timedelta(seconds=max(0.0, 1.0 - lowest)))
+            latest = tick.arrived + timedelta(seconds=max(0.0, 1.0 - lowest))
         feed_time = tick.timestamp
         spill = False
         if tick.unstamped and (open_bar := self.current_bars.get(sym)) is not None:
@@ -1143,7 +1135,7 @@ class LiveTickAdapter:
         # An unstamped print that opens a bar may be the bucket before's (latency rose, by any amount): its bar is
         # ambiguous, and is not evaluated if the back-filled bucket before it traded. With no bar open and within
         # the grace, it is also provisional: a stamped print of the bucket before moves the bar there. A stamp of
-        # this bucket received before it (and no later than it could have traded) proves the bucket: in-order
+        # this bucket received before it (and stamped no later than its receipt) proves the bucket: in-order
         # delivery puts the print after it.
         last = self._last_update.get(sym)
         proven = last is not None and last[0] == self._feed_epoch \
@@ -1167,23 +1159,35 @@ class LiveTickAdapter:
             active['Close'] = tick.price
             active['Volume'] += volume
 
-    def _hole_before(self, prev_idx: datetime, idx: datetime) -> Optional[datetime]:
+    def _hole_before(self, prev_idx: datetime, idx: datetime, discarded: Optional[datetime] = None) -> Optional[datetime]:
         """Start of the bars missing between history's last bar and ``idx``: the rest of prev_idx's session
-        (a late join, a reconnect or a stall near the close can cost it its last bars), then idx's session
-        up to idx."""
+        (a late join, a reconnect or a stall near the close can cost it its last bars), then every session
+        after it up to idx (a weekday whose bars were all discarded is a hole too; a holiday costs one fetch).
+        ``discarded``, the first bar since history's last that the feed saw but did not keep, marks its own session
+        too, which the weekday rule skips on a weekend (a special session)."""
         width = timedelta(minutes=self.bar_minutes)
         if prev_idx >= idx - width:
             return None
         if prev_idx + width < datetime.combine(prev_idx.date(), SESSION_CLOSE, tzinfo=IST):
             return prev_idx + width
-        session_open = datetime.combine(idx.date(), SESSION_OPEN, tzinfo=IST)
-        if idx <= session_open:
-            return None
-        return max(prev_idx + width, session_open)
+        session_open = min(next_session_open(prev_idx), datetime.combine(idx.date(), SESSION_OPEN, tzinfo=IST))
+        if discarded is not None and prev_idx < discarded < session_open:
+            session_open = datetime.combine(discarded.date(), SESSION_OPEN, tzinfo=IST)
+        return session_open if idx > session_open else None
 
     @staticmethod
     def _span(start: datetime, end: datetime) -> str:
         return f"{start:%H:%M}-{end:%H:%M}" if start.date() == end.date() else f"{start:%Y-%m-%d %H:%M}-{end:%Y-%m-%d %H:%M}"
+
+    def _release_held(self, sym: str, start: datetime, end: datetime, play: bool) -> None:
+        """Take the discarded spill-pair bars in [start, end) off the hold, and play them to the bar listeners if the
+        broker's bars will not."""
+        held = self._held.pop(sym, [])
+        if rest := [(ts, bar) for ts, bar in held if not start <= ts < end]:
+            self._held[sym] = rest
+        for ts, bar in held:
+            if play and start <= ts < end:
+                self._notify(sym, ts, bar)
 
     def _notify(self, sym: str, ts: datetime, bar: pd.Series) -> None:
         for listener in self.bar_listeners:
@@ -1213,13 +1217,18 @@ class LiveTickAdapter:
         after_spill = self._spill_next.pop(sym, None) == idx
         if bar.get('spill'):
             self._spill_next[sym] = idx + timedelta(minutes=self.bar_minutes)
+        if bar['partial'] or bar.get('spill') or after_spill:
+            self._discarded_from.setdefault(sym, idx)      # the next kept bar's hole covers it, in any session
         if bar['partial']:
             logger.info(f"[{sym}] Discarding the {idx:%H:%M} bar: it began before the feed was watching.")
             return
         if bar.get('spill') or after_spill:
             why = "it holds a print with no exchange time that may belong to the next bar" if bar.get('spill') \
                 else "the bar before it may hold one of its prints"
-            logger.warning(f"[{sym}] Discarding the {idx:%H:%M} bar: {why}; the broker's bar replaces it.")
+            logger.warning(f"[{sym}] Discarding the {idx:%H:%M} bar: {why}; the back-fill replaces it before the next "
+                           f"bar is evaluated.")
+            # Its prints are real: bar listeners (the paper OCO) get it if the broker's bars do not replace it.
+            self._held.setdefault(sym, []).append((idx, pd.Series({c: float(bar[c]) for c in OHLCV})))
             return
 
         history = self.market_state.get(sym)
@@ -1230,7 +1239,7 @@ class LiveTickAdapter:
             return
         row = pd.DataFrame([[float(bar[c]) for c in OHLCV]], columns=OHLCV,
                            index=pd.DatetimeIndex([idx], name=history.index.name))
-        hole_start = self._hole_before(history.index[-1], idx) if len(history) else None
+        hole_start = self._hole_before(history.index[-1], idx, self._discarded_from.pop(sym, None)) if len(history) else None
         self.market_state[sym] = history = pd.concat([history, row]) if len(history) else row
         logger.info(f"📊 [{sym}] 5m Bar Closed {idx:%Y-%m-%d %H:%M} | O: {bar['Open']:.2f} H: {bar['High']:.2f} "
                     f"L: {bar['Low']:.2f} C: {bar['Close']:.2f} | V: {bar['Volume']:,}")
@@ -1239,6 +1248,7 @@ class LiveTickAdapter:
             # Evaluating across a hole could report a stale "first crossing" one bar late at a worse price.
             if self.backfill is None:
                 logger.warning(f"[{sym}] Bars {self._span(hole_start, idx)} are missing; the {idx:%H:%M} bar is not evaluated.")
+                self._release_held(sym, hole_start, idx, play=True)
                 self._notify(sym, idx, row.iloc[0])
                 return
             task = asyncio.get_running_loop().create_task(self._backfill_then_evaluate(sym, hole_start, idx, row.iloc[0],
@@ -1256,8 +1266,10 @@ class LiveTickAdapter:
             fetched = fetched[(fetched.index >= pd.Timestamp(start)) & (fetched.index < pd.Timestamp(idx))]
         except Exception as e:
             logger.warning(f"[{sym}] Back-fill of {self._span(start, idx)} failed ({e!r}); the {idx:%H:%M} bar is not evaluated.")
+            self._release_held(sym, start, idx, play=True)
             self._notify(sym, idx, live_bar)
             return
+        self._release_held(sym, start, idx, play=False)          # the broker's bars replace them
         history = self.market_state[sym]
         if len(fetched):
             history = pd.concat([history, fetched])
@@ -1391,7 +1403,8 @@ class KiteOrderGateway(OrderGateway):
       the GTT), and a matching GTT created since arming began is adopted, even one that has
       already triggered, instead of creating a second one that would sell twice. After any
       ambiguous attempt the book is watched once more for a late duplicate, which raises an
-      alert. GTTs already in the book beforehand (an earlier run's) are never adopted.
+      alert. GTTs already in the book beforehand (an earlier run's), or read in it after refused
+      tunnels alone, are never adopted.
     """
     TERMINAL = ("COMPLETE", "REJECTED", "CANCELLED")
 
@@ -1532,30 +1545,32 @@ class KiteOrderGateway(OrderGateway):
                 found.append((str(g['id']), g.get('status')))
         return found
 
-    async def _await_gtt(self, sym: str, plan: OrderPlan, quantity: int, exclude: set,
-                         adopt: bool = True) -> Tuple[Optional[Tuple[str, str]], Optional[Exception]]:
+    async def _await_gtt(self, sym: str, plan: OrderPlan, quantity: int, exclude: set, adopt: bool = True
+                         ) -> Tuple[Optional[Tuple[str, str]], Optional[Exception], Optional[set]]:
         """Poll the GTT book for ``cancel_grace`` seconds for a GTT that a request with a lost reply
-        may still create. (first match or None, the error of the latest read or None if it succeeded).
+        may still create. (first match or None, the error of the latest read or None if it succeeded,
+        the ids of the latest successful read or None if none succeeded).
 
         A booked GTT stays in the book (active or triggered), so one successful read at or after the
         deadline covers the whole window; if the latest read failed, polling continues for up to one
         more window until a read succeeds. A read that fails for good (an expired session) ends it at once.
         With ``adopt`` False (no request reached Kite, so no match can be ours), it only waits out the window."""
-        deadline, read_error = time.monotonic() + self.cancel_grace, None
+        deadline, read_error, ids = time.monotonic() + self.cancel_grace, None, None
         while True:
             try:
-                found = self._matching_gtts(await asyncio.to_thread(self.kite.get_gtts), sym, plan, quantity, exclude)
-                read_error = None
+                gtts = await asyncio.to_thread(self.kite.get_gtts)
+                found = self._matching_gtts(gtts, sym, plan, quantity, exclude)
+                ids, read_error = {str(g.get('id')) for g in gtts or []}, None
                 if found and adopt:
-                    return found[0], None
+                    return found[0], None, ids
             except Exception as e:
                 read_error = e
                 logger.warning(f"[{sym}] GTT book read failed: {e!r}; retrying.")
                 if is_permanent_error(e):                    # no later read can succeed
-                    return None, e
+                    return None, e, ids
             now = time.monotonic()
             if now >= deadline and (read_error is None or now >= deadline + self.cancel_grace):
-                return None, read_error
+                return None, read_error, ids
             await asyncio.sleep(self.poll_interval)
 
     async def _watch_duplicates(self, sym: str, plan: OrderPlan, quantity: int, order_id: str,
@@ -1612,7 +1627,8 @@ class KiteOrderGateway(OrderGateway):
             {"transaction_type": k.TRANSACTION_TYPE_SELL, "quantity": filled, "order_type": k.ORDER_TYPE_LIMIT,
              "product": self.product, "price": plan.target},
         ]
-        # ``known``: the GTT book's ids before this entry began (a match listed there belongs to someone else).
+        # ``known``: the GTT book's ids before this entry began (a match listed there belongs to someone else),
+        # plus those of any read taken while no request could have reached Kite (after refused tunnels alone).
         # ``maybe_booked``: an attempt may have reached Kite, so a GTT may exist and retries follow a read of the
         # book (a proxy's refused tunnel is retried as ambiguous, but it carried nothing to Kite).
         trigger_id, maybe_booked, fired, error = None, False, False, None
@@ -1661,8 +1677,12 @@ class KiteOrderGateway(OrderGateway):
                     # The request may have reached the broker, which can still be creating the GTT: a blind
                     # retry would arm a second one that sells the whole position again.
                     maybe_booked = maybe_booked or not self._tunnel_refused(e)
-                    found, book_error = await self._await_gtt(sym, plan, filled, exclude=known or set(),
-                                                              adopt=maybe_booked)
+                    found, book_error, book_ids = await self._await_gtt(sym, plan, filled, exclude=known or set(),
+                                                                        adopt=maybe_booked)
+                    if not maybe_booked and book_ids is not None:
+                        # Read before any request that may have reached Kite: none of these GTTs is this entry's,
+                        # so a later poll must not adopt one (nor, with the snapshot unreadable, report it).
+                        known = (known or set()) | book_ids
                     if found is None and book_error is not None and is_permanent_error(book_error):
                         book_refusal = book_error              # e.g. an expired session: named in the alert below
                     if found is None and (book_error is None or not maybe_booked):
@@ -2390,13 +2410,19 @@ class _StopRoutes:
 
 _STOP_ROUTES = _StopRoutes()
 
-def _loop_bound(handler, forked: bool = True) -> bool:
-    """Whether ``handler`` runs through an event loop (a loop's dispatcher or method, or asyncio.run's own SIGINT
-    handler on 3.11+) that cannot run it: none can in a forked child; otherwise one that has closed."""
+def _loop_of(handler):
+    """The event loop ``handler`` runs through (a loop's dispatcher or method, or asyncio.run's own SIGINT handler on
+    3.11+, through its Runner), the Runner itself once closed (it has dropped its loop), or None."""
     owner = getattr(getattr(handler, 'func', handler), '__self__', None)
     if isinstance(owner, getattr(asyncio, 'Runner', ())):
-        owner = getattr(owner, '_loop', None) or owner       # a closed Runner has dropped its loop
-    elif not isinstance(owner, asyncio.AbstractEventLoop):
+        return getattr(owner, '_loop', None) or owner
+    return owner if isinstance(owner, asyncio.AbstractEventLoop) else None
+
+def _loop_bound(handler, forked: bool = True) -> bool:
+    """Whether ``handler`` runs through an event loop (see _loop_of) that cannot run it: none can in a forked child;
+    otherwise one that has closed."""
+    owner = _loop_of(handler)
+    if owner is None:
         return False
     return forked or not isinstance(owner, asyncio.AbstractEventLoop) or owner.is_closed()
 
@@ -2410,11 +2436,11 @@ def _host_handler(route: dict, signum: int, forked: bool = True):
 
 def _inherited_host(previous, inherited: tuple, signum: int, loop: Optional[asyncio.AbstractEventLoop] = None):
     """In a forked child, what a handler restored from the parent stands for: the parent engines' dispatcher for the
-    host's handler, and any other dispatcher of the parent's loop (uvloop installs a new one for each host callback)
-    for the default, as it cannot run here."""
+    host's handler, and anything else that runs through the parent's loop (another dispatcher of it, as uvloop installs
+    one for each host callback, or asyncio.run's own SIGINT handler) for the default, as it cannot run here."""
     if previous is inherited[0]:
         return inherited[1]
-    if inherited[2] is not loop and getattr(getattr(previous, 'func', previous), '__self__', None) is inherited[2]:
+    if inherited[2] is not loop and _loop_of(previous) is inherited[2]:
         return signal.default_int_handler if signum == signal.SIGINT else signal.SIG_DFL
     return previous
 

@@ -1,5 +1,109 @@
 # Changelog
 
+## v1.15 (2026-09-28)
+
+v1.14 went through a fifteenth adversarial review on a frozen snapshot
+(`181b2c7`), with the same four areas. Every finder and skeptic completed.
+There were 8 findings, with no duplicates, and none was refuted: 6 confirmed,
+2 with part of the claim overstated (R15-FEED-2, R15-LIFECYCLE-1). 2 are medium
+and 6 low. Where the fix is not the finder's:
+- R15-FEED-1: the finder started the hole at the first weekday after history's
+  last bar. That skipped a special Saturday session's own head, which v1.14
+  back-filled, so the hole starts at the earlier of that weekday and the bar's
+  own session. v1.15 also closes the case both leave open: a weekend special
+  session (the exchange holds some, e.g. on a Budget day) whose every bar was
+  discarded. The first bar the feed saw but did not keep since history's last
+  (partial, a spill bar or the bar after one) now marks its own session as part
+  of the next kept bar's hole, on any day. The weekday rule still covers a
+  weekday on which the feed saw none of the name's bars.
+- R15-FEED-2: the finder cleared the whole hold after playing one window. v1.15
+  releases only that window's bars, so a later hole's bars survive back-fills
+  that finish out of order. The path without a history source plays them too.
+- R15-LIFECYCLE-1: the owner resolution is one helper shared with the at-fork
+  reset, so the two rules cannot drift apart again. A control pins the child's
+  own `asyncio.run` handler, which must survive.
+- R15-DATA-DOCS-1: the finder's docs-only alternative would have documented a
+  fake signal. No number of lag samples tells a host running behind from
+  forward-stamped packets, so the proof now checks the stamp against the print's
+  receipt time itself. A bar's latest possible time is unchanged. The cost is a
+  missed signal on a host running behind, never a fake one.
+- R15-DATA-DOCS-3: the corrected margin also states that the host must run
+  behind by more than the print's latency, which makes the condition exact.
+- R15-DATA-DOCS-4: the docs name what the harness does. The finder's wording
+  ("every engine a test sends a stop signal") was itself inaccurate.
+
+Every v1.15 regression test fails on the v1.14 snapshot and passes here, on
+Python 3.11 and 3.10. The six `asyncio.run` handler tests are skipped on 3.10,
+which has no such handler. The rule table
+`test_a_discarded_bar_marks_its_weekend_session_as_part_of_the_hole` fails on
+v1.14 as a whole, since `_hole_before` has no `discarded` argument there.
+Without the weekend rule, only its two weekend rows fail. The exceptions are
+these controls:
+- `test_an_identical_gtt_is_still_reported_when_no_read_after_the_refused_tunnel_succeeded`:
+  with no successful read, there is nothing to learn.
+- `test_a_session_whose_every_bar_was_discarded_is_back_filled_before_the_next_sessions_first_bar[False]`
+  and `test_a_weekend_session_whose_every_bar_was_discarded_is_back_filled_before_mondays_first_bar[untraded]`:
+  with no bar lost, Monday's genuine crossing fires. With no bar seen on a
+  weekend, there is no weekend fetch.
+- The rows of `test_the_hole_before_a_bar_spans_every_session_since_historys_last_bar`
+  and of the weekend rule table that earlier versions already got right
+  (consecutive sessions, the previous session's tail, the session's own head,
+  a weekend, a special Saturday's head, a bar before history's last).
+- `test_a_discarded_spill_pair_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_replace_it[replaced]`:
+  the broker's bars are played once each.
+- `test_a_childs_own_asyncio_run_sigint_handler_survives_its_engine`: an
+  over-broad mapping must not touch the child's own handler.
+- `test_a_child_that_lifted_a_guard_with_the_saved_dispatcher_gets_the_hosts_plain_handler_after_its_engine`:
+  a pin for a v1.14 rule that no test covered. It fails on the mutation that
+  swaps the two checks.
+
+Every v1.15 rule was also mutated on a copy, and each mutant failed its pins:
+- reads after refused tunnels not kept (4 tests);
+- reads kept after an ambiguous attempt too (2);
+- the hole starting at the bar's own session, as in v1.14 (3), or at the
+  next weekday only, as the finder had it (1);
+- a partial bar not marking its session (1), no bar marking one (2), the hole
+  starting at the discarded bar instead of its session's open (4), and a bar
+  before history's last still counting (1);
+- held bars not played when the fetch fails (1) or without a history source
+  (1), played on success too (1), not held at all (2), and a release dropping
+  a later hole's bars (2);
+- the proof reading a majority of forward stamps as the host's offset, as in
+  v1.14 (5);
+- the inherited map ignoring `asyncio.run`'s handler, as in v1.14 (4), or
+  mapping every loop-bound handler (2);
+- the inherited map's two checks swapped (2).
+
+Existing tests changed: none.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.14 defect | v1.15 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | v1.14 fixed refused tunnels alone. After a refused tunnel, the poll reads the book for a whole window, before any request that could book a GTT, and then threw those reads away. A later ambiguous attempt (a 504, a read timeout) polled with the same pre-entry snapshot. With the snapshot unreadable, an earlier run's identical GTT that every read had shown raised GTT STATE UNKNOWN with an attempt unused, even when this entry's own GTT was also booked (a fired one was not marked). With a readable snapshot, a foreign identical GTT booked before the first request was adopted silently, and the duplicate watch then said to delete the entry's own. It predates v1.14. | A book read taken while no request could have reached Kite counts as a snapshot: its ids are never adopted. | `test_an_identical_gtt_read_after_a_refused_tunnel_is_not_taken_for_a_later_504s`, `test_a_foreign_gtt_read_after_a_refused_tunnel_is_not_adopted_after_a_later_504`, `test_a_gtt_booked_by_a_read_timeout_after_a_refused_tunnel_is_adopted` (active and triggered), and a control |
+
+### Live feed
+
+| Sev | Verdict | v1.14 defect | v1.15 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | The hole check assumed sessions follow one another: it covered the previous session's tail and the new bar's own session, never a whole session between. If every bar of a weekday was discarded (a spill pair that was the day's only trades, or a zeroed packet at each boundary), that day was never back-filled. The next session's first bar was then evaluated against the day before, and a crossing that happened on the lost day fired again as a first crossing, a real order with `--live-orders`. v1.14's spill discard made it easier to reach; with a reconnect it predates v1.14. | The hole also spans every weekday since history's last bar (a holiday costs one empty fetch) and the session of any bar the feed saw but did not keep, a weekend special session included. | `test_a_session_whose_every_bar_was_discarded_is_back_filled_before_the_next_sessions_first_bar`, `test_a_weekend_session_whose_every_bar_was_discarded_is_back_filled_before_mondays_first_bar` (spill, partial), the rule tables `test_the_hole_before_a_bar_spans_every_session_since_historys_last_bar` and `test_a_discarded_bar_marks_its_weekend_session_as_part_of_the_hole`, with controls |
+| low | ◐ | v1.14 discarded a spill bar and the bar after it without playing them to the bar listeners. When the next kept bar's back-fill failed, the paper OCO never saw those buckets, so a stop or target reached only inside them was missed, and the symbol stayed blocked. v1.13 played both. (Overstated: a partial bar whose back-fill fails has never been played, and a run that ends first is the same gap as the forming bar at shutdown.) | The discarded bars are held. If the broker's bars do not replace them (a failed fetch, or no history source), they are played before the live bar, once each. The log no longer says "the broker's bar replaces it". | `test_a_discarded_spill_pair_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_replace_it` (a failed fetch, no history source, and a control that plays the broker's bars once), `test_releasing_one_holes_held_bars_keeps_a_later_holes` |
+
+### Lifecycle
+
+| Sev | Verdict | v1.14 defect | v1.15 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ◐ | v1.14's inherited map read a handler as the parent loop's only if its `__self__` was that loop. `asyncio.run`'s own SIGINT handler (3.11+) is a partial of the Runner, so a child that lifted a guard with it (after a take-back with the handler saved at start) got it back from its own engine, and its first Ctrl-C was swallowed. (Overstated: the README tells a child never to lift a guard with anything that ran through a loop. It predates v1.14.) | The owner is resolved as the at-fork reset does (a Runner stands for its loop), in one shared helper. | `test_a_child_that_lifted_a_guard_with_asyncio_runs_sigint_handler_gets_the_default_after_its_engine` (asyncio and uvloop, `main()` and `run()`), and the control `test_a_childs_own_asyncio_run_sigint_handler_survives_its_engine` |
+
+### Tests and docs
+
+| Sev | Verdict | v1.14 defect | v1.15 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | v1.14's guard covered only a lag window with a single sample. When forward-stamped updates were most of the window (two quotes 15 s ahead on an illiquid name, 2 of 3, 3 of 5), their upper median read as a host running behind, and a stamp of the next bucket proved an unstamped print's bucket: its bar was evaluated with the print's shares counted twice, on a synced host. The README said such a stamp cannot prove a bucket. | The proof checks the stamp against the print's receipt time itself; `_receipt_skew` is gone. On a host running behind, more such bars go unproven (a missed signal, documented). | `test_forward_stamps_that_are_most_of_the_lag_window_do_not_prove_an_unstamped_prints_bucket` (2 of 2, 2 of 3, 3 of 5) |
+| low | ✔ | The uvloop half of v1.14's inherited-map rule had no pin. On uvloop the engines' dispatcher is itself bound to the parent's loop, so swapping `_inherited_host`'s two checks passed all 468 tests, and a child whose host had a plain SIGTERM handler was then killed after its own engine. | Pinned. | `test_a_child_that_lifted_a_guard_with_the_saved_dispatcher_gets_the_hosts_plain_handler_after_its_engine` (asyncio and uvloop, `main()` and `run()`) |
+| low | ✔ | The host-behind limitation stated its margin backwards ("by more than their stamps' truncation"): with a large truncation it called a print safe that is filed early and evaluated. | Docs: faster than every sample by more than a second minus its truncation, on a host behind by more than the print's latency (the v1.14 row is corrected too). | (docs) |
+| low | ✔ | The README and CHANGELOG said the harness gives every engine it starts the default stop signals. The `cli()` engines, two direct launchers and every in-process engine keep SIGHUP ignored under `nohup` (no test depends on it). | Docs: `Child`, `HOST` and `SCRIPT` start their interpreters with SIGHUP and SIGTERM at their defaults, and pytest gives SIGINT back its default (the v1.14 row is corrected too). | (docs) |
+
 ## v1.14 (2026-09-28)
 
 v1.13 went through a fourteenth adversarial review on a frozen snapshot
@@ -88,10 +192,10 @@ Existing tests changed:
 | Sev | Verdict | v1.13 defect | v1.14 fix | Pinned by |
 | --- | --- | --- | --- | --- |
 | medium | ✔ | The README said the proof's guard means "a stamp up to 30 s ahead cannot prove a bucket". It did prove one when the forward-stamped update was the window's only lag sample, which is common on an illiquid name. The engine read that sample as the host's offset, and the stamp then proved an unstamped print's bucket, so the print's shares were counted twice in an evaluated bar. | The proof corrects for the host only when a second lag sample backs the offset; the README says "ahead of the print's receipt". | `test_a_forward_stamp_alone_in_the_lag_window_does_not_prove_an_unstamped_prints_bucket` (and a control with a second sample) |
-| medium | ✔ | The v1.13 limitation said an unstamped print near a boundary "costs signals, never fakes one". On a host running behind the exchange, a print faster than every lag sample of the minute, by more than their truncation, is still filed a bucket early. With no bar open, its bar is evaluated. | Docs: a new Known limitations entry for this residual (keep the host's clock synced), with a pointer from the live-bar section. | (docs) |
+| medium | ✔ | The v1.13 limitation said an unstamped print near a boundary "costs signals, never fakes one". On a host running behind the exchange, a print faster than every lag sample of the minute, by more than a second minus that sample's truncation, is still filed a bucket early. With no bar open, its bar is evaluated. | Docs: a new Known limitations entry for this residual (keep the host's clock synced), with a pointer from the live-bar section. | (docs) |
 | low | ✔ | The v1.13 spill skip on the back-fill path had no pin: removing it passed all 454 tests. | Pinned (the v1.14 discard now covers that path). | `test_an_open_bar_after_a_hole_joined_by_a_print_that_may_be_the_next_buckets_is_not_evaluated` |
 | low | ✔ | The rewritten boundary limitation misstated its window. With no bar open, a late packet does not widen it. The open-bar spill window runs to the bar clock's close, which is wider by the 2 s grace. On a host running ahead, the documented formula gives a time before receipt. | Docs: the entry and the live-bar section state the actual bounds. | (docs) |
-| low | ✔ | The suite was not independent of how it is launched. Under `nohup pytest`, two SIGHUP tests failed, because the harness restored only SIGINT. | The harness starts every engine interpreter with SIGHUP and SIGTERM at their defaults. | the two SIGHUP tests, under `nohup` |
+| low | ✔ | The suite was not independent of how it is launched. Under `nohup pytest`, two SIGHUP tests failed, because the harness restored only SIGINT. | `Child`, `HOST` and `SCRIPT` start their interpreters with SIGHUP and SIGTERM at their defaults. | the two SIGHUP tests, under `nohup` |
 
 ## v1.13 (2026-09-27)
 

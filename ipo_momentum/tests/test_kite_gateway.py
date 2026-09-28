@@ -1162,3 +1162,61 @@ def test_a_429_on_place_order_is_looked_up_by_its_tag_and_keeps_the_symbol_block
     r = run_router(router(gateway=fast_gateway(kite)), [sig(), sig()])
     assert r.active_inventory == {"SWIGGY"} and "orders" in kite.routes()
     assert kite.routes().count("order.place") == 1 and "never appeared in the order book" in r.unresolved[0]
+
+
+# ---------------------------------------------------------------- round 15: a book read after refused tunnels alone
+def test_an_identical_gtt_read_after_a_refused_tunnel_is_not_taken_for_a_later_504s():
+    # The snapshot is unreadable and an earlier run's identical GTT is in the book. The poll after the refused tunnel
+    # reads the book and shows it before any request that could book a GTT is sent. v1.14 forgot those reads, so the
+    # 504's poll took the same GTT for a possible one of its own: GTT STATE UNKNOWN with an attempt unused, no exits.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused_tunnel(), KE.NetworkException("Gateway timed out", code=504), {"trigger_id": 999}],
+                    gtt_book=[EARLIER_GTT], gtt_book_failures=3)
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == ("999", False) and gw.alerts == [] and kite.gtt_places == 3
+
+
+def test_a_foreign_gtt_read_after_a_refused_tunnel_is_not_adopted_after_a_later_504():
+    # Someone else's identical GTT, booked after the snapshot but before this entry's first GTT request. The poll after
+    # the refused tunnel shows it; v1.14 still adopted it silently after the 504 as this position's exit.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused_tunnel(), KE.NetworkException("Gateway timed out", code=504), {"trigger_id": 999}])
+    original = kite._request
+
+    def request(route, method, *args, **kwargs):
+        if route == "gtt.place" and EARLIER_GTT not in kite.created_gtts:
+            kite.created_gtts.append(EARLIER_GTT)          # booked just before this entry's first GTT request
+        return original(route, method, *args, **kwargs)
+
+    kite._request = request
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == ("999", False) and gw.alerts == [] and kite.gtt_places == 3
+
+
+@pytest.mark.parametrize("status", ["active", "triggered"])
+def test_a_gtt_booked_by_a_read_timeout_after_a_refused_tunnel_is_adopted(status):
+    # Control: only reads taken before any request that may have reached Kite are set aside, so this entry's own GTT
+    # is adopted (a fired one marked so). With the earlier GTT read after the tunnel, v1.14 matched that one first and
+    # raised GTT STATE UNKNOWN although the entry's own GTT was in the book.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused_tunnel(), requests.exceptions.ReadTimeout("read timed out"), {"trigger_id": 999}],
+                    gtt_booked=[False, True, False], gtt_created_status=status, gtt_book=[EARLIER_GTT],
+                    gtt_book_failures=3)
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown, fill.exits_fired) == ("700", False, status == "triggered")
+    assert kite.gtt_places == 2 and [g["id"] for g in kite.created_gtts] == [700]
+    assert gw.alerts == [] if status == "active" else len(gw.alerts) == 1 and "already TRIGGERED" in gw.alerts[0]
+
+
+def test_an_identical_gtt_is_still_reported_when_no_read_after_the_refused_tunnel_succeeded():
+    # Control: the book stays behind the proxy until the 504, so nothing proves the match predates it: still UNKNOWN.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[refused_tunnel(), KE.NetworkException("Gateway timed out", code=504), {"trigger_id": 999}],
+                    gtt_book=[EARLIER_GTT], gtt_book_failures=3, gtt_book_fail=lambda since, places: places <= 1)
+    gw = fast_gateway(kite)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == (None, True) and kite.gtt_places == 2
+    assert "GTT 650 matches this position" in gw.alerts[0]

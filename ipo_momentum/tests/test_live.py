@@ -2160,3 +2160,233 @@ def test_a_bar_after_an_empty_bucket_that_follows_a_spill_bar_is_evaluated():
 
     asyncio.run(scenario())
     assert pd.Timestamp(ist(2026, 9, 25, 10, 10)) in [idx for _, idx in alpha.evaluated]
+
+
+# ---------------------------------------------------------------- round 15: a session with no kept bar; the paper OCO
+class TradingAlpha(engine.AlphaEngine):
+    """The real strategy, recording (bar before, bar) for each evaluation."""
+    def __init__(self):
+        super().__init__()
+        self.evaluated = []
+
+    def evaluate(self, symbol, df):
+        self.evaluated.append((df.index[-2], df.index[-1]))
+        return super().evaluate(symbol, df)
+
+
+@pytest.mark.parametrize("friday_traded", [True, False])
+def test_a_session_whose_every_bar_was_discarded_is_back_filled_before_the_next_sessions_first_bar(friday_traded):
+    # On Friday the name traded only in 10:00, crossing the base high (100.5) on 700k, and a print with no exchange time
+    # received 1.2 s after 10:05 joined that bar: a spill bar, discarded. v1.14 looked for missing bars only in Thursday's
+    # tail and in Monday's own session, so Monday's 09:15 bar (102 on 500k) was evaluated against Thursday's 15:25 close:
+    # a first crossing the exchange's bars never show (it crossed on Friday). Control: the name did not trade on Friday,
+    # and Monday's genuine crossing fires.
+    alpha = TradingAlpha()
+    friday = make_bars([101.5], volumes=[700_000], start=ist(2026, 9, 25, 10, 0)) if friday_traded else engine.empty_bars()
+    calls = []
+
+    async def backfill(sym, start, end):
+        calls.append((start, end))
+        return await broker_of(friday)(sym, start, end)
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 0)]
+        history = pd.concat([session_history(day) for day in (22, 23, 24)])
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=backfill, require_feed_liveness=True)
+        a.alpha = alpha
+        a.mark_feed_reset(at=now[0])
+        if friday_traded:
+            a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 25, 10, 1), 0.5))
+            for second in (10, 30, 50):
+                a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 25, 10, 4, second), 0.5))
+            now[0] = ist(2026, 9, 25, 10, 5, 1, 200000)
+            a.on_tick(a._normalize(zeroed(700_000, 101.5)))                    # joins 10:00: a spill bar
+            a.note_feed_alive(ist(2026, 9, 25, 10, 5, 3))
+            a.flush_due_bars(ist(2026, 9, 25, 10, 5, 3))                       # 10:00 discarded
+            assert "SWIGGY" not in a.current_bars and a.market_state["SWIGGY"].index[-1] == ist(2026, 9, 24, 15, 25)
+        a.on_tick(at_host(102.0, 500_000, ist(2026, 9, 28, 9, 15, 20), 0.5))
+        a.on_tick(at_host(102.0, 500_100, ist(2026, 9, 28, 9, 20, 1), 0.5))    # closes Monday 09:15
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    a = asyncio.run(scenario())
+    if friday_traded:
+        assert calls == [(ist(2026, 9, 25, 9, 15), ist(2026, 9, 28, 9, 15))]
+    before = ist(2026, 9, 25, 10, 0) if friday_traded else ist(2026, 9, 24, 15, 25)
+    assert alpha.evaluated == [(pd.Timestamp(before), pd.Timestamp(ist(2026, 9, 28, 9, 15)))]
+    assert a.oms_queue.qsize() == (0 if friday_traded else 1)
+
+
+@pytest.mark.parametrize("prev,idx,start", [
+    ((24, 15, 25), (25, 9, 15), None),                 # consecutive sessions: nothing is missing
+    ((24, 15, 20), (25, 9, 15), (24, 15, 25)),         # the previous session's tail
+    ((24, 15, 25), (25, 9, 30), (25, 9, 15)),          # the session's own head
+    ((25, 15, 25), (28, 9, 15), None),                 # a weekend is not a hole
+    ((24, 15, 25), (28, 9, 15), (25, 9, 15)),          # a weekday with no kept bar is (v1.14: None)
+    ((24, 15, 25), (28, 9, 20), (25, 9, 15)),
+    ((25, 15, 25), (26, 9, 20), (26, 9, 15)),          # a special Saturday session still checks its own head
+])
+def test_the_hole_before_a_bar_spans_every_session_since_historys_last_bar(prev, idx, start):
+    a = adapter()
+    at = lambda day, h, m: ist(2026, 9, day, h, m)       # noqa: E731
+    assert a._hole_before(at(*prev), at(*idx)) == (None if start is None else at(*start))
+
+
+@pytest.mark.parametrize("how", ["spill", "partial", "untraded"])
+def test_a_weekend_session_whose_every_bar_was_discarded_is_back_filled_before_mondays_first_bar(how):
+    # A special Saturday session (the exchange holds some, e.g. on a Budget day): the name traded only in 10:00, crossing
+    # the base high (100.5) on 700k, and that bar was discarded (a spill bar, or partial after a reconnect). The weekday
+    # rule skips weekends, so Monday's 09:15 bar (102 on 500k) was evaluated against Friday's 15:25 close: a first
+    # crossing the exchange's bars never show (it crossed on Saturday). Control: no Saturday session, so no weekend
+    # fetch, and Monday's genuine crossing fires.
+    alpha = TradingAlpha()
+    saturday = make_bars([101.5], volumes=[700_000], start=ist(2026, 9, 26, 10, 0)) if how != "untraded" \
+        else engine.empty_bars()
+    calls = []
+
+    async def backfill(sym, start, end):
+        calls.append((start, end))
+        return await broker_of(saturday)(sym, start, end)
+
+    async def scenario():
+        now = [ist(2026, 9, 26, 9, 0)]
+        history = pd.concat([session_history(day) for day in (23, 24, 25)])
+        a = clocked(now, history=history, started_at=now[0], loop=asyncio.get_running_loop(), backfill=backfill,
+                    require_feed_liveness=True)
+        a.alpha = alpha
+        a.mark_feed_reset(at=now[0])
+        if how != "untraded":
+            a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 26, 10, 1), 0.5))
+            if how == "partial":
+                a.mark_feed_reset(at=ist(2026, 9, 26, 10, 2))                  # a reconnect: 10:00 is partial
+            for second in (10, 30, 50):
+                a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 26, 10, 4, second), 0.5))
+            if how == "spill":
+                now[0] = ist(2026, 9, 26, 10, 5, 1, 200000)
+                a.on_tick(a._normalize(zeroed(700_000, 101.5)))                # joins 10:00: a spill bar
+            a.note_feed_alive(ist(2026, 9, 26, 10, 5, 3))
+            a.flush_due_bars(ist(2026, 9, 26, 10, 5, 3))                       # 10:00 discarded
+            assert "SWIGGY" not in a.current_bars and a.market_state["SWIGGY"].index[-1] == ist(2026, 9, 25, 15, 25)
+        a.on_tick(at_host(102.0, 500_000, ist(2026, 9, 28, 9, 15, 20), 0.5))
+        a.on_tick(at_host(102.0, 500_100, ist(2026, 9, 28, 9, 20, 1), 0.5))    # closes Monday 09:15
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    a = asyncio.run(scenario())
+    assert calls == ([] if how == "untraded" else [(ist(2026, 9, 26, 9, 15), ist(2026, 9, 28, 9, 15))])
+    before = ist(2026, 9, 25, 15, 25) if how == "untraded" else ist(2026, 9, 26, 10, 0)
+    assert alpha.evaluated == [(pd.Timestamp(before), pd.Timestamp(ist(2026, 9, 28, 9, 15)))]
+    assert a.oms_queue.qsize() == (1 if how == "untraded" else 0)
+
+
+@pytest.mark.parametrize("prev,idx,discarded,start", [
+    ((25, 15, 25), (28, 9, 15), (26, 10, 0), (26, 9, 15)),    # a discarded Saturday bar: its whole session
+    ((25, 15, 25), (28, 9, 15), (27, 11, 0), (27, 9, 15)),    # a Sunday one
+    ((25, 15, 25), (28, 9, 15), None, None),                  # no bar seen: a weekend is not a hole
+    ((25, 15, 25), (28, 9, 15), (25, 15, 0), None),           # one before history's last bar is not a hole
+    ((24, 15, 25), (28, 9, 15), (26, 10, 0), (25, 9, 15)),    # a weekday before it is missing too
+    ((25, 15, 20), (28, 9, 15), (26, 10, 0), (25, 15, 25)),   # so is Friday's tail
+    ((25, 10, 0), (25, 10, 15), (25, 10, 5), (25, 10, 5)),    # within a session, the bars after history's last
+])
+def test_a_discarded_bar_marks_its_weekend_session_as_part_of_the_hole(prev, idx, discarded, start):
+    a = adapter()
+    at = lambda day, h, m: ist(2026, 9, day, h, m)       # noqa: E731
+    assert a._hole_before(at(*prev), at(*idx), discarded and at(*discarded)) == (None if start is None else at(*start))
+
+
+@pytest.mark.parametrize("play", [True, False])
+def test_releasing_one_holes_held_bars_keeps_a_later_holes(play):
+    # Two back-fills of one symbol can finish out of order: releasing 10:00-10:10 must leave 11:00's held bar for its
+    # own back-fill, and play only the bars of its window (in time order), or none when the broker's bars replace them.
+    played = []
+    a = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               bar_listeners=[lambda sym, ts, bar: played.append((ts, bar["Close"]))])
+    bar = lambda close: pd.Series({c: close for c in engine.OHLCV})     # noqa: E731
+    a._held["SWIGGY"] = [(ist(2026, 9, 25, 10, 0), bar(101.0)), (ist(2026, 9, 25, 10, 5), bar(100.5)),
+                         (ist(2026, 9, 25, 11, 0), bar(102.0))]
+    a._release_held("SWIGGY", ist(2026, 9, 25, 10, 0), ist(2026, 9, 25, 10, 10), play=play)
+    assert played == ([(ist(2026, 9, 25, 10, 0), 101.0), (ist(2026, 9, 25, 10, 5), 100.5)] if play else [])
+    assert [ts for ts, _ in a._held["SWIGGY"]] == [ist(2026, 9, 25, 11, 0)]
+    a._release_held("SWIGGY", ist(2026, 9, 25, 10, 55), ist(2026, 9, 25, 11, 5), play=play)
+    assert "SWIGGY" not in a._held
+
+
+@pytest.mark.parametrize("how", ["fetch_fails", "no_source", "replaced"])
+def test_a_discarded_spill_pair_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_replace_it(how):
+    # A paper position (stop 99, stop limit 97.02) is open, and the name dipped to 98.8 only in the 10:05 bucket. B, a
+    # print with no exchange time received 1.3 s after 10:05, joined 10:00, so 10:00 and 10:05 were discarded. When the
+    # back-fill before the 10:10 bar failed, v1.14 played only the 10:10 bar: the stop was never hit and the symbol stayed
+    # blocked (v1.13 played both bars as they closed). The same without a history source. Control: with the broker's
+    # bars, those are played, once each.
+    fetch_fails = how != "replaced"
+    broker = pd.DataFrame([[101.0, 101.2, 100.9, 101.0, 5_000.0], [101.0, 101.0, 98.8, 100.5, 6_000.0]],
+                          columns=engine.OHLCV, index=pd.DatetimeIndex([ist(2026, 9, 25, 10, 0), ist(2026, 9, 25, 10, 5)],
+                                                                        name="datetime"))
+    played = []
+
+    async def backfill(sym, start, end):
+        if how == "fetch_fails":
+            raise ConnectionError("history API unreachable")
+        return await broker_of(broker)(sym, start, end)
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 0)]
+        router = engine.ExecutionRouter(asyncio.Queue(), risk_per_trade=1_000.0)
+        router.positions["SWIGGY"] = engine.Position("SWIGGY", 100, 101.0, 99.0, 107.0, ist(2026, 9, 25, 9, 55),
+                                                      stop_limit=97.02)
+        router.active_inventory.add("SWIGGY")
+        history = pd.concat([session_history(24), make_bars([101.0] * 9, start=ist(2026, 9, 25, 9, 15))])   # to 09:55
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=None if how == "no_source" else backfill,
+                    bar_listeners=[router.on_bar, lambda sym, ts, bar: played.append((ts, bar["Low"]))])
+        a.mark_feed_reset(at=now[0])
+        a.on_tick(at_host(101.0, 1_000, ist(2026, 9, 25, 10, 1), 0.5))          # opens 10:00
+        for second in (10, 30, 50):
+            a.on_tick(at_host(101.0, 5_000, ist(2026, 9, 25, 10, 4, second), 0.5))
+        now[0] = ist(2026, 9, 25, 10, 5, 1, 300000)
+        a.on_tick(a._normalize(zeroed(6_000, 101.0)))                            # B: joins 10:00, spill
+        a.on_tick(at_host(98.8, 9_000, ist(2026, 9, 25, 10, 6), 0.5))           # the dip opens 10:05
+        a.on_tick(at_host(100.5, 11_000, ist(2026, 9, 25, 10, 8), 0.5))
+        a.on_tick(at_host(100.6, 12_000, ist(2026, 9, 25, 10, 11), 0.5))        # 10:05 discarded, opens 10:10
+        a.on_tick(at_host(100.7, 13_000, ist(2026, 9, 25, 10, 15, 1), 0.5))     # closes 10:10 after the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return router
+
+    router = asyncio.run(scenario())
+    assert played == [(pd.Timestamp(ist(2026, 9, 25, 10, 0)), 101.0 if fetch_fails else 100.9),
+                      (pd.Timestamp(ist(2026, 9, 25, 10, 5)), 98.8), (pd.Timestamp(ist(2026, 9, 25, 10, 10)), 100.6)]
+    assert [(p.exit_reason, p.exit_price, p.closed_at) for p in router.closed_positions] == \
+        [("STOP", 98.8 if fetch_fails else 99.0, pd.Timestamp(ist(2026, 9, 25, 10, 5)))]
+    assert not router.positions and not router.active_inventory
+
+
+# ---------------------------------------------------------------- round 15: a stamp ahead of a print's receipt
+@pytest.mark.parametrize("forward,honest", [(2, 0), (2, 1), (3, 2)])
+def test_forward_stamps_that_are_most_of_the_lag_window_do_not_prove_an_unstamped_prints_bucket(forward, honest):
+    # On a synced host, quotes stamped 15 s ahead (the 30 s rule accepts them) are most of the minute's lag samples. v1.14
+    # read their upper median as a host 15 s behind: the print B, traded at 10:04:59.9 and received at 10:05:00.4, was
+    # "proven" 10:05's by those very stamps, so its bar was evaluated while the back-fill of 10:00 counted B's 2,000
+    # shares again (3,500 against a true 1,500). No number of samples tells such stamps from a host behind.
+    alpha = RecordingAlpha()
+    broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        for k in range(honest):
+            a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 4, 10 + k), -0.4))        # quotes, 0.4 s late
+        for k in range(forward):
+            a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5, 3 + 2 * k), 15.0))     # quotes, 15 s ahead
+        now[0] = ist(2026, 9, 25, 10, 5, 0, 400000)
+        a.on_tick(a._normalize(zeroed(15_000, 100.3)))                                     # B
+        assert a.current_bars["SWIGGY"]["ambiguous"] is True
+        a.on_tick(stamped(100.9, 16_500, ist(2026, 9, 25, 10, 7), -0.3))
+        a.on_tick(stamped(100.9, 16_600, ist(2026, 9, 25, 10, 10, 1), -0.3))   # closes 10:05 across the 10:00 hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 5)) not in [idx for _, idx in alpha.evaluated]

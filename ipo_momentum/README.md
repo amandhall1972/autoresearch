@@ -39,14 +39,16 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 cd ipo_momentum
 uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest, uvloop (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 468 tests, ~5 min, fully offline
+uv run pytest                       # 510 tests, ~5 min, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
 `pytest` for the tests; without `kiteconnect`, `test_kite_gateway.py` and the
 two Kite adapter tests in `test_data.py` are skipped; without `uvloop`
 (`pip install uvloop`, not on Windows), so are the uvloop cases of the signal
-tests in `test_end_to_end.py`; the rest pass), then `python engine.py --source csv`.
+tests in `test_end_to_end.py`; on Python 3.10, so are the six tests of
+`asyncio.run`'s own SIGINT handler, which 3.10 lacks; the rest pass), then
+`python engine.py --source csv`.
 
 | Mode | Command |
 | --- | --- |
@@ -269,10 +271,12 @@ last one ends:
   handler the host had before its engines started, never with anything that
   ran through a loop, nor with the handler saved when the guard was set: that
   is the parent engines' dispatcher (on uvloop, after a host callback
-  registered mid-run, that callback's dispatcher of the parent's loop), which
-  in the child swallows every stop until the child's own engine hooks (whose
-  hand-back, through `main()` or `run()`, then restores what the host had: the
-  default, where that was a loop callback).
+  registered mid-run, that callback's dispatcher of the parent's loop; after a
+  take-back with the handler saved at start, `asyncio.run`'s own SIGINT
+  handler, which swallows the child's first Ctrl-C), which in the child
+  swallows every stop until the child's own engine hooks (whose hand-back,
+  through `main()` or `run()`, then restores what the host had: the default,
+  where that ran through the parent's loop).
 - uvloop's callbacks cannot be read back. A host callback it held for a stop
   signal before the run is therefore lost: the engine logs a warning, and the
   signal is back at its default (never silently swallowed). Re-register it
@@ -346,7 +350,9 @@ Trailing stays the default because it is the original strategy's definition.
     after it would be short. Both are discarded (logged) and the strict
     back-fill restores the exchange's two bars before the next bar is
     evaluated, so neither a short bar in later RVOL baselines nor the print's
-    price in a first-crossing test can fake a breakout. A stamped print of the
+    price in a first-crossing test can fake a breakout. If that back-fill
+    fails, the paper OCO plays the two discarded bars (their prints are real)
+    before the next bar, which is not evaluated. A stamped print of the
     bar's own bucket received after it clears this, since in-order delivery
     puts the unstamped print before it. The session's last bar is exempt: no
     bucket follows it.
@@ -361,13 +367,14 @@ Trailing stays the default because it is the original strategy's definition.
     its latest possible time's.
   - A bar it opens may hold the bucket before's shares, at any distance from
     the boundary (latency can rise unmeasured). Unless a stamped update of its
-    own bucket came first (and no later than the print could have traded), the
+    own bucket came first (and stamped no later than the print's receipt), the
     bar is not evaluated if the broker's back-fill says the bucket before it
     traded, since its shares may be counted twice: filed late, the worst case
-    is a missed signal. (The proof checks the stamp against the median-guarded
-    receipt time, or the receipt time itself while the window holds a single
-    lag sample, so a stamp up to 30 s ahead of the print's receipt cannot prove
-    a bucket.) With no bar open and within 2 s after the boundary,
+    is a missed signal. (No number of lag samples tells a host running behind
+    the exchange from forward-stamped packets, so the proof checks the stamp
+    against the receipt time itself: a stamp ahead of the print's receipt
+    cannot prove a bucket, and on a host running behind this leaves more such
+    bars unproven.) With no bar open and within 2 s after the boundary,
     the bar is also provisional: a later stamped print of the bucket before
     moves it there.
 * **The 30 s rule.** A tick stamped more than 30 s ahead of the host clock is
@@ -448,10 +455,15 @@ Trailing stays the default because it is the original strategy's definition.
   firing one bar late at a worse price. A session's first bar also checks the
   previous session's tail: a join, reconnect or stall near the close can cost
   it its last bars, and a breakout in the lost 15:25 bar would otherwise fire
-  again at the next open. The back-fill is strict: an empty answer means
-  nothing traded, and a failed fetch raises, so the bar is recorded but not
-  evaluated. Without a history source, a bar after a hole is likewise not
-  evaluated (the offline demo's first tape bar is one: the bundled sessions
+  again at the next open. It also checks every weekday between them, which is
+  a hole when all its bars were discarded (a spill pair, or a bar a reconnect
+  cut short, that was the day's only trades) and costs one empty fetch after
+  a holiday. A weekend is a hole only when the feed saw a bar of it that was
+  discarded (the exchange holds special weekend sessions, e.g. on a Budget
+  day): the back-fill then starts at that session's open. The back-fill is
+  strict: an empty answer means nothing traded, and a failed fetch raises, so
+  the bar is recorded but not evaluated. Without a history source, a bar after
+  a hole is likewise not evaluated (the offline demo's first tape bar is one: the bundled sessions
   lack their 15:20 and 15:25 bars). Nor is a bar an unstamped print opened
   whose back-filled bucket before it traded (see Time).
 * **Integrity.** Late and out-of-order prints are dropped before they can move
@@ -519,7 +531,9 @@ or duplicated:
    - After an ambiguous failure (a read timeout, a 5xx, a 429), the book is
      polled for 15 s, because the broker can still be creating the GTT. A
      matching GTT created since arming began is adopted, including one that
-     has already triggered (then an alert says the exit has fired). A blind
+     has already triggered (then an alert says the exit has fired), but never
+     one the book already showed after refused tunnels alone, before any
+     request that could book it. A blind
      retry would arm a second GTT that sells the whole position again. The
      poll judges on its *latest* read: if that failed, polling goes on (for at
      most one more window) until a read succeeds. A read that fails for good
@@ -628,7 +642,7 @@ not evidence of an edge in either direction.
 
 ## How it was reviewed
 
-Fourteen adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
+Fifteen adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
 lists every finding with its severity, verdict, fix and the test that pins it.
 
 1. **v1.0, the original file.** Four reviewers, one per area (live path, alpha,
@@ -801,6 +815,24 @@ lists every finding with its severity, verdict, fix and the test that pins it.
       failed two tests under `nohup`; docs precision.
 
     These became v1.14.
+15. **v1.14, the fourteenth fix.** All four skeptics ran. 8 findings, none
+    refuted, 2 medium and 6 low:
+    - If every bar of a session was discarded (a spill pair that was the
+      day's only trades), that session was never back-filled, and the next
+      session's first bar could fire a crossing that happened on the lost
+      day. Every weekday since history's last bar is now part of the hole, and
+      so is a weekend session in which the feed saw a bar it did not keep.
+    - Forward-stamped quotes that were most of a minute's lag samples read as
+      a host running behind and proved an unstamped print's bucket on a synced
+      host. The proof now checks a stamp against the print's receipt itself.
+    - A book read after a refused tunnel, which proves its GTTs are not this
+      entry's, was thrown away, so a later 504 could adopt a foreign GTT or
+      report an earlier one as UNKNOWN.
+    - A discarded spill pair was never played to the paper OCO when its
+      back-fill failed; `asyncio.run`'s own SIGINT handler was not mapped in a
+      child; an unpinned rule order on uvloop; docs precision.
+
+    These became v1.15.
 
 ---
 
@@ -852,9 +884,11 @@ lists every finding with its severity, verdict, fix and the test that pins it.
   bar's own bucket follows it. On a feed whose packets mostly lack exchange
   time, that skips most bars.
 * **On a host running behind the exchange, an unstamped print can be filed a
-  bucket early**, and so fake a signal: when it arrives faster than every lag
-  sample of the last minute, by more than their stamps' truncation, its latest
-  possible time falls before it traded. With no bar open, such a print that
+  bucket early**, and so fake a signal: when its latency is more than a second
+  below every lag sample's latency plus that stamp's truncation (it is faster
+  than each by more than a second minus the truncation) and the host runs
+  behind by more than its latency, its latest possible time falls before it
+  traded. With no bar open, such a print that
   traded just after a boundary opens a bar of the bucket before, where the name
   may not have traded, and that bar is evaluated. The host's offset has no
   upper bound the samples can show, so no margin closes this: keep the host's
@@ -865,7 +899,9 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 * **A bar an unstamped print opened** is not evaluated when the back-filled
   bucket before it traded, unless a stamped update proved its bucket first. On a
   feed whose packets mostly lack exchange time, that can skip a genuine first
-  bar after a reconnect: a missed signal, never a fake one.
+  bar after a reconnect: a missed signal, never a fake one. On a host running
+  behind the exchange, a stamp of the bar's bucket that is ahead of the print's
+  receipt proves nothing, so more such bars are skipped.
 * **An untraded name's zero counter is trusted** when its packet dates the last
   trade to an earlier day and no bar of today is known. If a name first traded
   while the feed was down and a stale pre-open snapshot then arrives before any
@@ -892,9 +928,15 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 * **Special sessions** outside 09:15–15:30 (e.g. Diwali Muhurat trading) are
   dropped from both Yahoo history and live ticks.
 * **Exchange holidays** are not modelled. `next_session_open` skips weekends
-  only, which affects the simulated tape's date, not live trading. The feed
-  watchdog treats every weekday as a session and relies on Kite's idle
-  heartbeats to stay quiet on a holiday.
+  only, which affects the simulated tape's date, not live trading, except that
+  the first live bar after a weekday holiday back-fills that day (an empty
+  fetch; if it fails, the bar is not evaluated). The feed watchdog treats every
+  weekday as a session and relies on Kite's idle heartbeats to stay quiet on a
+  holiday. Special weekend sessions are not modelled either: the watchdog
+  does not watch them, and Monday's first bar back-fills one only if the feed
+  saw a bar of it. A run whose feed died unnoticed through such a session can
+  evaluate Monday's first bar without that session's bars; restart the engine
+  after a special session to load them from history.
 * **The bundled data** has vendor artifacts: missing 15:20/15:25 bars and five
   zero-volume bars ([data/README.md](data/README.md)).
 * **The strategy is unvalidated.** One historical signal is not a backtest.
@@ -907,9 +949,10 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 468 tests run offline in about 5 minutes, whichever way they are launched (a shell background job or `nohup` included: the harness gives the engines it starts their default stop signals). The slowest are real CLI runs that
+The 510 tests run offline in about 5 minutes, whichever way they are launched (a shell background job or `nohup` included: pytest gives SIGINT back its default, and the `Child`, `HOST` and `SCRIPT` harnesses start their interpreters with SIGHUP and SIGTERM at their defaults). The slowest are real CLI runs that
 deliver SIGINT, SIGTERM and SIGHUP mid-entry and during exit, and a shutdown
-that must outlast v1.1's 10 s drain. They pass in seven configurations:
+that must outlast v1.1's 10 s drain. They pass in seven configurations (on
+Python 3.10, six of them are skipped as above):
 - Python 3.10 with pandas 2.2 and numpy 1.26
 - Python 3.10 with pandas 2.3 and numpy 2.2 (the `uv.lock` resolution)
 - Python 3.11 with pandas 3.0 and numpy 2.4
@@ -923,8 +966,8 @@ Pandas `FutureWarning`s raised from engine code fail the suite.
 | File | Covers |
 | --- | --- |
 | `test_alpha.py` | Breakout conditions and crossing semantics, the exact stop/target math, true-range ATR, RVOL baselines and modes, session-defined bases, look-ahead freedom (including inside the base), the pinned real signal |
-| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, zeroed stamps (feed time, its bounds on a host behind and after one late packet, filing in the latest bucket with no bar open, open bars a print may spill from and the bar after them (discarded and back-filled), a forward stamp alone in the lag window, provisional and ambiguous bars, late drops, the lag race) and untraded names, feed liveness in feed time, feed lag in both directions, clock skew, host clock steps, suspends, far-future stamps and the 30 s rule and its straddle stop, the silent-socket watchdog, strict hole back-fill within and across sessions, thread safety, loop survival |
+| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, zeroed stamps (feed time, its bounds on a host behind and after one late packet, filing in the latest bucket with no bar open, open bars a print may spill from and the bar after them (discarded and back-filled, and played to the paper OCO when the back-fill fails), forward stamps alone or most of the lag window, provisional and ambiguous bars, late drops, the lag race) and untraded names, feed liveness in feed time, feed lag in both directions, clock skew, host clock steps, suspends, far-future stamps and the 30 s rule and its straddle stop, the silent-socket watchdog, strict hole back-fill within and across sessions (a whole weekday or weekend session with no kept bar included), thread safety, loop survival |
 | `test_execution.py` | Sizing caps, tick rounding, duplicates, future and stale signals, paper OCO mechanics incl. gaps, the halt report. No Kite dependency. |
-| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies and refused tunnels, repeated outages, GTTs booked during an outage), broker refusals classified by HTTP status, transient errors, cancels that don't land, partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books (incl. an expired session), unknown and fired GTT states reported as such, refused tunnels that leave no GTT (incl. a proxy outage that also hides the book, or restarts in between) and start no duplicate watch, an expired session named after refused tunnels, an identical earlier or foreign GTT never adopted after refused tunnels alone, a 429 on the entry looked up by its tag, a stop handled before an already scheduled entry ran. Skipped without `kiteconnect`. |
+| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies and refused tunnels, repeated outages, GTTs booked during an outage), broker refusals classified by HTTP status, transient errors, cancels that don't land, partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books (incl. an expired session), unknown and fired GTT states reported as such, refused tunnels that leave no GTT (incl. a proxy outage that also hides the book, or restarts in between) and start no duplicate watch, an expired session named after refused tunnels, an identical earlier or foreign GTT never adopted after refused tunnels alone, nor after a later ambiguous attempt once a book read after the tunnel showed it, a 429 on the entry looked up by its tag, a stop handled before an already scheduled entry ran. Skipped without `kiteconnect`. |
 | `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter (incl. wake-up order under clock jitter), the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads and bad timestamps, the session's last 30m/60m bar and special sessions, retry policy, strict back-fill, midnight lookback clamps, listing dates in any zone, orchestrator anchoring and error containment, collecting and running the suite without the Kite extra |
 | `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (asyncio and uvloop, incl. handlers changed mid-run and `SA_RESTART`), several engines in one loop incl. one started after the host took a signal back or under its `SIG_IGN` guard, held runs and `release_signals()` (incl. between runs, from another thread, and a loop closed unreleased on asyncio, uvloop or without loop signals, then `main()`, `run()` or an engine in a thread), forked workers and helpers before, during and after their own engine (incl. Ctrl-C, a host's plain handler or mid-run loop callback, a guard lifted with the saved handler, and a worker forked before any engine hooked), `run()` from a worker thread |

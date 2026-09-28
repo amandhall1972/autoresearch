@@ -1819,3 +1819,125 @@ def test_a_child_that_lifted_a_guard_after_the_host_moved_to_a_loop_callback_get
     """, uvloop=(loop_kind == "uvloop"))
     assert code == 0, out + err
     assert "helper -15 host [] a 0" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="asyncio.run's own SIGINT handler is 3.11+")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("via", ["main", "run"])
+def test_a_child_that_lifted_a_guard_with_asyncio_runs_sigint_handler_gets_the_default_after_its_engine(
+        loop_kind, via):
+    # A host that took Ctrl-C back after a held run with the handler it saved at start, asyncio.run's own (a partial of
+    # its Runner, whose loop is the parent's), then set a guard around the fork, saved that handler. In a child that
+    # lifted the guard with it, its first call only cancels a dead copy of the parent's task: v1.14's engine handed it
+    # back, so the child's first Ctrl-C after its engine was swallowed.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host(f"""
+        import time
+        saved = signal.getsignal(signal.SIGINT)                    # asyncio.run's own
+        await engine.main(ARGS + ["0.2"], hold_signals=True)
+        signal.signal(signal.SIGINT, saved)                        # the take-back
+        old = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            try:
+                signal.signal(signal.SIGINT, old)
+                if {via!r} == "run":
+                    engine.run(ARGS + ["0.3"])
+                else:
+                    asyncio.run(engine.main(ARGS + ["0.3"]))
+                os.write(w, b"x")
+                time.sleep(5)
+            except KeyboardInterrupt:
+                os._exit(3)
+            os._exit(7)
+        signal.signal(signal.SIGINT, old)
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(pid, signal.SIGINT)
+        _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+        print("saved", getattr(old, "func", old).__qualname__, "helper", os.waitstatus_to_exitcode(status), flush=True)
+    """, uvloop=(loop_kind == "uvloop"))
+    assert code == 0, out + err
+    assert "saved Runner._on_sigint helper 3" in out, out + err
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="asyncio.run's own SIGINT handler is 3.11+")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+def test_a_childs_own_asyncio_run_sigint_handler_survives_its_engine(loop_kind):
+    # The control: only the parent's loop is dead in the child. The child's own asyncio.run handler runs through the
+    # child's loop, so its engine hands it back and Ctrl-C still cancels the child's main task first.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host("""
+        import time
+        saved = signal.getsignal(signal.SIGINT)
+        await engine.main(ARGS + ["0.2"], hold_signals=True)
+        signal.signal(signal.SIGINT, saved)
+        old = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            async def child():
+                mine = signal.getsignal(signal.SIGINT)                 # the child's asyncio.run's own
+                await engine.main(ARGS + ["0.3"])
+                print("kept", signal.getsignal(signal.SIGINT) is mine, flush=True)
+                os.write(w, b"x")
+                await asyncio.sleep(5)
+            try:
+                signal.signal(signal.SIGINT, signal.default_int_handler)
+                asyncio.run(child())
+            except KeyboardInterrupt:
+                os._exit(3)
+            os._exit(7)
+        signal.signal(signal.SIGINT, old)
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(pid, signal.SIGINT)
+        _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+        print("helper", os.waitstatus_to_exitcode(status), flush=True)
+    """, uvloop=(loop_kind == "uvloop"))
+    assert code == 0, out + err
+    assert "kept True" in out and "helper 3" in out, out + err
+
+
+# ---------------------------------------------------------------- round 15: the inherited map's order on uvloop
+@pytest.mark.skipif(sys.platform != "linux", reason="os.fork")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("via", ["main", "run"])
+def test_a_child_that_lifted_a_guard_with_the_saved_dispatcher_gets_the_hosts_plain_handler_after_its_engine(
+        loop_kind, via):
+    # On uvloop the parent engines' dispatcher is itself a dispatcher of the parent's loop, like a host callback's: it
+    # must be read as the engines' (the host's plain handler comes back) before any dispatcher of that loop is read as
+    # a dead callback's (the default). With the two checks swapped every other test passes, and this child is killed.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host(f"""
+        import time
+        flags = []
+        signal.signal(signal.SIGTERM, lambda signum, frame: flags.append(signum))   # the host's own, before the run
+        a = asyncio.create_task(engine.main(ARGS + ["3"]))
+        await hooked(1, a)
+        old = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            signal.signal(signal.SIGTERM, old)                         # the saved handler: the engines' dispatcher
+            if {via!r} == "run":
+                engine.run(ARGS + ["0.3"])
+            else:
+                asyncio.run(engine.main(ARGS + ["0.3"]))
+            os.write(w, b"x")
+            deadline = time.monotonic() + 5
+            while not flags and time.monotonic() < deadline:
+                time.sleep(0.02)
+            os._exit(7 if flags == [signal.SIGTERM] else 8)
+        signal.signal(signal.SIGTERM, old)
+        await loop.run_in_executor(None, os.read, r, 1)
+        os.kill(pid, signal.SIGTERM)
+        _, status = await loop.run_in_executor(None, os.waitpid, pid, 0)
+        print("helper", os.waitstatus_to_exitcode(status), "a", await a, flush=True)
+    """, uvloop=(loop_kind == "uvloop"))
+    assert code == 0, out + err
+    assert "helper 7 a 0" in out, out + err
