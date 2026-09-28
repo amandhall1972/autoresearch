@@ -1,6 +1,6 @@
 [project]
 name = "ipo-momentum-engine"
-version = "1.16.0"
+version = "1.17.0"
 description = "IPO base-breakout momentum engine: historical sync, live tick bar synthesis, AVWAP/RVOL alpha, risk-capped execution"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.16)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.17)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -1132,6 +1132,8 @@ class LiveTickAdapter:
                 if tick.timestamp <= tick.received:
                     # Only such a stamp can prove a bucket (below): one ahead of its own receipt may be forward, and
                     # then the update happened before it (on a host behind the exchange it may be genuine: missed).
+                    # The newest replaces an earlier one that would pass the feed-time check: either may be forward,
+                    # and no sample tells which, so trying the earlier one would prove more forward stamps too.
                     proof = self._proof_stamp.get(sym)
                     self._proof_stamp[sym] = (self._feed_epoch, max(proof[1], tick.timestamp)
                                               if proof is not None and proof[0] == self._feed_epoch else tick.timestamp)
@@ -1144,9 +1146,10 @@ class LiveTickAdapter:
             return
         # An unstamped print that opens a bar may be the bucket before's (latency rose, by any amount): its bar is
         # ambiguous, and is not evaluated if the back-filled bucket before it traded. With no bar open and within
-        # the grace, it is also provisional: a stamped print of the bucket before moves the bar there. A stamp of
-        # this bucket received before it (stamped no later than its own receipt and than the print's feed time)
-        # proves the bucket: in-order delivery puts the print after it.
+        # the grace, it is also provisional: a stamped print of the bucket before moves the bar there. The newest
+        # stamp received before it that is no later than its own receipt proves the bucket if it is of this bucket and
+        # no later than the print's feed time: in-order delivery puts the print after it. A later update of the
+        # bucket voids an earlier stamp that would have proved it (a missed signal, never a fake one).
         last = self._proof_stamp.get(sym)
         proven = last is not None and last[0] == self._feed_epoch \
             and boundary <= last[1] < boundary + width and last[1] <= (proof_by or last[1])
@@ -1437,15 +1440,23 @@ class KiteOrderGateway(OrderGateway):
 
     @staticmethod
     def _tunnel_refused(e: BaseException) -> bool:
-        """True if a proxy refused the CONNECT for Kite (403, 407, 502, 503...). urllib3 raises this only
-        from its tunnel set-up and writes a request only through an open tunnel, so the proxy received
-        the CONNECT line and nothing else: the order never left. The GTT path keeps treating it as
-        ambiguous on purpose: attempts plus book polls ride out a longer proxy outage than one never-sent
-        window would. Refused tunnels alone never make a GTT possible, so they use every attempt even
-        while the book is unreadable, and start no duplicate watch."""
+        """True if a proxy refused the CONNECT for Kite (403, 407, 502, 503...), or the tunnel set-up timed
+        out (a proxy that did not answer the CONNECT within the client timeout, e.g. while it could not reach
+        Kite). urllib3 raises both only from its tunnel set-up (the timeout as a ReadTimeoutError naming the
+        proxy's URL; a read timeout after a request was sent names the request's path) and writes a request
+        only through an open tunnel, so no request byte was sent: the order never left. The GTT path keeps
+        treating it as ambiguous on purpose: attempts plus book polls ride out a longer proxy outage than one
+        never-sent window would. Refused tunnels alone never make a GTT possible, so they use every attempt
+        even while the book is unreadable, and start no duplicate watch."""
         reason = getattr(e.args[0], "reason", None) if type(e).__name__ == "ProxyError" and e.args else None
         reason = getattr(reason, "original_error", None)
-        return isinstance(reason, OSError) and str(reason).startswith("Tunnel connection failed:")
+        if isinstance(reason, OSError) and str(reason).startswith("Tunnel connection failed:"):
+            return True
+        # A TLS proxy (https://) that did not finish its handshake: urllib3 wraps the same timeout in ProxyError.
+        timeout = e.args[0] if type(e).__name__ == "ReadTimeout" and e.args else reason
+        proxy = getattr(getattr(timeout, "pool", None), "proxy", None)
+        return type(timeout).__name__ == "ReadTimeoutError" and proxy is not None \
+            and getattr(timeout, "url", None) == proxy.url
 
     def __init__(self, kite, exchange: str = "NSE", product: str = "CNC", fill_timeout: float = 30.0,
                  poll_interval: float = 1.0, cancel_grace: float = 15.0, stop_limit_buffer: float = 0.02,
@@ -1468,13 +1479,16 @@ class KiteOrderGateway(OrderGateway):
         # reply can take longer; the entry is then still awaited, never interrupted.
         sdk_timeout = float(getattr(kite, "timeout", None) or 7.0)
         self.settle_timeout = fill_timeout + 12 * cancel_grace + 20 * (sdk_timeout + poll_interval)
+        self._state_errors: Dict[str, Exception] = {}   # order id -> the error of its latest failed state read
 
     async def _poll_state(self, order_id: str) -> Optional[dict]:
         try:
             history = await asyncio.to_thread(self.kite.order_history, order_id)
         except Exception as e:
             logger.warning(f"order_history({order_id}) failed: {e!r}; retrying.")
+            self._state_errors[order_id] = e             # named if the state is never confirmed
             return None
+        self._state_errors.pop(order_id, None)
         return history[-1] if history else None
 
     async def _wait_terminal(self, order_id: str, timeout: float,
@@ -1492,17 +1506,22 @@ class KiteOrderGateway(OrderGateway):
                 return None, last
             await asyncio.sleep(self.poll_interval)
 
-    async def _cancel_and_settle(self, sym: str, order_id: str, last: Optional[dict]) -> Tuple[Optional[dict], Optional[dict]]:
+    async def _cancel_and_settle(self, sym: str, order_id: str, last: Optional[dict]
+                                 ) -> Tuple[Optional[dict], Optional[dict], Optional[Exception]]:
+        """(terminal state or None, last state seen, the last cancel error if no cancel was accepted)."""
+        cancel_error = None
         for attempt in range(3):
             try:
                 await asyncio.to_thread(self.kite.cancel_order, self.kite.VARIETY_REGULAR, order_id)
+                cancel_error = None
                 break
             except Exception as e:
                 # It may already be complete or cancelled; polling below decides either way.
+                cancel_error = e
                 logger.error(f"[{sym}] Cancel of {order_id} failed (attempt {attempt + 1}/3): {e!r}")
                 await asyncio.sleep(self.poll_interval)
         terminal, seen = await self._wait_terminal(order_id, self.cancel_grace)
-        return terminal, seen or last
+        return terminal, seen or last, cancel_error
 
     async def _find_by_tag(self, sym: str, tag: str, cause: Exception) -> str:
         """The order id for ``tag``, polling the order book for ``cancel_grace`` seconds (the broker
@@ -1756,12 +1775,16 @@ class KiteOrderGateway(OrderGateway):
         logger.info(f"[{sym}] Entry order {order_id} placed: BUY {plan.quantity} LIMIT {plan.entry_limit:.2f}")
 
         terminal, last = await self._wait_terminal(order_id, self.fill_timeout, interruptible=True)
+        cancel_error = None
         if terminal is None:
             why = "shutdown began" if self.stopping else f"not filled in {self.fill_timeout:.0f}s"
             logger.warning(f"[{sym}] Entry {order_id} {why}; cancelling remainder.")
-            terminal, last = await self._cancel_and_settle(sym, order_id, last)
+            terminal, last, cancel_error = await self._cancel_and_settle(sym, order_id, last)
         if terminal is None:
             # The cancel is unconfirmed: protect what is known to be bought, then keep the symbol blocked.
+            read_error = self._state_errors.pop(order_id, None)
+            why = (f" (every cancel failed, last: {cancel_error!r})" if cancel_error else "") + \
+                (f"; the last read of its state failed ({read_error!r})" if read_error else "")
             fill = await self._protect(plan, order_id, last, known) if last and int(last.get('filled_quantity') or 0) > 0 else None
             known = ""
             if fill is not None:
@@ -1770,7 +1793,7 @@ class KiteOrderGateway(OrderGateway):
                          "of UNKNOWN GTT state (a GTT may exist: CHECK THE GTT BOOK)" if fill.exits_unknown else
                          "NOT covered by a GTT")
                 known = f"; {fill.quantity} shares already bought are {cover}"
-            raise OrderStateUnknown(sym, order_id, f"not terminal {self.cancel_grace:.0f}s after cancelling{known}; "
+            raise OrderStateUnknown(sym, order_id, f"not terminal {self.cancel_grace:.0f}s after cancelling{why}{known}; "
                                                    f"the remainder may still be working", fill=fill)
         return await self._protect(plan, order_id, terminal, known)
 
@@ -2520,6 +2543,51 @@ async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> 
     if problem:
         logger.critical(problem)
         return 2
+
+    # Ctrl-C, `kill`/systemd/docker stop and a closed terminal are taken before the first await, for the whole call.
+    # A stop while the engine starts (IP check, instrument dump, history sync) must not be lost: as a container's
+    # PID 1 the kernel drops a signal left at its default, and in a host already running engines they alone would
+    # take it. The engine would then trade after the stop, until the supervisor's SIGKILL. Nothing can be in flight
+    # yet, so the start is abandoned. Once the run begins, the same route takes the orderly shutdown in _engine().
+    # _StopRoutes honours nohup and hands every signal back afterwards.
+    loop, task = asyncio.get_running_loop(), asyncio.current_task()
+
+    def route(signum: int):
+        route.handler(signum)
+
+    def ignore(signum: int):
+        logger.warning(f"Signal {signum} received; shutdown already in progress, signal ignored.")
+
+    def stop_starting(signum: int):
+        route.handler, route.stopped = ignore, signum
+        logger.warning(f"Signal {signum} received while starting: not starting.")
+        task.cancel()
+
+    route.handler, route.running, route.stopped = stop_starting, False, None
+    hooked = _STOP_ROUTES.hook(loop, route)
+    missed = [signal.Signals(s).name for s in STOP_SIGNALS if s not in hooked and signal.getsignal(s) != signal.SIG_IGN]
+    if missed:
+        # Python runs signal handlers in the main thread only, and a signal another live loop owns goes to that loop.
+        logger.warning(f"{', '.join(missed)} cannot reach this engine (it runs off the main thread, or another event "
+                       f"loop owns them): such a stop ends the process without settling an entry in flight. Run main() "
+                       f"in the main thread, or forward a stop by cancelling its task from there, which settles in order.")
+    try:
+        return await _engine(args, route)
+    except asyncio.CancelledError:
+        if route.stopped is None:
+            raise                                     # cancelled from outside while starting
+        if hasattr(task, "uncancel"):
+            task.uncancel()                           # 3.11+: the cancel was the engine's own, not the host's
+        return 128 + route.stopped
+    finally:
+        route.handler = ignore                        # a repeat, or one after a failed start, never cancels the task
+        if hold_signals:
+            route.held = True                 # still routed; dropped once the host takes the signal back
+        else:
+            _STOP_ROUTES.unhook(loop, route, hooked)
+
+async def _engine(args: argparse.Namespace, route: Callable[[int], None]) -> int:
+    """main()'s start and run. ``route`` is the callback main() hooked: the run points it at its orderly shutdown."""
     if args.expect_ip and not await verify_hardware_ip(args.expect_ip):
         return 1
 
@@ -2611,50 +2679,43 @@ async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> 
         logger.warning(f"Signal {signum} received: shutting down in order.")
         runtime.cancel()
 
-    # Ctrl-C, `kill`/systemd/docker stop and a closed terminal all take the orderly path below, so an
-    # entry in flight is always settled. _StopRoutes honours nohup and hands every signal back afterwards.
-    hooked = _STOP_ROUTES.hook(loop, on_stop_signal)
+    # From here a stop takes the orderly path below, so an entry in flight is always settled.
+    route.handler, route.running = on_stop_signal, True
 
     try:
-        try:
-            # Workers loop forever; one finishing early means it crashed, and the engine must not run half-blind.
-            done, _ = await asyncio.wait({runtime, *workers}, return_when=asyncio.FIRST_COMPLETED)
-            for t in workers:
-                if t in done:
-                    exit_code = 1
-                    logger.critical(f"Worker '{t.get_name()}' stopped unexpectedly: {t.exception()!r}. Shutting down.")
-        except asyncio.CancelledError:
-            stop_signal = stop_signal or getattr(signal, "SIGINT", 2)   # cancelled from outside (no handler)
-        finally:
-            shutting_down = True
-            oms.accepting, gateway.stopping = False, True    # before the first await
-            # 1. Stop everything that can produce ticks or signals.
-            if feed is not None:
-                feed.close()
-            for t in [runtime, *helpers, tick_worker, clock_worker, *workers[3:]]:
-                t.cancel()
-            await asyncio.gather(runtime, *helpers, tick_worker, clock_worker, *workers[3:], return_exceptions=True)
-            await ticker.cancel_backfills()
-            if ticker.tick_queue.qsize():
-                logger.info(f"{ticker.tick_queue.qsize()} queued ticks discarded at shutdown.")
-            # 2. Let the order in flight settle: the gateway stops waiting for fills, cancels what is
-            #    working and protects what filled. An entry that may exist at the broker runs as a
-            #    shielded task, so even interrupting the router cannot abandon it.
-            try:
-                await asyncio.wait_for(oms_queue.join(), timeout=oms.settle_timeout)
-            except asyncio.TimeoutError:
+        # Workers loop forever; one finishing early means it crashed, and the engine must not run half-blind.
+        done, _ = await asyncio.wait({runtime, *workers}, return_when=asyncio.FIRST_COMPLETED)
+        for t in workers:
+            if t in done:
                 exit_code = 1
-                logger.critical(f"The order router did not settle within {oms.settle_timeout:.0f}s; "
-                                f"waiting for the entry in flight to finish on its own deadlines.")
-            oms_worker.cancel()
-            await asyncio.gather(oms_worker, return_exceptions=True)
-            await gateway.wait_inflight()
-        return _halt_report(oms, gateway, ticker, exit_code, stop_signal)
+                logger.critical(f"Worker '{t.get_name()}' stopped unexpectedly: {t.exception()!r}. Shutting down.")
+    except asyncio.CancelledError:
+        stop_signal = stop_signal or getattr(signal, "SIGINT", 2)   # cancelled from outside (no handler)
     finally:
-        if hold_signals:
-            on_stop_signal.held = True        # still routed; dropped once the host takes the signal back
-        else:
-            _STOP_ROUTES.unhook(loop, on_stop_signal, hooked)
+        shutting_down = True
+        oms.accepting, gateway.stopping = False, True    # before the first await
+        # 1. Stop everything that can produce ticks or signals.
+        if feed is not None:
+            feed.close()
+        for t in [runtime, *helpers, tick_worker, clock_worker, *workers[3:]]:
+            t.cancel()
+        await asyncio.gather(runtime, *helpers, tick_worker, clock_worker, *workers[3:], return_exceptions=True)
+        await ticker.cancel_backfills()
+        if ticker.tick_queue.qsize():
+            logger.info(f"{ticker.tick_queue.qsize()} queued ticks discarded at shutdown.")
+        # 2. Let the order in flight settle: the gateway stops waiting for fills, cancels what is
+        #    working and protects what filled. An entry that may exist at the broker runs as a
+        #    shielded task, so even interrupting the router cannot abandon it.
+        try:
+            await asyncio.wait_for(oms_queue.join(), timeout=oms.settle_timeout)
+        except asyncio.TimeoutError:
+            exit_code = 1
+            logger.critical(f"The order router did not settle within {oms.settle_timeout:.0f}s; "
+                            f"waiting for the entry in flight to finish on its own deadlines.")
+        oms_worker.cancel()
+        await asyncio.gather(oms_worker, return_exceptions=True)
+        await gateway.wait_inflight()
+    return _halt_report(oms, gateway, ticker, exit_code, stop_signal)
 
 def _halt_report(oms: "ExecutionRouter", gateway: OrderGateway, ticker: LiveTickAdapter, exit_code: int,
                  stop_signal: Optional[int]) -> int:

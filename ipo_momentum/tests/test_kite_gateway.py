@@ -1259,3 +1259,130 @@ def test_the_read_after_the_last_refused_tunnel_still_names_an_expired_session()
     fill = asyncio.run(gw.execute(kite_plan()))
     assert (fill.exit_order_id, fill.exits_unknown) == (None, False) and kite.gtt_places == 3
     assert "POSITION OPEN WITHOUT EXITS" in gw.alerts[-1] and "the GTT book answered TokenException" in gw.alerts[-1]
+
+
+# ---------------------------------------------------------------- round 17: a tunnel set-up that timed out sent nothing
+def silent_port():
+    """A local socket that accepts connections and never answers (a proxy still trying to reach Kite); close() it."""
+    import socket
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(8)
+    held = []
+
+    def hold():
+        while True:
+            try:
+                held.append(server.accept()[0])                           # read nothing, answer nothing
+            except OSError:
+                return                                                    # closed
+
+    threading.Thread(target=hold, daemon=True).start()
+    return server, held
+
+
+def silent_request(proxy_scheme=None):
+    """What requests raises when the peer accepts the connection and never answers, within the client timeout."""
+    server, held = silent_port()
+    port = server.getsockname()[1]
+    session = requests.Session()
+    session.trust_env = False
+    if proxy_scheme:
+        session.proxies = {"https": f"{proxy_scheme}://127.0.0.1:{port}"}
+    try:
+        session.post("https://api.kite.trade/orders/regular" if proxy_scheme else f"http://127.0.0.1:{port}/orders",
+                     data={"tag": "x"}, timeout=0.3)
+    except (requests.exceptions.ReadTimeout, requests.exceptions.ProxyError) as e:
+        return e
+    finally:
+        server.close()
+        for conn in held:
+            conn.close()
+    raise AssertionError("the request did not time out")
+
+
+def unanswered_connect():
+    """The proxy read the CONNECT and never answered it: urllib3's tunnel set-up timed out, naming the proxy's URL."""
+    return silent_request("http")
+
+
+def lost_reply_through_the_tunnel(connect_timeout):
+    """A reply lost after the request went through the tunnel, as urllib3's _make_request raises it: the same pool, but
+    the error names the request's path, not the proxy."""
+    import urllib3
+    return requests.exceptions.ReadTimeout(urllib3.exceptions.ReadTimeoutError(
+        connect_timeout.args[0].pool, "/orders/regular", "Read timed out. (read timeout=0.3)"))
+
+
+def test_a_tunnel_set_up_that_timed_out_counts_as_a_refused_tunnel():
+    # urllib3 writes a request only through an open tunnel, so a CONNECT the proxy never answered (squid waits up to
+    # its connect_timeout for Kite before it answers) carried nothing to Kite. v1.16 took it for a lost reply.
+    stalled = unanswered_connect()
+    assert type(stalled) is requests.exceptions.ReadTimeout
+    assert engine.KiteOrderGateway._tunnel_refused(stalled) and not engine.KiteOrderGateway._never_sent(stalled)
+    assert engine.KiteOrderGateway._tunnel_refused(silent_request("https"))  # a TLS proxy that never finished the handshake
+    # Controls: a read timeout after the request was sent, through the tunnel or with no proxy, may have reached Kite.
+    assert not engine.KiteOrderGateway._tunnel_refused(lost_reply_through_the_tunnel(stalled))
+    assert not engine.KiteOrderGateway._tunnel_refused(silent_request())
+    assert not engine.KiteOrderGateway._tunnel_refused(requests.exceptions.ReadTimeout("read timed out"))
+
+
+@pytest.mark.parametrize("sent", [False, True])
+def test_an_entry_whose_connect_the_proxy_never_answered_releases_the_symbol(sent):
+    # v1.16 looked the tag up through the same stalled proxy and blocked the symbol for the session (exit 1, ATTENTION
+    # "entry outcome unknown") for an order that never left. Control: a reply lost after the request was sent.
+    stalled = unanswered_connect()
+    kite = StubKite([OPEN], place_error=lost_reply_through_the_tunnel(stalled) if sent else stalled, orders_result=[])
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    if sent:
+        assert r.active_inventory == {"SWIGGY"} and "entry outcome unknown" in r.unresolved[0]
+    else:
+        assert r.active_inventory == set() and r.unresolved == [] and "orders" not in kite.routes()
+
+
+def test_a_proxy_outage_that_stalls_the_connect_is_ridden_out_with_every_attempt():
+    # The GTT book is behind the same stalled proxy. v1.16 took the first stalled CONNECT for a request that may have
+    # booked a GTT, polled the unreadable book for two windows and gave up with two attempts unused: GTT STATE UNKNOWN
+    # for a position that surely had no GTT, where a proxy answering 502 got its GTT armed.
+    stalled = unanswered_connect()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[stalled, stalled, {"trigger_id": 777}])
+    proxy_outage(kite, stalled, until_places=3)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == ("777", False) and kite.gtt_places == 3 and gw.alerts == []
+
+
+@pytest.mark.parametrize("sent", [False, True])
+def test_stalled_connects_alone_leave_a_position_known_to_have_no_gtt(sent):
+    # Control: a reply lost after the request was sent may have booked a GTT, so its state stays UNKNOWN.
+    stalled = unanswered_connect()
+    error = lost_reply_through_the_tunnel(stalled) if sent else stalled
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}], gtt_results=[error],
+                    gtt_book=error)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert fill.exit_order_id is None and kite.created_gtts == [] and len(gw.alerts) == 1
+    if sent:
+        assert fill.exits_unknown and kite.gtt_places == 1 and "GTT STATE UNKNOWN" in gw.alerts[0]
+    else:
+        assert not fill.exits_unknown and kite.gtt_places == 3 and "POSITION OPEN WITHOUT EXITS" in gw.alerts[0]
+
+
+# ---------------------------------------------------------------- round 17: an unconfirmed entry says why
+def test_an_unconfirmed_entry_names_the_failed_cancels_and_state_reads():
+    # The session expires after the order was placed: every cancel and state read answers 403. v1.16's ATTENTION said
+    # only "not terminal 15s after cancelling", as if a cancel had been accepted, and never named the expired session.
+    kite = StubKite([OPEN, TOKEN], cancel_results=[TOKEN])
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert r.active_inventory == {"SWIGGY"} and kite.routes().count("order.cancel") == 3
+    assert "(every cancel failed, last: TokenException(" in r.unresolved[0]
+    assert "the last read of its state failed (TokenException(" in r.unresolved[0]
+
+
+def test_an_accepted_cancel_whose_state_stays_open_names_nothing_more():
+    # Control: the cancel was accepted and the latest read succeeded (an earlier one failed), so no error is named.
+    kite = StubKite([KE.NetworkException("Gateway timed out", code=504), OPEN])
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    assert r.unresolved == ["[SWIGGY] order 260928000000001: not terminal 0s after cancelling; "
+                            "the remainder may still be working"]

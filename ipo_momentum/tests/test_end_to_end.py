@@ -517,8 +517,12 @@ def loop_callback(loop, signum):
     return getattr(getattr(handle, "_callback", None), "__qualname__", None)
 
 
-async def hooked(n, run, signum=signal.SIGTERM):     # until n engines take signum (a fixed sleep races start-up)
-    while len(engine._STOP_ROUTES.routes.get(signum, {{}}).get("callbacks", ())) < n:
+def running(signum):     # engines that take signum and have started their run (v1.16's hooked only then, unflagged)
+    return sum(getattr(c, "running", True) for c in engine._STOP_ROUTES.routes.get(signum, {{}}).get("callbacks", ()))
+
+
+async def hooked(n, run, signum=signal.SIGTERM):     # until n engines run with signum (a fixed sleep races start-up)
+    while running(signum) < n:
         if run.done():
             raise SystemExit(f"the engine exited before hooking {{signum}}: {{run.result()!r}}")
         await asyncio.sleep(0.01)
@@ -594,7 +598,8 @@ def test_a_host_that_stops_its_loop_on_sigterm_cannot_cut_the_shutdown_short(loo
                                              "--run-seconds", "30"]))
 
         async def stop_once_hooked():                                 # a fixed delay races start-up
-            while not engine._STOP_ROUTES.routes.get(signal.SIGTERM, {{}}).get("callbacks") and not task.done():
+            while not any(getattr(c, "running", True) for c in engine._STOP_ROUTES.routes.get(signal.SIGTERM, {{}})
+                          .get("callbacks", ())) and not task.done():
                 await asyncio.sleep(0.01)
             os.kill(os.getpid(), signal.SIGTERM)
 
@@ -1043,8 +1048,8 @@ ARGS = ["--source", "csv", "--csv", {csv!r}, "--no-simulate", "--run-seconds"]
 engine.configure_logging()
 
 
-async def until_hooked(n, signum=signal.SIGTERM):
-    while len(engine._STOP_ROUTES.routes.get(signum, {{}}).get("callbacks", ())) < n:
+async def until_hooked(n, signum=signal.SIGTERM):   # until n engines run with signum
+    while sum(getattr(c, "running", True) for c in engine._STOP_ROUTES.routes.get(signum, {{}}).get("callbacks", ())) < n:
         await asyncio.sleep(0.01)
 
 
@@ -1941,3 +1946,166 @@ def test_a_child_that_lifted_a_guard_with_the_saved_dispatcher_gets_the_hosts_pl
     """, uvloop=(loop_kind == "uvloop"))
     assert code == 0, out + err
     assert "helper 7 a 0" in out, out + err
+
+
+# ---------------------------------------------------------------- round 17: a stop while starting, engines off the main thread
+GATED_HISTORY = """
+import asyncio
+gate, booting = asyncio.Event(), asyncio.Event()
+_fetch = engine.CsvReplayAdapter.fetch_historical_bars
+
+
+async def gated(self, symbol, *args, **kwargs):                        # still loading history until the gate opens
+    if symbol in SLOW:
+        booting.set()
+        engine.logger.info(f"[{symbol}] history sync under way")
+        await gate.wait()
+    return await _fetch(self, symbol, *args, **kwargs)
+
+
+engine.CsvReplayAdapter.fetch_historical_bars = gated
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+def test_an_engine_still_starting_beside_running_ones_takes_their_stop(loop_kind):
+    # v1.16 took the stop signals only once the history was loaded. A host's running engines took a supervisor's stop
+    # alone and handed the signal back; one still starting then ran on as if never stopped, trading until the
+    # supervisor's SIGKILL.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host("""
+        engine.configure_logging()
+        globals().update(SLOW={"LATECO"})
+        exec(GATED, globals())
+        a = asyncio.create_task(engine.main(ARGS + ["30"]))
+        b = asyncio.create_task(engine.main(ARGS + ["30", "--symbol", "LATECO"]))
+        await hooked(1, a)
+        await booting.wait()
+        os.kill(os.getpid(), signal.SIGTERM)
+        print("a", await a, flush=True)
+        gate.set()
+        done, _ = await asyncio.wait({b}, timeout=3)
+        print("b", b.result() if done else "still running", flush=True)
+        b.cancel()
+        await asyncio.gather(b, return_exceptions=True)
+    """.replace("GATED", repr(GATED_HISTORY)), uvloop=loop_kind == "uvloop")
+    assert code == 0, out + err
+    assert "a 143" in out and "b 143" in out, out + err
+    assert "Signal 15 received while starting: not starting." in err
+    assert "[LATECO] Map established" not in err, err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_stop_while_starting_is_the_engines_own_and_leaves_the_hosts_task_alone():
+    # The start is abandoned by cancelling main()'s task: awaited inline, that is the host's own task, which must not be
+    # left cancelling (3.11+), nor be cancelled by a later stop that a failed start holds. The host's own cancel while
+    # starting is not a stop: it propagates.
+    code, out, err = run_host("""
+        globals().update(SLOW={"SWIGGY"})
+        exec(GATED, globals())
+
+        async def stop_while_starting():
+            await booting.wait()
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        stopper = asyncio.create_task(stop_while_starting())
+        result = await engine.main(ARGS + ["30"])                     # awaited inline: runs in the host's own task
+        await asyncio.sleep(0.05)
+        print("inline", result, getattr(asyncio.current_task(), "cancelling", lambda: 0)(), flush=True)
+        failed = await engine.main(["--source", "csv", "--csv", "/nonexistent.csv"], hold_signals=True)
+        os.kill(os.getpid(), signal.SIGTERM)                          # held: logged and ignored
+        await asyncio.sleep(0.2)
+        engine.release_signals()
+        print("failed start", failed, flush=True)
+        booting.clear()
+        run = asyncio.create_task(engine.main(ARGS + ["30"]))
+        await booting.wait()
+        run.cancel()
+        try:
+            print("outside cancel returned", await run, flush=True)
+        except asyncio.CancelledError:
+            print("outside cancel raised", "routes", sorted(map(int, engine._STOP_ROUTES.routes)), flush=True)
+    """.replace("GATED", repr(GATED_HISTORY)))
+    assert code == 0, out + err
+    assert "inline 143 0" in out and "failed start 1" in out and "outside cancel raised routes []" in out, out + err
+    assert "Signal 15 received; shutdown already in progress, signal ignored." in err, err
+
+
+def _stop_while_starting(pid1):
+    code = "\n".join([DEFAULT_STOPS, "import sys", f"sys.path.insert(0, {str(Path(engine.__file__).parent)!r})",
+                      "import engine", "SLOW = {'SWIGGY'}", GATED_HISTORY, f"sys.exit(engine.run({DEMO!r}))"])
+    cmd = [sys.executable, "-c", code]
+    proc = subprocess.Popen((["unshare", "--pid", "--fork", "--kill-child"] if pid1 else []) + cmd,
+                            stderr=subprocess.PIPE, text=True)
+    lines = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in proc.stderr] + [lines.put(None)], daemon=True).start()
+    log, engine_pid = [], proc.pid
+    try:
+        while (line := lines.get(timeout=30)) is not None and "history sync under way" not in line:
+            log.append(line)
+        if pid1:
+            engine_pid = int(Path(f"/proc/{proc.pid}/task/{proc.pid}/children").read_text().split()[0])
+        os.kill(engine_pid, signal.SIGTERM)                            # docker stop, while the engine starts
+        code = proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        code = "still running 10 s after the stop"
+    finally:
+        for pid in {engine_pid, proc.pid}:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        proc.wait()
+    while (line := lines.get(timeout=10)) is not None:
+        log.append(line)
+    return code, "".join(log)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_a_stop_while_the_engine_starts_is_taken_not_left_to_the_default():
+    # A container's PID 1 drops a signal left at its default, so the engine must hold the stop signals from the
+    # moment main() starts. v1.16 left them at SIG_DFL until its history was loaded.
+    code, err = _stop_while_starting(pid1=False)
+    assert code == 143, err
+    assert "Signal 15 received while starting: not starting." in err and "Map established" not in err, err
+
+
+def _can_unshare_pid():
+    try:
+        return subprocess.run(["unshare", "--pid", "--fork", "--kill-child", "true"], capture_output=True,
+                              timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux") or not _can_unshare_pid(),
+                    reason="needs a PID namespace (unshare --pid)")
+def test_as_a_containers_pid_1_a_stop_while_starting_is_not_lost():
+    # `docker stop` of an engine run as the container's PID 1 (no --init): v1.16's kernel-dropped SIGTERM let it start,
+    # trade, and be killed by the SIGKILL at the end of the grace period.
+    code, err = _stop_while_starting(pid1=True)
+    assert code == 143, err
+    assert "Signal 15 received while starting: not starting." in err and "Map established" not in err, err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_an_engine_that_no_stop_signal_can_reach_says_so():
+    # Python runs signal handlers in the main thread only: v1.16 ran an engine on a worker thread with no stop handling
+    # at all, silently, so `kill` or `docker stop` ended it mid-entry. An ignored signal (nohup) is not reported.
+    code = "\n".join([DEFAULT_STOPS, "import signal, sys, threading",
+                      f"sys.path.insert(0, {str(Path(engine.__file__).parent)!r})", "import engine", textwrap.dedent(f"""
+        args = ["--source", "csv", "--csv", {str(FIXTURE)!r}, "--no-simulate", "--run-seconds", "0.2"]
+        result = []
+        worker = threading.Thread(target=lambda: result.append(engine.run(args)))
+        worker.start()
+        worker.join()
+        print("thread", result, flush=True)
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        print("main", engine.run(args), flush=True)
+    """)])
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    assert "thread [0]" in proc.stdout and "main 0" in proc.stdout, proc.stdout + proc.stderr
+    assert proc.stderr.count("cannot reach this engine") == 1, proc.stderr
+    assert "SIGINT, SIGTERM, SIGHUP cannot reach this engine (it runs off the main thread" in proc.stderr

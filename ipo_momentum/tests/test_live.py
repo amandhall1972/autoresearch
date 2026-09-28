@@ -2474,15 +2474,17 @@ def test_a_partial_bar_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_r
 @pytest.mark.parametrize("lead,forward,honest", [
     (3.0, [(57.1, 0), (58.1, 1)], 1),                    # a host 3 s ahead: 2 of 3 samples ~2.9 s forward
     (3.0, [(57.1, 0), (58.1, 1), (59.1, 2)], 2),         # 3 of 5
-    (0.0, [(59.55, 0)], 1),                              # a synced host: one stamp 0.45 s forward
+    (0.0, [(59.55, 0)], 1),                              # a synced host: one stamp 0.45 s forward, ahead of its receipt
+    (0.0, [(59.65, 0)], 1),                              # 0.35 s forward, received after it: only feed time catches it
 ])
 def test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket(lead, forward, honest):
     # v1.15 let a stamp prove an unstamped print's bucket if it was no later than the print's receipt. A host `lead` s
     # ahead of the exchange reads that receipt `lead` s late, so quotes stamped with whole seconds 10:05:00, :01 and :02
-    # for trades at 10:04:57.1, 58.1 and 59.1 (on a synced host, one stamped 10:05:00 at 10:04:59.55, less than the
-    # print's latency ahead) still "proved" 10:05 for B, 10:00's only trade at 10:04:59.9: its bar was evaluated while
-    # the back-fill of 10:00 counted B's 2,000 shares again (3,500 against a true 1,500). The honest sample, the
-    # largest, holds the host's lead: the stamp must be no later than B's feed time.
+    # for trades at 10:04:57.1, 58.1 and 59.1 (on a synced host, one stamped 10:05:00 at 10:04:59.55 or 59.65, less
+    # than the print's latency ahead) still "proved" 10:05 for B, 10:00's only trade at 10:04:59.9: its bar was
+    # evaluated while the back-fill of 10:00 counted B's 2,000 shares again (3,500 against a true 1,500). The honest
+    # sample, the largest, holds the host's lead: the stamp must be no later than B's feed time. The 59.55 stamp is
+    # also ahead of its own receipt, which rejects it alone; the 59.65 one, received 0.05 s after its stamp, is not.
     alpha = RecordingAlpha()
     broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0))
     host = lambda t: t + timedelta(seconds=lead)        # noqa: E731
@@ -2540,6 +2542,44 @@ def test_on_a_host_running_ahead_a_stamp_of_its_own_bucket_received_first_still_
 
     asyncio.run(scenario())
     assert pd.Timestamp(ist(2026, 9, 25, 11, 5)) in [idx for _, idx in alpha.evaluated]
+
+
+# ---------------------------------------------------------------- round 17: only the newest stamp is tried
+@pytest.mark.parametrize("later", [None, "after_feed_time", "ahead_of_receipt"])
+def test_a_later_update_of_the_bucket_voids_an_earlier_stamps_proof(later):
+    # A synced host whose largest lag sample is 0.4 s. Q1, a quote stamped 10:05:00, is received at 10:05:00.1; B, an
+    # unstamped trade, at 10:05:03.3 (feed time 10:05:02.9). Q1 passes both checks and, with no later update, proves
+    # 10:05 (the control). A later update of 10:05 received before B, stamped 10:05:03 (after B's feed time), voids it:
+    # only the newest stamp no later than its own receipt is tried. Q1 and it may both be forward (updates at 10:04:59.5
+    # and 10:04:59.7), with B, 10:00's only trade, at 10:04:59.9 and 3.4 s late (slower than every sample): trying Q1 too
+    # would evaluate B's bar while the back-fill of 10:00 counts B's 2,000 shares again. A genuine twin is missed (the
+    # README says so). An update stamped ahead of its own receipt proves nothing and voids nothing: Q1 still proves.
+    alpha = RecordingAlpha()
+    broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        for second in (10, 30, 50):
+            a.on_tick(at_host(100.2, 13_000, ist(2026, 9, 25, 10, 4, second), 0.4))    # quotes, 0.4 s late
+        a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5), -0.1))                # Q1
+        if later is not None:
+            stamp = ist(2026, 9, 25, 10, 5, 3 if later == "after_feed_time" else 4)
+            q = stamped(100.2, 13_000, stamp, 0)
+            q.received = ist(2026, 9, 25, 10, 5, 3, 100000)
+            a.on_tick(q)
+        now[0] = ist(2026, 9, 25, 10, 5, 3, 300000)
+        a.on_tick(a._normalize(zeroed(15_000, 100.3)))                                  # B
+        assert (a.current_bars["SWIGGY"]["timestamp"], a.current_bars["SWIGGY"]["ambiguous"]) == \
+            (ist(2026, 9, 25, 10, 5), later == "after_feed_time")
+        a.on_tick(at_host(100.9, 16_500, ist(2026, 9, 25, 10, 7), 0.3))
+        a.on_tick(at_host(100.9, 16_600, ist(2026, 9, 25, 10, 10, 1), 0.3))           # closes 10:05 across the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert (pd.Timestamp(ist(2026, 9, 25, 10, 5)) in [idx for _, idx in alpha.evaluated]) is (later != "after_feed_time")
 
 
 # ---------------------------------------------------------------- round 16: each kept bar clears the discarded-bar mark

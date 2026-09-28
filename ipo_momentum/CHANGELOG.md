@@ -1,5 +1,95 @@
 # Changelog
 
+## v1.17 (2026-09-28)
+
+v1.16 went through a seventeenth adversarial review on a frozen snapshot
+(`a3cba49`), with the same four areas. Every finder and skeptic completed.
+There were 8 findings, with no duplicates, and none refuted: 6 confirmed, 2
+with part of the claim overstated (R17-FEED-1, R17-DATA-DOCS-3). 1 is high, 2
+medium and 5 low. The high one, in the lifecycle area that v1.16 did not
+change, is older than every round that reviewed it: a stop that arrived while
+an engine was starting was lost. Where the fix is not the finder's:
+- R17-LIFECYCLE-1: the finder's version hooked the signals early and kept a
+  phase table; the skeptic's does the same with one callback whose handler
+  changes at the start of the run, in the same synchronous step, so no stop can
+  fall between the two phases. A stop while starting cancels only main()'s own
+  task (on 3.11+ the cancel is taken back, so an inline host's task is left
+  alone), and a host's own cancel during start-up still propagates.
+- R17-LIFECYCLE-2: Python allows no way for a signal to reach a worker thread,
+  so the fix is a warning at start and a documented way to forward a stop
+  (cancel main()'s task from the main thread, which settles in order).
+- R17-ORDERS-1: the skeptic also counts the same timeout from an https:// proxy
+  whose TLS handshake never finished (urllib3 wraps that one in ProxyError).
+- R17-FEED-1: the finder's code fix (try the earliest stamp of the bucket that
+  passes both checks) would also prove a forward-stamped twin that the host
+  cannot tell from the genuine case: a possible fake signal to recover missed
+  ones. v1.17 keeps v1.16's rule (only the newest stamp is tried), states it in
+  the README with its cost, and pins it.
+
+Every v1.17 regression test fails on the v1.16 snapshot and passes here, on
+Python 3.11 and 3.10. The exceptions are these controls and pins:
+- `test_an_entry_whose_connect_the_proxy_never_answered_releases_the_symbol[True]`
+  and `test_stalled_connects_alone_leave_a_position_known_to_have_no_gtt[True]`:
+  a reply lost after the request was sent stays ambiguous.
+- `test_an_accepted_cancel_whose_state_stays_open_names_nothing_more`: an
+  accepted cancel and a read that later succeeded add nothing to the message.
+- `test_a_later_update_of_the_bucket_voids_an_earlier_stamps_proof`: a pin of
+  v1.16's newest-stamp rule. It fails on the finder's earliest-stamp change.
+- The new synced-host row of
+  `test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket`:
+  a pin of v1.16's feed-time check that no other test caught alone.
+
+Every v1.17 rule was also mutated on a copy, and each mutant failed its pins:
+- a stop while starting not abandoning the start (5 tests), the engine's own
+  cancel left on the host's task (1), and the start-up handler left in place
+  after main() (1);
+- no warning when no stop signal can reach the engine (1);
+- a stalled CONNECT still counting as possibly sent, as in v1.16 (4), any read
+  timeout counting as a refused tunnel (3), and a TLS proxy's stalled
+  handshake not counted (1);
+- the cancel error not named (1), the state-read error not named (1), and a
+  successful read not clearing it (1);
+- the earliest proving stamp kept instead of the newest (5);
+- the stamp checked only against the print's receipt, as in v1.15 (5, the new
+  synced-host row among them).
+
+Existing tests changed:
+- The end-to-end sync helpers `hooked()`, `until_hooked()` and
+  `stop_once_hooked` wait for running engines, not hooked ones: an engine now
+  hooks before it starts.
+- `test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket`:
+  its synced-host row (a stamp 0.45 s ahead, which the own-receipt check
+  already rejects) is replaced by one only the feed-time check rejects (a stamp
+  ahead by less than its update's latency, and a print slower than it).
+
+### Lifecycle
+
+| Sev | Verdict | v1.16 defect | v1.17 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ✔ | main() took the stop signals only after its start-up (the IP check, the instrument dump, the history sync). A stop in those seconds was lost in two realistic set-ups. As a container's PID 1, the kernel drops a signal left at its default, so the engine started, traded, and the supervisor's SIGKILL came up to 420 s later, possibly mid-entry. In a host running one engine per IPO, the running engines alone took the stop, and the one still starting then ran on. It is older than every review round. | The stop signals are taken before the first await, for the whole call. A stop while starting abandons the start (nothing can be in flight) and returns 128+N; from the start of the run the same route takes the orderly shutdown. | `test_as_a_containers_pid_1_a_stop_while_starting_is_not_lost`, `test_an_engine_still_starting_beside_running_ones_takes_their_stop` (asyncio and uvloop), `test_a_stop_while_the_engine_starts_is_taken_not_left_to_the_default`, `test_a_stop_while_starting_is_the_engines_own_and_leaves_the_hosts_task_alone` |
+| medium | ✔ | An engine off the main thread (run() on a worker thread, which the suite supports, or main() in a worker thread's loop) took no stop signal, since Python runs handlers in the main thread only, and said nothing. SIGTERM then killed it mid-entry, with no settlement and no halt report. | A warning at start names the signals that cannot reach the engine and how to forward a stop (cancel main()'s task from the main thread). Known limitations says so. | `test_an_engine_that_no_stop_signal_can_reach_says_so` |
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.16 defect | v1.17 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | A proxy that accepted the CONNECT but never answered it (squid while its path to Kite is black-holed) raised ReadTimeout from urllib3's tunnel set-up, before any request byte was written. The gateway treated it as possibly sent: an unsent entry blocked the symbol for the session, and a filled position gave up after one GTT attempt with GTT STATE UNKNOWN, although no GTT could exist. | A timeout of the tunnel set-up (a ReadTimeoutError naming the proxy's URL, also inside ProxyError for a TLS proxy) counts as a refused tunnel. | `test_a_tunnel_set_up_that_timed_out_counts_as_a_refused_tunnel`, `test_an_entry_whose_connect_the_proxy_never_answered_releases_the_symbol`, `test_a_proxy_outage_that_stalls_the_connect_is_ridden_out_with_every_attempt`, `test_stalled_connects_alone_leave_a_position_known_to_have_no_gtt`, with controls |
+| low | ✔ | An expired session during the fill or cancel wait was never named: every state read and cancel failed, and the ATTENTION line said only that the order was "not terminal … after cancelling". | The ATTENTION line names the last cancel error when no cancel was accepted, and the last state read's error when it failed. No waiting or cancelling changes. | `test_an_unconfirmed_entry_names_the_failed_cancels_and_state_reads`, and a control |
+
+### Live feed
+
+| Sev | Verdict | v1.16 defect | v1.17 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ◐ | Only the newest stamp of a symbol's updates is tried as proof. Under v1.16's feed-time check, a later update of the same bucket, received shortly before the print, voids an earlier stamp that would have proved it: on a busy name a synced host lost 37-74% of genuine proofs (v1.15 proved them all), so more real breakouts after a traded bucket were skipped. The README said a genuine stamp still proves the bucket. (Overstated: trying the earlier stamp too would also prove a forward-stamped twin the host cannot tell apart, a possible fake signal.) | Docs: the README states that the newest stamp decides, and the cost on a busy name. | `test_a_later_update_of_the_bucket_voids_an_earlier_stamps_proof` (a pin, with controls) |
+
+### Tests and docs
+
+| Sev | Verdict | v1.16 defect | v1.17 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | The synced-host row listed as a pin of the feed-time check did not test it: the own-receipt check already rejected that stamp, so it failed only with both checks reverted. The feed-time mutant's count also left out the changed older test. | A row that only the feed-time check rejects; the v1.16 count is corrected (marked). | the new row of `test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket` |
+| low | ✔ | The v1.16 row for the last refused tunnel said the delay dated from v1.14. It dates from v1.11, and from v1.12 with the book behind the refusing proxy. | Corrected (marked). | (docs) |
+| low | ◐ | The v1.16 intro said the own-receipt check closed the hole on a synced host, and the feed-time check whenever the window held an honest sample. Neither holds for a stamp that leads by less than its update's latency, or a print slower than every sample. (Overstated: the same paragraph, like the README, then stated the combined residual correctly.) | Corrected (marked). | (docs) |
+
 ## v1.16 (2026-09-28)
 
 v1.15 went through a sixteenth adversarial review on a frozen snapshot
@@ -12,12 +102,18 @@ finder's:
 - R16-FEED-1 and R16-DATA-DOCS-1 are one hole, seen from two hosts: a
   forward-stamped update could still prove an unstamped print's bucket. The
   feed fix (a stamp proves only if it is no later than its own receipt) closes
-  it on a synced host or one running behind, but not on a host running ahead,
-  whose receipts read late. The data/docs fix (a stamp proves only if it is no
-  later than the print's feed time) closes that case whenever the window holds
-  an honest sample, and a synced host's sub-second leads, but on its own misses
-  the feed finder's repro, in which the print's latency just exceeded the
-  window's. v1.16 applies both. A forward stamp now proves a bucket only if its
+  leads beyond the update's own latency plus the host's lead: the feed finder's
+  3 s and 29 s on a synced host, but not a sub-second lead there, nor one of up
+  to the host's lead on a host running ahead, whose receipts read late. The
+  data/docs fix (a stamp proves only if it is no later than the print's feed
+  time) closes the rest for a print no slower than the window's slowest honest
+  sample, which on a host running ahead also holds its lead, but on its own
+  misses the feed finder's repro, in which the print's latency just exceeded
+  the window's. (Corrected in v1.17: this said the feed fix closed the hole on
+  a synced host, and the data/docs fix whenever the window held an honest
+  sample. Alone, the feed fix lets through a stamp that leads by less than its
+  update's latency, and neither fix covers a print slower than every sample.)
+  v1.16 applies both. A forward stamp now proves a bucket only if its
   lead is within the update's own latency plus the host's lead and, as well,
   the print's latency plus the host's lead exceeds the minute's largest lag
   sample: every sample forward-stamped on a host running ahead, or a print
@@ -39,7 +135,10 @@ Python 3.11 and 3.10. The exceptions are these controls:
 - `test_a_forward_stamp_no_later_than_an_unstamped_prints_receipt_does_not_prove_its_bucket[-0.1]`
   and `test_on_a_host_running_ahead_a_stamp_of_its_own_bucket_received_first_still_proves_an_unstamped_prints_bar`:
   a genuine stamp still proves the bucket, on a synced host and on one running
-  ahead.
+  ahead. (Corrected in v1.17: only if it is the newest stamp no later than its
+  own receipt received before the print. A later update of the bucket voids
+  it, so on a busy name a synced host loses many genuine proofs, often more
+  than a host slightly behind; v1.15 proved them all. R17-FEED-1.)
 - `test_a_partial_bar_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_replace_it[replaced]`:
   the broker's bars are played once each.
 - `test_a_bar_kept_after_a_discarded_one_clears_its_mark_so_a_later_weekend_session_is_back_filled`
@@ -49,7 +148,10 @@ Every v1.16 rule was also mutated on a copy, and each mutant failed its pins:
 - the last refused tunnel still polling its window, as in v1.15 (2 tests), and
   no read after it (3);
 - a stamp ahead of its own receipt still proving, as in v1.15 (2);
-- the stamp checked only against the print's receipt, as in v1.15 (2);
+- the stamp checked only against the print's receipt, as in v1.15 (2;
+  corrected in v1.17: 3, with the older test changed below; the synced-host
+  row failed only with both checks reverted, so v1.17 adds one that only this
+  check catches, which makes 4);
 - partial bars not held, as in v1.15 (2);
 - a kept bar not clearing the discarded-bar mark (2).
 
@@ -68,7 +170,7 @@ Existing tests changed:
 
 | Sev | Verdict | v1.15 defect | v1.16 fix | Pinned by |
 | --- | --- | --- | --- | --- |
-| low | ✔ | After the third refused tunnel, no attempt was left and no GTT could exist, yet the loop still polled the book for a whole window (two while the book sat behind the refusing proxy). The filled position had no exits the whole time, but the `POSITION OPEN WITHOUT EXITS` alert, the halt report and a shutdown in progress waited 15 s at the defaults, up to about 37 s. It dates from v1.14. | After the last refused tunnel, one book read (which still names an expired session) replaces the poll, and the alert follows at once. | `test_the_last_refused_tunnel_is_reported_at_once` (book readable or not), and a control |
+| low | ✔ | After the third refused tunnel, no attempt was left and no GTT could exist, yet the loop still polled the book for a whole window (two while the book sat behind the refusing proxy). The filled position had no exits the whole time, but the `POSITION OPEN WITHOUT EXITS` alert, the halt report and a shutdown in progress waited 15 s at the defaults, up to about 37 s. It dates from v1.11 (v1.12 with the book behind the refusing proxy); until v1.14 that poll could even adopt a GTT that could not be this entry's. (Corrected in v1.17: this said it dated from v1.14.) | After the last refused tunnel, one book read (which still names an expired session) replaces the poll, and the alert follows at once. | `test_the_last_refused_tunnel_is_reported_at_once` (book readable or not), and a control |
 
 ### Live feed
 
@@ -81,7 +183,7 @@ Existing tests changed:
 
 | Sev | Verdict | v1.15 defect | v1.16 fix | Pinned by |
 | --- | --- | --- | --- | --- |
-| medium | ✔ | On a host running ahead of the exchange, receipts read late by its lead, so a stamp ahead of its trade by less than that lead plus the print's latency still proved an unstamped print's bucket, and the double count and fake signal of R15-DATA-DOCS-1 came back. On a synced host, a stamp ahead by less than the print's latency did the same. The docs said only a host running behind was affected, at the cost of missed signals only. It predates v1.15. | A stamp must also be no later than the print's feed time (its receipt less the largest lag sample, which holds the host's lead). The README states both checks and the case left, as a new Known limitations entry. | `test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket` (a host 3 s ahead with 2 of 3 and 3 of 5 samples forward, and a synced host with one stamp 0.45 s ahead), and the host-ahead control |
+| medium | ✔ | On a host running ahead of the exchange, receipts read late by its lead, so a stamp ahead of its trade by less than that lead plus the print's latency still proved an unstamped print's bucket, and the double count and fake signal of R15-DATA-DOCS-1 came back. On a synced host, a stamp ahead by less than the print's latency did the same. The docs said only a host running behind was affected, at the cost of missed signals only. It predates v1.15. | A stamp must also be no later than the print's feed time (its receipt less the largest lag sample, which holds the host's lead). The README states both checks and the case left, as a new Known limitations entry. | `test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket` (a host 3 s ahead with 2 of 3 and 3 of 5 samples forward, and a synced host with one stamp 0.45 s ahead; corrected in v1.17: that stamp is also ahead of its own receipt, so its row failed only with both checks reverted, and v1.17 adds one 0.35 s ahead and received after it, which only this check catches), and the host-ahead control |
 | low | ✔ | Nothing pinned that every kept bar clears the discarded-bar mark. With the mark kept, a stale one from a late join refused a later weekend session's discarded bar, and Monday's first bar fired R15-FEED-1's fake crossing; all 510 tests passed. | Pinned. | `test_a_bar_kept_after_a_discarded_one_clears_its_mark_so_a_later_weekend_session_is_back_filled` (spill and partial) |
 | low | ◐ | The v1.15 CHANGELOG's test evidence was partly wrong. The proof mutant counted "(5)" called `clock_skew`, a property, and crashed (a faithful revert fails 3). The weekend rule table's rows were listed among the controls that pass on v1.14, though all fail there. The corrected v1.14 row still lacked the "behind by more than the print's latency" condition. (Refuted: the saved-dispatcher pin's text was accurate.) | Corrected in the v1.15 section, each marked. | (docs) |
 
