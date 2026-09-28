@@ -1,5 +1,90 @@
 # Changelog
 
+## v1.16 (2026-09-28)
+
+v1.15 went through a sixteenth adversarial review on a frozen snapshot
+(`b9de4eb`), with the same four areas. Every finder and skeptic completed; the
+data/docs skeptic was cut off by a container restart and re-ran from the
+review's journal. The lifecycle finder found nothing. There were 6 findings,
+with no duplicates, and none refuted: 5 confirmed, 1 with part of the claim
+refuted (R16-DATA-DOCS-3). 2 are medium and 4 low. Where the fix is not the
+finder's:
+- R16-FEED-1 and R16-DATA-DOCS-1 are one hole, seen from two hosts: a
+  forward-stamped update could still prove an unstamped print's bucket. The
+  feed fix (a stamp proves only if it is no later than its own receipt) closes
+  it on a synced host or one running behind, but not on a host running ahead,
+  whose receipts read late. The data/docs fix (a stamp proves only if it is no
+  later than the print's feed time) closes that case whenever the window holds
+  an honest sample, and a synced host's sub-second leads, but on its own misses
+  the feed finder's repro, in which the print's latency just exceeded the
+  window's. v1.16 applies both. A forward stamp now proves a bucket only if its
+  lead is within the update's own latency plus the host's lead and, as well,
+  the print's latency plus the host's lead exceeds the minute's largest lag
+  sample: every sample forward-stamped on a host running ahead, or a print
+  slower than every sample. No sample can tell such stamps from honest
+  latency; this is documented as a limitation.
+- R16-ORDERS-1: the regression test's timing margin is half a second, not the
+  finder's 0.2 s, so it cannot flake under load. The exact pin is the route
+  assertion: one book read after the last request.
+- R16-DATA-DOCS-3: of its four claims, the one about the saved-dispatcher pin
+  was refuted (the CHANGELOG counted 2 failures for that mutation, the uvloop
+  cases). The other three are corrected in the v1.15 section below, each marked
+  "corrected in v1.16".
+
+Every v1.16 regression test fails on the v1.15 snapshot and passes here, on
+Python 3.11 and 3.10. The exceptions are these controls:
+- `test_the_read_after_the_last_refused_tunnel_still_names_an_expired_session`:
+  the one read kept after the last refused tunnel still names an expired
+  session.
+- `test_a_forward_stamp_no_later_than_an_unstamped_prints_receipt_does_not_prove_its_bucket[-0.1]`
+  and `test_on_a_host_running_ahead_a_stamp_of_its_own_bucket_received_first_still_proves_an_unstamped_prints_bar`:
+  a genuine stamp still proves the bucket, on a synced host and on one running
+  ahead.
+- `test_a_partial_bar_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_replace_it[replaced]`:
+  the broker's bars are played once each.
+- `test_a_bar_kept_after_a_discarded_one_clears_its_mark_so_a_later_weekend_session_is_back_filled`
+  (spill and partial): a pin for a v1.15 rule no test covered.
+
+Every v1.16 rule was also mutated on a copy, and each mutant failed its pins:
+- the last refused tunnel still polling its window, as in v1.15 (2 tests), and
+  no read after it (3);
+- a stamp ahead of its own receipt still proving, as in v1.15 (2);
+- the stamp checked only against the print's receipt, as in v1.15 (2);
+- partial bars not held, as in v1.15 (2);
+- a kept bar not clearing the discarded-bar mark (2).
+
+One mutant passes every test, as it must: clamping the feed-time bound at the
+print's receipt cannot matter while a proving stamp must be no later than its
+own receipt, which comes before the print's. The clamp stays as defence in
+depth.
+
+Existing tests changed:
+- `test_an_unstamped_trade_received_after_a_stamp_of_the_next_bucket_is_filed_in_that_bucket`:
+  its quote is stamped after the print's feed time, so the print's bar is now
+  ambiguous. It is still filed in 10:05 and evaluated, because the back-filled
+  10:00 did not trade.
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.15 defect | v1.16 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | After the third refused tunnel, no attempt was left and no GTT could exist, yet the loop still polled the book for a whole window (two while the book sat behind the refusing proxy). The filled position had no exits the whole time, but the `POSITION OPEN WITHOUT EXITS` alert, the halt report and a shutdown in progress waited 15 s at the defaults, up to about 37 s. It dates from v1.14. | After the last refused tunnel, one book read (which still names an expired session) replaces the poll, and the alert follows at once. | `test_the_last_refused_tunnel_is_reported_at_once` (book readable or not), and a control |
+
+### Live feed
+
+| Sev | Verdict | v1.15 defect | v1.16 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | v1.15 checked a proving stamp only against the unstamped print's receipt. A quote whose update happened in 10:00, stamped 10:05:00 (up to 30 s ahead, which the 30 s rule accepts), proved bucket 10:05 for any print received at or after 10:05:00, including one that traded at 10:04:59.9. That print's bar was evaluated while the back-fill of 10:00 counted its shares again: a fake breakout on a synced host, with no clock warning. It predates v1.15. | A stamp proves a bucket only if it is no later than its own receipt (a stamp ahead of it may be forward). | `test_a_forward_stamp_no_later_than_an_unstamped_prints_receipt_does_not_prove_its_bucket` (leads of 3 s and 29 s, and a genuine control) |
+| low | ✔ | v1.15 played discarded spill-pair bars to the paper OCO when the broker's bars could not replace them, but not a bar discarded as partial (a reconnect, a closed websocket, a stall), whose seen prints are just as real. A stop or target reached only in that bucket was missed in paper trading, and the symbol stayed blocked. It predates v1.15. | Every discarded bar is held, and played once, in order, when the back-fill fails or there is no history source. | `test_a_partial_bar_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_replace_it` (a failed fetch, no history source, and a control) |
+
+### Tests and docs
+
+| Sev | Verdict | v1.15 defect | v1.16 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | On a host running ahead of the exchange, receipts read late by its lead, so a stamp ahead of its trade by less than that lead plus the print's latency still proved an unstamped print's bucket, and the double count and fake signal of R15-DATA-DOCS-1 came back. On a synced host, a stamp ahead by less than the print's latency did the same. The docs said only a host running behind was affected, at the cost of missed signals only. It predates v1.15. | A stamp must also be no later than the print's feed time (its receipt less the largest lag sample, which holds the host's lead). The README states both checks and the case left, as a new Known limitations entry. | `test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket` (a host 3 s ahead with 2 of 3 and 3 of 5 samples forward, and a synced host with one stamp 0.45 s ahead), and the host-ahead control |
+| low | ✔ | Nothing pinned that every kept bar clears the discarded-bar mark. With the mark kept, a stale one from a late join refused a later weekend session's discarded bar, and Monday's first bar fired R15-FEED-1's fake crossing; all 510 tests passed. | Pinned. | `test_a_bar_kept_after_a_discarded_one_clears_its_mark_so_a_later_weekend_session_is_back_filled` (spill and partial) |
+| low | ◐ | The v1.15 CHANGELOG's test evidence was partly wrong. The proof mutant counted "(5)" called `clock_skew`, a property, and crashed (a faithful revert fails 3). The weekend rule table's rows were listed among the controls that pass on v1.14, though all fail there. The corrected v1.14 row still lacked the "behind by more than the print's latency" condition. (Refuted: the saved-dispatcher pin's text was accurate.) | Corrected in the v1.15 section, each marked. | (docs) |
+
 ## v1.15 (2026-09-28)
 
 v1.14 went through a fifteenth adversarial review on a frozen snapshot
@@ -26,7 +111,9 @@ and 6 low. Where the fix is not the finder's:
   fake signal. No number of lag samples tells a host running behind from
   forward-stamped packets, so the proof now checks the stamp against the print's
   receipt time itself. A bar's latest possible time is unchanged. The cost is a
-  missed signal on a host running behind, never a fake one.
+  missed signal on a host running behind, never a fake one. (Corrected in
+  v1.16: R16-FEED-1 and R16-DATA-DOCS-1 found forward stamps this still let
+  prove a bucket.)
 - R15-DATA-DOCS-3: the corrected margin also states that the host must run
   behind by more than the print's latency, which makes the condition exact.
 - R15-DATA-DOCS-4: the docs name what the harness does. The finder's wording
@@ -46,9 +133,10 @@ these controls:
   with no bar lost, Monday's genuine crossing fires. With no bar seen on a
   weekend, there is no weekend fetch.
 - The rows of `test_the_hole_before_a_bar_spans_every_session_since_historys_last_bar`
-  and of the weekend rule table that earlier versions already got right
-  (consecutive sessions, the previous session's tail, the session's own head,
-  a weekend, a special Saturday's head, a bar before history's last).
+  that earlier versions already got right (consecutive sessions, the previous
+  session's tail, the session's own head, a weekend, a special Saturday's
+  head). (Corrected in v1.16: the weekend rule table's rows were listed here
+  too, but all of them fail on v1.14, as said above.)
 - `test_a_discarded_spill_pair_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_replace_it[replaced]`:
   the broker's bars are played once each.
 - `test_a_childs_own_asyncio_run_sigint_handler_survives_its_engine`: an
@@ -69,7 +157,8 @@ Every v1.15 rule was also mutated on a copy, and each mutant failed its pins:
   (1), played on success too (1), not held at all (2), and a release dropping
   a later hole's bars (2);
 - the proof reading a majority of forward stamps as the host's offset, as in
-  v1.14 (5);
+  v1.14 (3; corrected in v1.16: the mutant first counted here called
+  `clock_skew`, a property, and crashed, which also failed two older tests);
 - the inherited map ignoring `asyncio.run`'s handler, as in v1.14 (4), or
   mapping every loop-bound handler (2);
 - the inherited map's two checks swapped (2).
@@ -192,7 +281,7 @@ Existing tests changed:
 | Sev | Verdict | v1.13 defect | v1.14 fix | Pinned by |
 | --- | --- | --- | --- | --- |
 | medium | ✔ | The README said the proof's guard means "a stamp up to 30 s ahead cannot prove a bucket". It did prove one when the forward-stamped update was the window's only lag sample, which is common on an illiquid name. The engine read that sample as the host's offset, and the stamp then proved an unstamped print's bucket, so the print's shares were counted twice in an evaluated bar. | The proof corrects for the host only when a second lag sample backs the offset; the README says "ahead of the print's receipt". | `test_a_forward_stamp_alone_in_the_lag_window_does_not_prove_an_unstamped_prints_bucket` (and a control with a second sample) |
-| medium | ✔ | The v1.13 limitation said an unstamped print near a boundary "costs signals, never fakes one". On a host running behind the exchange, a print faster than every lag sample of the minute, by more than a second minus that sample's truncation, is still filed a bucket early. With no bar open, its bar is evaluated. | Docs: a new Known limitations entry for this residual (keep the host's clock synced), with a pointer from the live-bar section. | (docs) |
+| medium | ✔ | The v1.13 limitation said an unstamped print near a boundary "costs signals, never fakes one". On a host running behind the exchange by more than a print's latency, a print faster than every lag sample of the minute, by more than a second minus that sample's truncation, is still filed a bucket early. With no bar open, its bar is evaluated. | Docs: a new Known limitations entry for this residual (keep the host's clock synced), with a pointer from the live-bar section. | (docs) |
 | low | ✔ | The v1.13 spill skip on the back-fill path had no pin: removing it passed all 454 tests. | Pinned (the v1.14 discard now covers that path). | `test_an_open_bar_after_a_hole_joined_by_a_print_that_may_be_the_next_buckets_is_not_evaluated` |
 | low | ✔ | The rewritten boundary limitation misstated its window. With no bar open, a late packet does not widen it. The open-bar spill window runs to the bar clock's close, which is wider by the 2 s grace. On a host running ahead, the documented formula gives a time before receipt. | Docs: the entry and the live-bar section state the actual bounds. | (docs) |
 | low | ✔ | The suite was not independent of how it is launched. Under `nohup pytest`, two SIGHUP tests failed, because the harness restored only SIGINT. | `Child`, `HOST` and `SCRIPT` start their interpreters with SIGHUP and SIGTERM at their defaults. | the two SIGHUP tests, under `nohup` |

@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.15)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.16)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -828,11 +828,12 @@ class LiveTickAdapter:
         self._ahead_run: Optional[Tuple[datetime, datetime]] = None  # first and last far-ahead drop in a row
         self._ahead_last: Optional[datetime] = None                  # the latest drop just over the limit
         self._last_update: Dict[str, Tuple[int, datetime]] = {}      # symbol -> (feed epoch, newest exchange time)
+        self._proof_stamp: Dict[str, Tuple[int, datetime]] = {}      # the same, of stamps not ahead of their receipt
         self._glitch_warned: set = set()                             # (symbol, day) already reported
         # A bucket in which the volume counter was re-baselined lost its head to the baseline.
         self._blind_bucket: Dict[str, Tuple[datetime, datetime]] = {}   # first and last bucket, inclusive
         self._spill_next: Dict[str, datetime] = {}   # the bar after one that may hold a print of its bucket
-        self._held: Dict[str, List[Tuple[datetime, pd.Series]]] = {}   # discarded spill-pair bars, for the paper OCO
+        self._held: Dict[str, List[Tuple[datetime, pd.Series]]] = {}   # discarded bars, for the paper OCO
         self._discarded_from: Dict[str, datetime] = {}   # the first bar discarded since the last one kept
 
     def _normalize(self, t: dict) -> Optional[Tick]:
@@ -1051,10 +1052,13 @@ class LiveTickAdapter:
         if tick.unstamped and tick.arrived is not None:
             # Prints queued ahead of this one may have raised the lag since the broker thread read it.
             tick.timestamp = tick.arrived - timedelta(seconds=self.feed_lag)
-            # A stamp proves the print's bucket only if it is no later than the print's receipt. No number of lag
-            # samples tells a host behind the exchange from forward-stamped packets, which would then prove their own
-            # bucket: on a host behind, this leaves more bars unproven (a missed signal, never a fake one).
-            proof_by = tick.arrived
+            # A stamp proves the print's bucket only if it is no later than its own receipt (below) and than the
+            # print's feed time. No number of lag samples tells a host behind the exchange from forward-stamped
+            # packets: the first check catches a forward lead beyond the update's latency on a synced host or one
+            # behind; the second, one on a host running ahead, whose lead the window's honest samples carry (feed time
+            # is the print's receipt less the largest). A forward stamp then proves a bucket only if the print's own
+            # latency also exceeds every sample's. Both only cost proofs: a missed signal, never a fake one.
+            proof_by = tick.arrived - timedelta(seconds=max(0.0, self.feed_lag))
             # Feed time errs early (the lag includes the stamps' truncation). Each sample is latency + truncation
             # minus the host's offset, so the latest it can have traded is a second minus the lowest sample past its
             # receipt, and never before its receipt.
@@ -1125,6 +1129,12 @@ class LiveTickAdapter:
             if volume > 0 or tracking:
                 newest = max(last[1], tick.timestamp) if tracking else tick.timestamp
                 self._last_update[sym] = (self._feed_epoch, newest)
+                if tick.timestamp <= tick.received:
+                    # Only such a stamp can prove a bucket (below): one ahead of its own receipt may be forward, and
+                    # then the update happened before it (on a host behind the exchange it may be genuine: missed).
+                    proof = self._proof_stamp.get(sym)
+                    self._proof_stamp[sym] = (self._feed_epoch, max(proof[1], tick.timestamp)
+                                              if proof is not None and proof[0] == self._feed_epoch else tick.timestamp)
         if volume <= 0:
             # No verified trade: a quote or depth update, or a print that only (re)sets the volume
             # baseline. A bucket in which nothing verifiably traded has no bar (a later positive delta
@@ -1135,9 +1145,9 @@ class LiveTickAdapter:
         # An unstamped print that opens a bar may be the bucket before's (latency rose, by any amount): its bar is
         # ambiguous, and is not evaluated if the back-filled bucket before it traded. With no bar open and within
         # the grace, it is also provisional: a stamped print of the bucket before moves the bar there. A stamp of
-        # this bucket received before it (and stamped no later than its receipt) proves the bucket: in-order
-        # delivery puts the print after it.
-        last = self._last_update.get(sym)
+        # this bucket received before it (stamped no later than its own receipt and than the print's feed time)
+        # proves the bucket: in-order delivery puts the print after it.
+        last = self._proof_stamp.get(sym)
         proven = last is not None and last[0] == self._feed_epoch \
             and boundary <= last[1] < boundary + width and last[1] <= (proof_by or last[1])
         ambiguous = tick.unstamped and boundary.time() != SESSION_OPEN and not proven
@@ -1180,8 +1190,8 @@ class LiveTickAdapter:
         return f"{start:%H:%M}-{end:%H:%M}" if start.date() == end.date() else f"{start:%Y-%m-%d %H:%M}-{end:%Y-%m-%d %H:%M}"
 
     def _release_held(self, sym: str, start: datetime, end: datetime, play: bool) -> None:
-        """Take the discarded spill-pair bars in [start, end) off the hold, and play them to the bar listeners if the
-        broker's bars will not."""
+        """Take the discarded bars in [start, end) off the hold, and play them to the bar listeners if the broker's
+        bars will not."""
         held = self._held.pop(sym, [])
         if rest := [(ts, bar) for ts, bar in held if not start <= ts < end]:
             self._held[sym] = rest
@@ -1219,6 +1229,8 @@ class LiveTickAdapter:
             self._spill_next[sym] = idx + timedelta(minutes=self.bar_minutes)
         if bar['partial'] or bar.get('spill') or after_spill:
             self._discarded_from.setdefault(sym, idx)      # the next kept bar's hole covers it, in any session
+            # Its prints are real: bar listeners (the paper OCO) get it if the broker's bars do not replace it.
+            self._held.setdefault(sym, []).append((idx, pd.Series({c: float(bar[c]) for c in OHLCV})))
         if bar['partial']:
             logger.info(f"[{sym}] Discarding the {idx:%H:%M} bar: it began before the feed was watching.")
             return
@@ -1227,8 +1239,6 @@ class LiveTickAdapter:
                 else "the bar before it may hold one of its prints"
             logger.warning(f"[{sym}] Discarding the {idx:%H:%M} bar: {why}; the back-fill replaces it before the next "
                            f"bar is evaluated.")
-            # Its prints are real: bar listeners (the paper OCO) get it if the broker's bars do not replace it.
-            self._held.setdefault(sym, []).append((idx, pd.Series({c: float(bar[c]) for c in OHLCV})))
             return
 
         history = self.market_state.get(sym)
@@ -1677,6 +1687,16 @@ class KiteOrderGateway(OrderGateway):
                     # The request may have reached the broker, which can still be creating the GTT: a blind
                     # retry would arm a second one that sells the whole position again.
                     maybe_booked = maybe_booked or not self._tunnel_refused(e)
+                    if not maybe_booked and attempt >= 3:
+                        # Refused tunnels alone, and none left to retry: no GTT can exist and no attempt is left to
+                        # space out, so a poll would only delay the alert. One read still names an expired session.
+                        try:
+                            await asyncio.to_thread(k.get_gtts)
+                        except Exception as read_error:
+                            logger.warning(f"[{sym}] GTT book read failed: {read_error!r}.")
+                            if is_permanent_error(read_error):
+                                book_refusal = read_error
+                        break
                     found, book_error, book_ids = await self._await_gtt(sym, plan, filled, exclude=known or set(),
                                                                         adopt=maybe_booked)
                     if not maybe_booked and book_ids is not None:

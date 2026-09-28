@@ -1220,3 +1220,42 @@ def test_an_identical_gtt_is_still_reported_when_no_read_after_the_refused_tunne
     fill = asyncio.run(gw.execute(kite_plan()))
     assert (fill.exit_order_id, fill.exits_unknown) == (None, True) and kite.gtt_places == 2
     assert "GTT 650 matches this position" in gw.alerts[0]
+
+
+# ---------------------------------------------------------------- round 16: no poll after the last refused tunnel
+@pytest.mark.parametrize("book_readable", [True, False])
+def test_the_last_refused_tunnel_is_reported_at_once(book_readable):
+    # After the third refused tunnel no attempt is left to space out and no GTT can exist, so a poll changes nothing.
+    # v1.15 still polled the book for a whole window (two while the book is behind the same proxy) before POSITION OPEN
+    # WITHOUT EXITS: 15-30 s at the defaults in which the operator of an unprotected position was not told.
+    tunnel = refused_tunnel()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}], gtt_results=[tunnel],
+                    gtt_book=None if book_readable else tunnel)
+    gw = fast_gateway(kite, cancel_grace=0.5, poll_interval=0.01)
+    places, alerted = [], []
+    original, alert = kite._request, gw._alert
+
+    def request(route, method, *args, **kwargs):
+        if route == "gtt.place":
+            places.append(engine.time.monotonic())
+        return original(route, method, *args, **kwargs)
+
+    kite._request = request
+    gw._alert = lambda msg: (alerted.append(engine.time.monotonic()), alert(msg))
+    fill = asyncio.run(gw.execute(kite_plan()))
+    routes = kite.routes()
+    assert (fill.exit_order_id, fill.exits_unknown) == (None, False) and kite.gtt_places == 3
+    assert len(gw.alerts) == 1 and "POSITION OPEN WITHOUT EXITS" in gw.alerts[0]
+    assert routes[len(routes) - routes[::-1].index("gtt.place"):] == ["gtt"]     # one read after the last request
+    assert places[1] - places[0] >= 0.5 and places[2] - places[1] >= 0.5     # the attempts are still spaced out
+    assert alerted[0] - places[2] < 0.5                                       # v1.15: at least a whole window
+
+
+def test_the_read_after_the_last_refused_tunnel_still_names_an_expired_session():
+    # Control: the session expires only after the third request, so only the read after it can name it.
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}], gtt_results=[refused_tunnel()])
+    expiring_book(kite, 3, TOKEN)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert (fill.exit_order_id, fill.exits_unknown) == (None, False) and kite.gtt_places == 3
+    assert "POSITION OPEN WITHOUT EXITS" in gw.alerts[-1] and "the GTT book answered TokenException" in gw.alerts[-1]
