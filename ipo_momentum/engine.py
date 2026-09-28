@@ -1,6 +1,6 @@
 """
 ====================================================================================
-INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.17)
+INSTITUTIONAL QUANTITATIVE ENGINE - IPO MOMENTUM & LIVE EXECUTION (V1.18)
 ====================================================================================
 Architecture:
 1. Data Harmonization (Historical Reality Sync via REST, or offline CSV replay)
@@ -19,6 +19,22 @@ and the synthetic tape never runs alongside a live feed. Nothing here is investm
 ====================================================================================
 """
 
+import signal
+
+# Run as a script (a container's CMD), a stop is recorded from here: as PID 1 without an init the kernel drops one left
+# at its default, and the imports below take a few hundred ms. main() takes it as a stop while starting. nohup is kept.
+_EARLY_STOPS: list = []
+
+
+def _record_early_stop(signum, frame):
+    _EARLY_STOPS.append(signum)
+
+
+if __name__ == "__main__":
+    for _stop in [getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)]:
+        if signal.getsignal(_stop) == signal.SIG_DFL:
+            signal.signal(_stop, _record_early_stop)
+
 import argparse
 import asyncio
 import collections
@@ -28,7 +44,6 @@ import json
 import logging
 import math
 import os
-import signal
 import sys
 import threading
 import time
@@ -835,6 +850,7 @@ class LiveTickAdapter:
         self._spill_next: Dict[str, datetime] = {}   # the bar after one that may hold a print of its bucket
         self._held: Dict[str, List[Tuple[datetime, pd.Series]]] = {}   # discarded bars, for the paper OCO
         self._discarded_from: Dict[str, datetime] = {}   # the first bar discarded since the last one kept
+        self._unfilled: Dict[str, datetime] = {}         # the start of a hole whose back-fill failed: still missing
 
     def _normalize(self, t: dict) -> Optional[Tick]:
         if 'instrument_token' in t:
@@ -919,8 +935,8 @@ class LiveTickAdapter:
         skew = self.clock_skew if lowest < -grace.total_seconds() else 0.0     # the median is never below it
         if skew < -grace.total_seconds():
             self._lag_warned = at
-            logger.warning(f"Host clock runs {-skew:.1f}s behind the exchange; bars and signal ages are corrected "
-                           f"for it. Check the host's time sync.")
+            logger.warning(f"Host clock runs {-skew:.1f}s behind the exchange; signal ages are corrected for it (bars "
+                           f"are not closed earlier: it may be a forward stamp). Check the host's time sync.")
         elif self.feed_lag > grace.total_seconds():
             self._lag_warned = at
             logger.warning(f"Feed runs {self.feed_lag:.1f}s behind the host clock (latency or clock skew); "
@@ -1073,7 +1089,10 @@ class LiveTickAdapter:
             end = open_bar['timestamp'] + timedelta(minutes=self.bar_minutes)
             # A print that may be the next bucket's (none after the close) must not decide this bar's evaluation.
             spill = end.time() < SESSION_CLOSE and (tick.timestamp >= end or (latest is not None and latest >= end))
-            if end <= tick.timestamp < end + BAR_CLOSE_GRACE:
+            # Nor may a negative lag close the bar early (it may be a forward stamp): the bar clock holds it open until
+            # its end plus the grace plus any positive lag on the host clock, and a print received before then joins it.
+            held_by = tick.timestamp if tick.arrived is None else tick.arrived - timedelta(seconds=max(0.0, self.feed_lag))
+            if end <= tick.timestamp and held_by < end + BAR_CLOSE_GRACE:
                 tick.timestamp = end - timedelta(microseconds=1)
             elif tick.timestamp < open_bar['timestamp']:
                 tick.timestamp = open_bar['timestamp']              # received after the print that opened it
@@ -1253,6 +1272,10 @@ class LiveTickAdapter:
         row = pd.DataFrame([[float(bar[c]) for c in OHLCV]], columns=OHLCV,
                            index=pd.DatetimeIndex([idx], name=history.index.name))
         hole_start = self._hole_before(history.index[-1], idx, self._discarded_from.pop(sym, None)) if len(history) else None
+        fresh = hole_start or idx
+        if (unfilled := self._unfilled.get(sym)) is not None:
+            # A failed back-fill's hole is still missing from history: every later bar retries it before it is evaluated.
+            hole_start = min(unfilled, fresh)
         self.market_state[sym] = history = pd.concat([history, row]) if len(history) else row
         logger.info(f"📊 [{sym}] 5m Bar Closed {idx:%Y-%m-%d %H:%M} | O: {bar['Open']:.2f} H: {bar['High']:.2f} "
                     f"L: {bar['Low']:.2f} C: {bar['Close']:.2f} | V: {bar['Volume']:,}")
@@ -1265,7 +1288,7 @@ class LiveTickAdapter:
                 self._notify(sym, idx, row.iloc[0])
                 return
             task = asyncio.get_running_loop().create_task(self._backfill_then_evaluate(sym, hole_start, idx, row.iloc[0],
-                                                                                    bar.get('ambiguous', False)))
+                                                                                    bar.get('ambiguous', False), fresh))
             self._backfills.add(task)
             task.add_done_callback(self._backfills.discard)
             return
@@ -1273,27 +1296,34 @@ class LiveTickAdapter:
         self._evaluate(sym, history, idx)
 
     async def _backfill_then_evaluate(self, sym: str, start: datetime, idx: datetime, live_bar: pd.Series,
-                                      ambiguous: bool = False) -> None:
+                                      ambiguous: bool = False, fresh: Optional[datetime] = None) -> None:
+        """``fresh``: where this bar's own hole starts (``idx`` if none). An earlier failed back-fill's hole, retried
+        from ``start``, holds live bars already in history and bars already played when its fetch failed."""
+        fresh = pd.Timestamp(start if fresh is None else fresh)
         try:
             fetched = await self.backfill(sym, start, idx)
             fetched = fetched[(fetched.index >= pd.Timestamp(start)) & (fetched.index < pd.Timestamp(idx))]
         except Exception as e:
             logger.warning(f"[{sym}] Back-fill of {self._span(start, idx)} failed ({e!r}); the {idx:%H:%M} bar is not evaluated.")
+            self._unfilled[sym] = min(start, self._unfilled.get(sym, start))   # later bars retry it
             self._release_held(sym, start, idx, play=True)
             self._notify(sym, idx, live_bar)
             return
+        if self._unfilled.get(sym, start) >= start:
+            self._unfilled.pop(sym, None)
         self._release_held(sym, start, idx, play=False)          # the broker's bars replace them
         history = self.market_state[sym]
         if len(fetched):
+            known = len(history)
             history = pd.concat([history, fetched])
             history = history[~history.index.duplicated(keep='first')].sort_index()
             self.market_state[sym] = history
-            logger.info(f"[{sym}] Back-filled {len(fetched)} missing bar(s) {self._span(start, idx)} from the broker.")
-        for ts, bar in fetched.iterrows():
+            logger.info(f"[{sym}] Back-filled {len(history) - known} missing bar(s) {self._span(start, idx)} from the broker.")
+        for ts, bar in fetched[fetched.index >= fresh].iterrows():
             self._notify(sym, ts, bar)
         self._notify(sym, idx, live_bar)
         before = pd.Timestamp(idx - timedelta(minutes=self.bar_minutes))
-        if ambiguous and before in fetched.index and fetched.loc[before, 'Volume'] > 0:
+        if ambiguous and before >= fresh and before in fetched.index and fetched.loc[before, 'Volume'] > 0:
             # The print with no exchange time that opened this bar may have traded in the bucket before it, which
             # the broker says traded: its shares may be counted twice.
             logger.warning(f"[{sym}] The {idx:%H:%M} bar opened on a print with no exchange time that may belong to "
@@ -1309,8 +1339,10 @@ class LiveTickAdapter:
     def flush_due_bars(self, now: datetime, grace: timedelta = BAR_CLOSE_GRACE) -> None:
         """Close bars whose bucket has ended; without this, a bar waits for the *next* tick,
         which never comes for an illiquid name or the session's final bar. Both the deadline and
-        the liveness proof are judged in feed time (receive time minus the measured feed lag)."""
-        lag = timedelta(seconds=self.feed_lag)
+        the liveness proof are judged in feed time (receive time minus the measured feed lag). A negative
+        lag is not trusted here: it may be a forward-stamped update (up to 30 s ahead, which the 30 s rule
+        accepts) rather than a host running behind, and it would close the bar before its last prints."""
+        lag = timedelta(seconds=max(0.0, self.feed_lag))
         now = to_ist(now) - lag
         width = timedelta(minutes=self.bar_minutes)
         for sym in [s for s, b in self.current_bars.items() if b['timestamp'] + width + grace <= now]:
@@ -1440,23 +1472,33 @@ class KiteOrderGateway(OrderGateway):
 
     @staticmethod
     def _tunnel_refused(e: BaseException) -> bool:
-        """True if a proxy refused the CONNECT for Kite (403, 407, 502, 503...), or the tunnel set-up timed
-        out (a proxy that did not answer the CONNECT within the client timeout, e.g. while it could not reach
-        Kite). urllib3 raises both only from its tunnel set-up (the timeout as a ReadTimeoutError naming the
-        proxy's URL; a read timeout after a request was sent names the request's path) and writes a request
-        only through an open tunnel, so no request byte was sent: the order never left. The GTT path keeps
-        treating it as ambiguous on purpose: attempts plus book polls ride out a longer proxy outage than one
-        never-sent window would. Refused tunnels alone never make a GTT possible, so they use every attempt
-        even while the book is unreadable, and start no duplicate watch."""
+        """True if a proxy refused the CONNECT for Kite (403, 407, 502, 503...), or the connection set-up
+        timed out after the TCP connect: a proxy that did not answer the CONNECT within the client timeout
+        (e.g. while it could not reach Kite), or a TLS handshake with Kite that did not finish, through the
+        tunnel or directly. urllib3 raises these only while it opens the connection, before it writes the
+        request (a timeout through a proxy as a ReadTimeoutError naming the proxy's URL; a direct one names
+        the request's path, as a lost reply does, but is raised from _validate_conn), so no request byte was
+        sent: the order never left. The GTT path keeps treating it as ambiguous on purpose: attempts plus book
+        polls ride out a longer outage than one never-sent window would. Refused tunnels alone never make a
+        GTT possible, so they use every attempt even while the book is unreadable, and start no duplicate watch."""
         reason = getattr(e.args[0], "reason", None) if type(e).__name__ == "ProxyError" and e.args else None
         reason = getattr(reason, "original_error", None)
         if isinstance(reason, OSError) and str(reason).startswith("Tunnel connection failed:"):
             return True
         # A TLS proxy (https://) that did not finish its handshake: urllib3 wraps the same timeout in ProxyError.
         timeout = e.args[0] if type(e).__name__ == "ReadTimeout" and e.args else reason
+        if type(timeout).__name__ != "ReadTimeoutError":
+            return False
         proxy = getattr(getattr(timeout, "pool", None), "proxy", None)
-        return type(timeout).__name__ == "ReadTimeoutError" and proxy is not None \
-            and getattr(timeout, "url", None) == proxy.url
+        if proxy is not None and getattr(timeout, "url", None) == proxy.url:
+            return True
+        cause = timeout.__cause__ or timeout.__context__     # the socket timeout, traced from where urllib3 caught it
+        tb = getattr(cause, "__traceback__", None)
+        while tb is not None:
+            if tb.tb_frame.f_code.co_name == "_validate_conn":  # the connect before the request is written
+                return True
+            tb = tb.tb_next
+        return False
 
     def __init__(self, kite, exchange: str = "NSE", product: str = "CNC", fill_timeout: float = 30.0,
                  poll_interval: float = 1.0, cancel_grace: float = 15.0, stop_limit_buffer: float = 0.02,
@@ -2366,7 +2408,8 @@ class _StopRoutes:
                     # Ignored for now (SIG_IGN set mid-run): join, and take the signal back once the host lifts the
                     # ignore. The route joined may no longer receive it (the host displaced or removed it first).
                     route['reclaim'] = loop.call_soon(self._reclaim, loop, signum, route)
-            route['callbacks'].append(callback)
+            if callback not in route['callbacks']:            # main() hooks again as its run starts
+                route['callbacks'].append(callback)
             hooked.append(signum)
         return hooked
 
@@ -2565,6 +2608,9 @@ async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> 
 
     route.handler, route.running, route.stopped = stop_starting, False, None
     hooked = _STOP_ROUTES.hook(loop, route)
+    # As the run starts, hook again: this step runs at the host's next await, often inside its SIG_IGN guard (skipped
+    # while no engine runs), and a handler the host set while the engine started would otherwise keep the signal.
+    route.rehook = lambda: hooked.extend([s for s in _STOP_ROUTES.hook(loop, route) if s not in hooked])
     missed = [signal.Signals(s).name for s in STOP_SIGNALS if s not in hooked and signal.getsignal(s) != signal.SIG_IGN]
     if missed:
         # Python runs signal handlers in the main thread only, and a signal another live loop owns goes to that loop.
@@ -2572,6 +2618,9 @@ async def main(argv: Optional[List[str]] = None, hold_signals: bool = False) -> 
                        f"loop owns them): such a stop ends the process without settling an entry in flight. Run main() "
                        f"in the main thread, or forward a stop by cancelling its task from there, which settles in order.")
     try:
+        if _EARLY_STOPS:                              # engine.py as a script: a stop before main() (see its top)
+            stop_starting(_EARLY_STOPS.pop(0))
+            await asyncio.sleep(0)                    # taken here, before anything starts
         return await _engine(args, route)
     except asyncio.CancelledError:
         if route.stopped is None:
@@ -2599,7 +2648,9 @@ async def _engine(args: argparse.Namespace, route: Callable[[int], None]) -> int
             logger.critical("Set KITE_API_KEY and KITE_ACCESS_TOKEN for --source kite.")
             return 2
         broker_adapter: BrokerAdapter = ZerodhaKiteAdapter(*kite_creds)
-        as_of = datetime.now(timezone.utc)
+        # Kite serves the running candle, and a host clock running ahead would read it as complete: history stops a
+        # bar before the host's now. The feed's first kept bar back-fills the rest, with the request it makes anyway.
+        as_of = datetime.now(timezone.utc) - timedelta(minutes=BAR_MINUTES)
     elif args.source == "csv":
         broker_adapter = CsvReplayAdapter({args.symbol: args.csv})
         try:
@@ -2681,6 +2732,7 @@ async def _engine(args: argparse.Namespace, route: Callable[[int], None]) -> int
 
     # From here a stop takes the orderly path below, so an entry in flight is always settled.
     route.handler, route.running = on_stop_signal, True
+    route.rehook()                                   # same step: take what the host ignored or took while it started
 
     try:
         # Workers loop forever; one finishing early means it crashed, and the engine must not run half-blind.
@@ -2751,7 +2803,9 @@ def run(argv: Optional[List[str]] = None) -> int:
     saved = {signum: signal.getsignal(signum) for signum in STOP_SIGNALS}
     for signum, previous in saved.items():
         inherited = _STOP_ROUTES.inherited.get(signum)
-        if inherited is not None:
+        if previous is _record_early_stop:
+            saved[signum] = signal.SIG_DFL                 # engine.py's own recorder (see its top) stood for the default
+        elif inherited is not None:
             saved[signum] = _inherited_host(previous, inherited, signum)   # a forked child restored a parent handler
     result: List[int] = []
     loops: List[asyncio.AbstractEventLoop] = []

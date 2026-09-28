@@ -1386,3 +1386,170 @@ def test_an_accepted_cancel_whose_state_stays_open_names_nothing_more():
     r = run_router(router(gateway=fast_gateway(kite)), [sig()])
     assert r.unresolved == ["[SWIGGY] order 260928000000001: not terminal 0s after cancelling; "
                             "the remainder may still be working"]
+
+
+# ---------------------------------------------------------------- round 18: a TLS handshake that timed out sent nothing
+def answered_connect_port():
+    """A proxy that answers every CONNECT 200 and relays nothing, as if Kite never answered the ClientHello; close() it."""
+    import socket
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(8)
+    held = []
+
+    def answer(conn):
+        head = b""
+        while b"\r\n\r\n" not in head:
+            chunk = conn.recv(4096)
+            if not chunk:
+                return
+            head += chunk
+        conn.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+
+    def hold():
+        while True:
+            try:
+                conn = server.accept()[0]
+            except OSError:
+                return                                                    # closed
+            held.append(conn)
+            threading.Thread(target=answer, args=(conn,), daemon=True).start()
+
+    threading.Thread(target=hold, daemon=True).start()
+    return server, held
+
+
+def stalled_handshake(through_tunnel=False):
+    """What requests raises when Kite's TLS handshake does not finish within the client timeout: directly (the server
+    accepted the connection and never answered the ClientHello), or through a tunnel the proxy opened."""
+    server, held = answered_connect_port() if through_tunnel else silent_port()
+    port = server.getsockname()[1]
+    session = requests.Session()
+    session.trust_env = False
+    if through_tunnel:
+        session.proxies = {"https": f"http://127.0.0.1:{port}"}
+    try:
+        session.post("https://api.kite.trade/orders/regular" if through_tunnel else f"https://127.0.0.1:{port}/orders/regular",
+                     data={"tag": "x"}, timeout=0.3)
+    except requests.exceptions.ReadTimeout as e:
+        return e
+    finally:
+        server.close()
+        for conn in held:
+            conn.close()
+    raise AssertionError("the handshake did not time out")
+
+
+def lost_tls_replies(tmp_path):
+    """Read timeouts after the request was written over TLS, directly: on a new connection, and on a kept-alive one."""
+    import datetime
+    import socket
+    import ssl
+    import warnings
+    x509 = pytest.importorskip("cryptography.x509")
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "127.0.0.1")])
+    # Literal dates: the suite's shifted-clock runs replace datetime.datetime, and cryptography type-checks its inputs.
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key()).serial_number(1)
+            .not_valid_before(datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc))
+            .not_valid_after(datetime.datetime(2100, 1, 1, tzinfo=datetime.timezone.utc))
+            .sign(key, hashes.SHA256()))
+    (tmp_path / "cert.pem").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    (tmp_path / "key.pem").write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                         serialization.NoEncryption()))
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(tmp_path / "cert.pem", tmp_path / "key.pem")
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(8)
+    held, received = [], []
+
+    def serve(conn):
+        try:
+            conn = context.wrap_socket(conn, server_side=True)
+            held.append(conn)
+            while True:
+                request = conn.recv(65536)
+                if not request:
+                    return
+                received.append(request.split(b" ")[0])
+                if request.startswith(b"GET"):                            # answered; every POST's reply is lost
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")
+        except OSError:
+            return
+
+    def accept():
+        while True:
+            try:
+                conn = server.accept()[0]
+            except OSError:
+                return
+            held.append(conn)
+            threading.Thread(target=serve, args=(conn,), daemon=True).start()
+
+    threading.Thread(target=accept, daemon=True).start()
+    url, errors = f"https://127.0.0.1:{server.getsockname()[1]}", []
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")                               # verify=False: a throwaway certificate
+            for reuse in (False, True):
+                session = requests.Session()
+                session.trust_env = False
+                if reuse:
+                    session.get(url + "/orders", verify=False, timeout=0.3)
+                try:
+                    session.post(url + "/orders/regular", data={"tag": "x"}, verify=False, timeout=0.3)
+                except requests.exceptions.ReadTimeout as e:
+                    errors.append(e)
+    finally:
+        server.close()
+        for conn in held:
+            conn.close()
+    assert len(errors) == 2 and received.count(b"POST") == 2              # both requests reached the server
+    return errors
+
+
+def test_a_tls_handshake_that_timed_out_counts_as_a_refused_tunnel_with_or_without_a_proxy(tmp_path):
+    # urllib3 writes a request only on a connection whose TLS handshake finished. Through a proxy, v1.17 counted a
+    # stalled handshake as a refused tunnel (the error names the proxy); directly, the same stall names the request's
+    # path, as a lost reply does, and v1.17 took it for one: the entry blocked its symbol, and a GTT gave up after one
+    # attempt with GTT STATE UNKNOWN. It is raised from the connect urllib3 runs before it writes the request.
+    for through_tunnel in (True, False):
+        stalled = stalled_handshake(through_tunnel)
+        assert engine.KiteOrderGateway._tunnel_refused(stalled) and not engine.KiteOrderGateway._never_sent(stalled)
+    # Controls: a reply lost after the request was written, over TLS on a new or a kept-alive connection, or over plain
+    # HTTP, may have reached Kite.
+    for lost in lost_tls_replies(tmp_path) + [silent_request()]:
+        assert not engine.KiteOrderGateway._tunnel_refused(lost) and not engine.KiteOrderGateway._never_sent(lost)
+
+
+@pytest.mark.parametrize("sent", [False, True])
+def test_an_entry_whose_tls_handshake_timed_out_releases_the_symbol(sent):
+    # v1.17 looked the tag up and blocked the symbol for the session (exit 1, ATTENTION "entry outcome unknown") for an
+    # order whose connection never opened. Control: a direct reply lost after the request was written.
+    kite = StubKite([OPEN], place_error=silent_request() if sent else stalled_handshake(), orders_result=[])
+    r = run_router(router(gateway=fast_gateway(kite)), [sig()])
+    if sent:
+        assert r.active_inventory == {"SWIGGY"} and "entry outcome unknown" in r.unresolved[0]
+    else:
+        assert r.active_inventory == set() and r.unresolved == [] and "orders" not in kite.routes()
+
+
+@pytest.mark.parametrize("outage_ends", [True, False])
+def test_stalled_handshakes_are_ridden_out_like_refused_tunnels(outage_ends):
+    # The GTT book is behind the same stalled server. v1.17 took the first stalled handshake for a request that may have
+    # booked a GTT, polled the unreadable book and gave up with two attempts unused: GTT STATE UNKNOWN, where the same
+    # stall behind a proxy got its GTT armed, or reported POSITION OPEN WITHOUT EXITS once every attempt was used.
+    stalled = stalled_handshake()
+    kite = StubKite([{"status": "COMPLETE", "filled_quantity": 2941, "average_price": 290.1}],
+                    gtt_results=[stalled, stalled, {"trigger_id": 777}] if outage_ends else [stalled])
+    proxy_outage(kite, stalled, until_places=3 if outage_ends else 99)
+    gw = fast_gateway(kite, cancel_grace=0.1, poll_interval=0.01)
+    fill = asyncio.run(gw.execute(kite_plan()))
+    assert kite.gtt_places == 3 and not fill.exits_unknown
+    if outage_ends:
+        assert fill.exit_order_id == "777" and gw.alerts == []
+    else:
+        assert fill.exit_order_id is None and len(gw.alerts) == 1 and "POSITION OPEN WITHOUT EXITS" in gw.alerts[0]

@@ -39,7 +39,7 @@ python engine.py --source csv      # fully offline, on real SWIGGY bars: history
 cd ipo_momentum
 uv sync --extra dev                 # Python >= 3.10; pandas, numpy, kiteconnect, pytest, uvloop (pinned in uv.lock)
 uv run python engine.py --source csv
-uv run pytest                       # 543 tests, ~5 min, fully offline
+uv run pytest                       # 563 tests, ~5 min, fully offline
 ```
 
 Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
@@ -47,7 +47,9 @@ Without uv: `pip install pandas numpy` (add `kiteconnect` for Zerodha and
 two Kite adapter tests in `test_data.py` are skipped; without `uvloop`
 (`pip install uvloop`, not on Windows), so are the uvloop cases of the signal
 tests in `test_end_to_end.py`; on Python 3.10, so are the six tests of
-`asyncio.run`'s own SIGINT handler, which 3.10 lacks; the rest pass), then
+`asyncio.run`'s own SIGINT handler, which 3.10 lacks; where no PID namespace
+can be created, even inside a user namespace (`unshare --user --pid`), so are
+the two container PID 1 tests; the rest pass), then
 `python engine.py --source csv`.
 
 | Mode | Command |
@@ -68,7 +70,7 @@ Real orders also need a funded account.
 | `0` | Success |
 | `1` | No usable history, a failed IP check, a crashed worker, a dead or silent websocket, a router that could not settle in time, or a live order that could not be settled or protected (the run lists each under `ATTENTION`) |
 | `2` | Invalid configuration, including malformed or out-of-range arguments |
-| `128 + N` | Stopped by signal N after the normal shutdown and halt report (or, when the stop came while the engine was still starting, at once, with nothing run): `130` Ctrl-C (SIGINT), `143` `kill`/`systemctl stop`/`docker stop` (SIGTERM), `129` a closed terminal (SIGHUP) |
+| `128 + N` | Stopped by signal N after the normal shutdown and halt report (or, when the stop came while the engine was still starting, as soon as the start-up request in flight returns, with nothing run): `130` Ctrl-C (SIGINT), `143` `kill`/`systemctl stop`/`docker stop` (SIGTERM), `129` a closed terminal (SIGHUP) |
 
 A failure outranks a signal: a shutdown that a signal started but that then
 fails still exits `1`, so a supervisor keyed on `1` never misses one.
@@ -149,7 +151,10 @@ With a degraded broker API it can take minutes, bounded by the gateway's
 deadlines (at most about 6¼ minutes at the defaults). Give the supervisor's
 stop grace room before it sends SIGKILL: `docker stop -t 420` or compose
 `stop_grace_period: 420s`, systemd `TimeoutStopSec=420`, Kubernetes
-`terminationGracePeriodSeconds: 420`. Docker's default is only 10 s.
+`terminationGracePeriodSeconds: 420`. Docker's default is only 10 s. Run the
+container under an init (`docker run --init`, compose `init: true`, or tini
+as the entrypoint): as its PID 1, the engine loses a stop sent in its first
+few tens of milliseconds (see Known limitations).
 
 Without `--listing-date` (Yahoo and CSV demos only), the first bar of the last
 20 days is treated as the listing, as in v1.0's demo, and the run says so. SWIGGY
@@ -204,10 +209,17 @@ SIGINT, SIGTERM or SIGHUP, or loses a worker:
 
 A stop that comes while the engine is still starting (IP check, instrument
 download, history sync) ends it there, before anything can trade, with exit
-`128 + N` and no halt report. The signals are taken as `main()` starts: as a
+`128 + N` and no halt report; the process exits once the start-up request in
+flight returns (a read in a worker thread cannot be interrupted). The signals
+are taken as `main()` starts: as a
 container's PID 1 (no `--init`) the kernel drops a signal left at its default,
 and in a host already running engines only those would take it, so the engine
-would start after the stop and trade until the supervisor's SIGKILL.
+would start after the stop and trade until the supervisor's SIGKILL. Run as a
+script (`python engine.py`), the engine records SIGTERM and SIGHUP from its
+first line, before its imports (a few hundred ms), and `main()` takes such a
+stop in the same way. The interpreter's own start-up before that line cannot
+be covered: as PID 1, run under an init (`docker run --init`, compose
+`init: true`, or tini), which also lets a stop that early end it at once.
 
 Signals stay owned by the engine, with repeats logged and ignored, until the
 process has finished exiting. Signals belong to the process, so each is taken
@@ -228,17 +240,21 @@ last one ends:
 - Whatever the host sets while engines run (a loop callback, a plain handler,
   `SIG_IGN`) is what is handed back. On asyncio a plain handler set mid-run
   keeps its own flags, unless an engine started after the host set it: that
-  engine displaced it. An engine that starts after such a change takes the
-  signal back for its own run; what the host had before the change is kept for
-  the hand-back.
+  engine displaced it. An engine that starts, or begins its run, after such a
+  change takes the signal back for its own run; what the host had before the
+  change is kept for the hand-back.
 - A signal the host sets to `SIG_IGN` while engines run (a common guard around
   spawning workers) stays ignored, as under `nohup`: an engine that starts
   inside the guard joins the running ones. Once the host lifts the ignore,
   whatever it restores, the engines take the signal back at their next check,
   every 50 ms (`RECLAIM_POLL`) while the event loop is free, if it no longer
   reaches them, for instance because the host
-  had re-registered or removed its own callback before the guard. An engine that
-  starts under `SIG_IGN` while no engine runs stays unhooked, as under `nohup`.
+  had re-registered or removed its own callback before the guard. An engine
+  that starts under `SIG_IGN` while no engine runs (its first step runs at the
+  host's next `await`, often inside such a guard) takes the signal as its run
+  begins, once the history is loaded; a stop in the rest of its start-up goes
+  to what the host restored. One that begins its run under `SIG_IGN` with no
+  engine running stays unhooked, as under `nohup`.
 - If the last engine ends inside such a guard, the signal is handed back
   ignored, with a warning: the handler the host saved when it set `SIG_IGN` was
   the engine's, and restoring it would swallow every later stop (and Ctrl-C).
@@ -350,7 +366,10 @@ Trailing stays the default because it is the original strategy's definition.
   than a stamp's truncation past feed time. So:
   - Within the bar clock's 2 s grace after the end of a bar that is still open,
     the print joins that bar: it cannot close a bar before the bar clock would,
-    even when latency has just risen.
+    even when latency has just risen. When the lag is negative (the print's
+    feed time is then later than its receipt), it joins the bar whenever it is
+    received before the bar's end plus the grace on the host clock (see Feed
+    liveness, below).
   - Received after the print that opened the current bar, it joins that bar.
   - A print that joins an open bar but may be the next bucket's (its feed time
     or latest possible time is past the bar's end) is in the wrong bar if it
@@ -455,8 +474,16 @@ Trailing stays the default because it is the original strategy's definition.
     symbol has traded in this connection (a subscribe snapshot's old timestamp
     does not count). Bars wait for the largest lag in the last minute, so
     network latency or a fast host clock cannot close a bar before its last
-    prints arrive, and a host clock running *behind* the exchange (negative
-    lag) is corrected too, with a warning.
+    prints arrive. A negative lag is not trusted for closing: it may be a host
+    clock running *behind* the exchange, or one forward-stamped update (the
+    30 s rule accepts up to 30 s) that is the window's only sample (on a quiet
+    name it stays so until the next sample, however long that takes), and no
+    sample tells them apart. Read as a host behind, such an update would
+    close a bar up to 30 s early, drop its tail as late and credit it to the
+    next bar. So the bar clock never closes a bar before its end plus the grace
+    on the host clock. On a host that really runs behind, a bar that no later
+    print closes closes up to that offset late (a later signal; signal ages
+    stay corrected, below), and a warning names the offset.
   - The router's signal ages use a separate estimate of how far the host runs
     behind: the upper median lag of the last minute, which one late packet
     cannot move once the minute holds at least two other samples (with fewer,
@@ -483,7 +510,13 @@ Trailing stays the default because it is the original strategy's definition.
   discarded (the exchange holds special weekend sessions, e.g. on a Budget
   day): the back-fill then starts at that session's open. The back-fill is
   strict: an empty answer means nothing traded, and a failed fetch raises, so
-  the bar is recorded but not evaluated. Without a history source, a bar after
+  the bar is recorded but not evaluated. The hole stays missing: every later
+  bar retries it (from its start to that bar) before it is evaluated, and is
+  not evaluated while the fetch keeps failing, so no bar is evaluated on a
+  history that lacks the hole's bars (their volume would be missing from later
+  RVOL baselines). A retry adds only the bars history lacks, and plays to the
+  paper OCO only the bars of the new bar's own hole: the rest were played when
+  they closed or when the first fetch failed. Without a history source, a bar after
   a hole is likewise not evaluated (the offline demo's first tape bar is one: the bundled sessions
   lack their 15:20 and 15:25 bars). In both cases the bars the feed discarded
   in the hole (partial or spill bars) are played to the paper OCO before it,
@@ -492,7 +525,13 @@ Trailing stays the default because it is the original strategy's definition.
   is a bar an unstamped print opened whose back-filled bucket before it
   traded (see Time).
 * **Integrity.** Late and out-of-order prints are dropped before they can move
-  the volume counter. History fetches drop the still-forming bar.
+  the volume counter. History fetches drop the still-forming bar. Kite serves
+  the running candle, and a host clock running ahead would read it as
+  complete, so the Kite start-up sync stops a bar (5 minutes) before the host's
+  clock: the feed's first kept bar back-fills the rest with the request it
+  makes anyway (a run started within 5 minutes after the close adds one fetch
+  at the next open). On listing day, a start before 10:10 finds no complete
+  bar and exits (before, 10:05).
 
 ---
 
@@ -540,8 +579,10 @@ or duplicated:
      or a broker refusal (any 4xx other than 429, e.g. insufficient margin)
      releases the symbol at once. So does a proxy that refused the tunnel (a CONNECT
      answered 403, 502..., or not answered within the client timeout, as by a
-     proxy that cannot reach Kite; both are a refused tunnel below): it received
-     the CONNECT line and nothing else.
+     proxy that cannot reach Kite), or a TLS handshake with Kite that did not
+     finish within the client timeout, through the tunnel or directly (all are a
+     refused tunnel below): no connection to Kite was set up, so no request
+     byte was sent.
      Kite errors are classified by HTTP status, not by name: an
      `OrderException` with a 503 is looked up, not taken as a refusal.
 2. It polls `order_history` until the order reaches a terminal state, retrying
@@ -574,11 +615,12 @@ or duplicated:
      follows a successful read of the book, so a GTT booked during the outage
      is adopted, not armed again; a book read that fails for good (an expired
      session) ends the loop at once, and the alert names it. (A proxy that
-     refused the tunnel stays on the ambiguous path here: attempts plus book
-     polls ride out a longer proxy outage than one never-sent window. Such a
-     request carried nothing to Kite, so no GTT can exist: refused tunnels
-     alone use every attempt, even while the book, behind the same proxy, is
-     unreadable, or a proxy restart in between refuses connections, and if only
+     refused the tunnel, or a stalled handshake, stays on the ambiguous path
+     here: attempts plus book polls ride out a longer outage than one
+     never-sent window. Such a request carried nothing to Kite, so no GTT can
+     exist: refused tunnels alone use every attempt, even while the book,
+     behind the same proxy or server, is unreadable, or a proxy restart in
+     between refuses connections, and if only
      those failed, the position is reported as `POSITION OPEN WITHOUT EXITS`,
      with exits `NONE`, as soon as the last is refused: no attempt is left to
      space out, so one book read replaces its poll. The alert also names an
@@ -672,7 +714,7 @@ not evidence of an edge in either direction.
 
 ## How it was reviewed
 
-Seventeen adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
+Eighteen adversarial review rounds shaped this code. [CHANGELOG.md](CHANGELOG.md)
 lists every finding with its severity, verdict, fix and the test that pins it.
 
 1. **v1.0, the original file.** Four reviewers, one per area (live path, alpha,
@@ -892,6 +934,24 @@ lists every finding with its severity, verdict, fix and the test that pins it.
       expired session during the fill wait went unnamed; docs precision.
 
     These became v1.17.
+18. **v1.17, the seventeenth fix.** All four skeptics ran. 8 findings, none
+    refuted, 4 medium and 4 low:
+    - A failed back-fill's hole was never retried: only the next bar was left
+      unevaluated, and every later bar was evaluated across the missing bars,
+      which lowered RVOL baselines and could fake a breakout. Later bars now
+      retry the fetch and wait for it.
+    - A lone forward-stamped update read as a host running behind, and the
+      bar clock closed the open bar early, crediting its tail to the next bar.
+      A negative lag no longer closes a bar before its end on the host clock.
+    - v1.17's early hook was a regression for a host whose `SIG_IGN` guard
+      spanned `main()`'s first step: the engine ran with no route. It takes the
+      signals again as its run starts.
+    - As PID 1, a stop during the interpreter's imports was still dropped; the
+      script records it from its first line. A directly stalled Kite TLS
+      handshake now counts as a refused tunnel like its proxied twin; the Kite
+      start-up sync stops a bar before the host clock; docs precision.
+
+    These became v1.18.
 
 ---
 
@@ -979,6 +1039,14 @@ lists every finding with its severity, verdict, fix and the test that pins it.
   before counts the print's shares again, which can fake a signal. Such
   stamps cannot be told apart from honest latency: keep the host's clock
   synced.
+* **A forward-stamped update of the next bucket closes the open bar early.**
+  The 30 s rule accepts a stamp up to 30 s ahead of its receipt, and a stamp
+  of a later bucket closes the open bar at once: its tail, received later, is
+  dropped as late and credited to the next bar, which can fake a breakout. On
+  a host running behind the exchange, such stamps are every bar's genuine
+  first prints (refusing them would discard every bar), so they are trusted:
+  keep the host's clock synced. The bar clock and prints with no exchange time
+  no longer close a bar early on a negative lag (see Feed liveness).
 * **An untraded name's zero counter is trusted** when its packet dates the last
   trade to an earlier day and no bar of today is known. If a name first traded
   while the feed was down and a stale pre-open snapshot then arrives before any
@@ -986,8 +1054,11 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 * **A host clock about 30 s or more behind the exchange** stops the run
   (exit 1) within seconds: every tick is dropped, or the stamps straddle the
   limit. A supervisor restart keeps failing until the time sync is fixed. Within 30 s
-  the offset is measured and corrected (an offset smaller than the feed's
-  latency cannot be told apart from latency). A live run keeps the clock it started
+  the offset is measured and signal ages are corrected (an offset smaller than
+  the feed's latency cannot be told apart from latency), but the bar clock
+  still closes on the host clock: a bar that no later print closes closes up
+  to the offset late, and a print with no exchange time received in that time
+  joins it as a spill (both bars are discarded and back-filled). A live run keeps the clock it started
   with, so after NTP corrects the host mid-session, the run goes on correcting
   (and warning about) its start-up offset until it is restarted.
 * **A suspended host** (laptop sleep) is handled on Linux, whose clock keeps
@@ -1026,6 +1097,14 @@ lists every finding with its severity, verdict, fix and the test that pins it.
   as a stop, settles in order and returns `130`. `run()` offers no task to
   cancel: call it from the main thread. The same warning names a signal that
   another event loop's engines still hold.
+* **As a container's PID 1, a stop in the interpreter's first few tens of
+  milliseconds is lost.** The kernel drops a signal that a PID namespace's
+  init has not taken, and until `python engine.py` takes SIGTERM and SIGHUP
+  (before its imports) they are at their default. A host that imports the
+  engine as PID 1 is exposed until its own `main()` starts. The engine then
+  starts and trades until the supervisor's SIGKILL. Run the container under an
+  init (`docker run --init`, compose `init: true`, or tini): the engine is
+  then not PID 1, and a stop before it takes its signals ends it at once.
 * **The strategy is unvalidated.** One historical signal is not a backtest.
 
 ---
@@ -1036,7 +1115,7 @@ lists every finding with its severity, verdict, fix and the test that pins it.
 uv run pytest            # or: pytest (from this directory)
 ```
 
-The 543 tests run offline in about 5 minutes, whichever way they are launched (a shell background job or `nohup` included: pytest gives SIGINT back its default, and the `Child`, `HOST` and `SCRIPT` harnesses start their interpreters with SIGHUP and SIGTERM at their defaults). The slowest are real CLI runs that
+The 563 tests run offline in about 5 minutes, whichever way they are launched (a shell background job or `nohup` included: pytest gives SIGINT back its default, and the `Child`, `HOST` and `SCRIPT` harnesses start their interpreters with SIGHUP and SIGTERM at their defaults). The slowest are real CLI runs that
 deliver SIGINT, SIGTERM and SIGHUP mid-entry and during exit, and a shutdown
 that must outlast v1.1's 10 s drain. They pass in seven configurations (on
 Python 3.10, six of them are skipped as above):
@@ -1053,8 +1132,8 @@ Pandas `FutureWarning`s raised from engine code fail the suite.
 | File | Covers |
 | --- | --- |
 | `test_alpha.py` | Breakout conditions and crossing semantics, the exact stop/target math, true-range ATR, RVOL baselines and modes, session-defined bases, look-ahead freedom (including inside the base), the pinned real signal |
-| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, zeroed stamps (feed time, its bounds on a host behind and after one late packet, filing in the latest bucket with no bar open, open bars a print may spill from and the bar after them (discarded and back-filled, and played to the paper OCO when the back-fill fails, as partial bars are), forward stamps alone, most of the lag window, no later than the print's receipt, or ahead of its feed time on a host running ahead, provisional and ambiguous bars, late drops, the lag race) and untraded names, feed liveness in feed time, feed lag in both directions, clock skew, host clock steps, suspends, far-future stamps and the 30 s rule and its straddle stop, the silent-socket watchdog, strict hole back-fill within and across sessions (a whole weekday or weekend session with no kept bar included, after an earlier discarded bar too), thread safety, loop survival |
+| `test_live.py` | Tick-to-OHLCV bars, the bar clock, session gating, late ticks, Kite payloads, feed drops, stalls, reconnects and late connects, counter glitches and the high-water mark, no-trade and re-baselining prints and their blind buckets, zeroed stamps (feed time, its bounds on a host behind and after one late packet, filing in the latest bucket with no bar open, open bars a print may spill from and the bar after them (discarded and back-filled, and played to the paper OCO when the back-fill fails, as partial bars are), forward stamps alone, most of the lag window, no later than the print's receipt, or ahead of its feed time on a host running ahead, provisional and ambiguous bars, late drops, the lag race) and untraded names, feed liveness in feed time, feed lag in both directions, clock skew, host clock steps, suspends, far-future stamps and the 30 s rule and its straddle stop, the silent-socket watchdog, strict hole back-fill within and across sessions (a whole weekday or weekend session with no kept bar included, after an earlier discarded bar too), a failed back-fill's hole retried before any later bar is evaluated, bars never closed early on a negative lag (a lone forward-stamped update), thread safety, loop survival |
 | `test_execution.py` | Sizing caps, tick rounding, duplicates, future and stale signals, paper OCO mechanics incl. gaps, the halt report. No Kite dependency. |
-| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies, refused tunnels and unanswered CONNECTs, repeated outages, GTTs booked during an outage), broker refusals classified by HTTP status, transient errors, cancels that don't land (and why, when named), partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books (incl. an expired session), unknown and fired GTT states reported as such, refused tunnels that leave no GTT (incl. a proxy outage that also hides the book, or restarts in between), are reported as soon as the last is refused and start no duplicate watch, an expired session named after refused tunnels, an identical earlier or foreign GTT never adopted after refused tunnels alone, nor after a later ambiguous attempt once a book read after the tunnel showed it, a 429 on the entry looked up by its tag, a stop handled before an already scheduled entry ran. Skipped without `kiteconnect`. |
+| `test_kite_gateway.py` | The Kite gateway on the real SDK: lost and late-booked replies, requests that never left (timeouts, refused connections, unreachable proxies, refused tunnels, unanswered CONNECTs and stalled TLS handshakes, repeated outages, GTTs booked during an outage), broker refusals classified by HTTP status, transient errors, cancels that don't land (and why, when named), partial fills, shutdown mid-fill-wait, mid-`place_order` and mid-GTT, idempotent GTT placement with late-booked, triggered and duplicate GTTs and unreadable books (incl. an expired session), unknown and fired GTT states reported as such, refused tunnels that leave no GTT (incl. a proxy outage that also hides the book, or restarts in between), are reported as soon as the last is refused and start no duplicate watch, an expired session named after refused tunnels, an identical earlier or foreign GTT never adopted after refused tunnels alone, nor after a later ambiguous attempt once a book read after the tunnel showed it, a 429 on the entry looked up by its tag, a stop handled before an already scheduled entry ran. Skipped without `kiteconnect`. |
 | `test_data.py` | tzdata fallback, logging hygiene, the FIFO rate limiter (incl. wake-up order under clock jitter), the IP check, Yahoo/Kite/CSV adapters incl. malformed payloads and bad timestamps, the session's last 30m/60m bar and special sessions, retry policy, strict back-fill, midnight lookback clamps, listing dates in any zone, orchestrator anchoring and error containment, collecting and running the suite without the Kite extra |
-| `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (asyncio and uvloop, incl. handlers changed mid-run and `SA_RESTART`), several engines in one loop incl. one started after the host took a signal back or under its `SIG_IGN` guard, held runs and `release_signals()` (incl. between runs, from another thread, and a loop closed unreleased on asyncio, uvloop or without loop signals, then `main()`, `run()` or an engine in a thread), forked workers and helpers before, during and after their own engine (incl. Ctrl-C, a host's plain handler or mid-run loop callback, a guard lifted with the saved handler, and a worker forked before any engine hooked), `run()` from a worker thread (and its warning that no stop signal reaches it), a stop while an engine starts (alone, beside running engines, and as a container's PID 1) |
+| `test_end_to_end.py` | The CLI: offline trade under a shifted clock, exit codes and their precedence, config and numeric argument validation, `--max-lookback-days` incl. demos, vendor limits and overflow, live-mode safety, a dead websocket, shutdown with an order in flight, SIGINT/SIGTERM/SIGHUP mid-entry and during exit, signals without loop handlers, `nohup`, restoring a host's handlers (asyncio and uvloop, incl. handlers changed mid-run and `SA_RESTART`), several engines in one loop incl. one started after the host took a signal back or under its `SIG_IGN` guard, held runs and `release_signals()` (incl. between runs, from another thread, and a loop closed unreleased on asyncio, uvloop or without loop signals, then `main()`, `run()` or an engine in a thread), forked workers and helpers before, during and after their own engine (incl. Ctrl-C, a host's plain handler or mid-run loop callback, a guard lifted with the saved handler, and a worker forked before any engine hooked), `run()` from a worker thread (and its warning that no stop signal reaches it), a stop while an engine starts (alone, beside running engines, and as a container's PID 1, incl. one before `main()` and one while `python engine.py` loads its imports), an engine that started inside a host's `SIG_IGN` guard or while the host set its own handler takes the signal as its run begins, the Kite start-up history stopping a bar before the host clock |

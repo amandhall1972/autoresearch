@@ -1095,7 +1095,8 @@ def test_a_forked_worker_takes_its_own_stop_signals():
         def worker(ready):
             async def run():
                 t = asyncio.create_task(engine.main(ARGS + ["5"]))
-                while not ((r := engine._STOP_ROUTES.routes.get(signal.SIGTERM)) and r["loop"] is asyncio.get_running_loop()):
+                while not ((r := engine._STOP_ROUTES.routes.get(signal.SIGTERM)) and r["loop"] is asyncio.get_running_loop()
+                           and any(getattr(c, "running", True) for c in r["callbacks"])):   # its engine runs
                     if t.done():
                         break
                     await asyncio.sleep(0.01)
@@ -2033,17 +2034,52 @@ def test_a_stop_while_starting_is_the_engines_own_and_leaves_the_hosts_task_alon
     assert "Signal 15 received; shutdown already in progress, signal ignored." in err, err
 
 
-def _stop_while_starting(pid1):
-    code = "\n".join([DEFAULT_STOPS, "import sys", f"sys.path.insert(0, {str(Path(engine.__file__).parent)!r})",
-                      "import engine", "SLOW = {'SWIGGY'}", GATED_HISTORY, f"sys.exit(engine.run({DEMO!r}))"])
+def _pid_namespace():
+    """The command that runs a process as PID 1 of a new PID namespace (plain as root, in a new user namespace as a user
+    without root), or None where neither can be created."""
+    for prefix in (["unshare", "--pid", "--fork", "--kill-child"],
+                   ["unshare", "--user", "--map-root-user", "--pid", "--fork", "--kill-child"]):
+        try:
+            if subprocess.run(prefix + ["true"], capture_output=True, timeout=10).returncode == 0:
+                return prefix
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    return None
+
+
+# A cold container's slow imports (the gate holds one the clock-shifted runs do not preload): the stop comes while the
+# engine is still loading.
+STALLED_IMPORT = """
+import sys, time
+
+
+class Stall:
+    def find_spec(self, name, path=None, target=None):
+        if name == "asyncio":                       # engine.py's second import, after its stop recorder
+            sys.meta_path.remove(self)
+            print("importing asyncio", file=sys.stderr, flush=True)
+            time.sleep(3)
+
+
+sys.meta_path.insert(0, Stall())
+"""
+
+
+def _stop_while_starting(pid1, importing=False):
+    if importing:                                       # `python engine.py`, stopped while it loads its imports
+        code = "\n".join([DEFAULT_STOPS, STALLED_IMPORT, "import runpy", f"sys.argv = [{engine.__file__!r}, *{DEMO!r}]",
+                          f"runpy.run_path({engine.__file__!r}, run_name='__main__')"])
+    else:
+        code = "\n".join([DEFAULT_STOPS, "import sys", f"sys.path.insert(0, {str(Path(engine.__file__).parent)!r})",
+                          "import engine", "SLOW = {'SWIGGY'}", GATED_HISTORY, f"sys.exit(engine.run({DEMO!r}))"])
     cmd = [sys.executable, "-c", code]
-    proc = subprocess.Popen((["unshare", "--pid", "--fork", "--kill-child"] if pid1 else []) + cmd,
-                            stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen((_pid_namespace() if pid1 else []) + cmd, stderr=subprocess.PIPE, text=True)
     lines = queue.Queue()
     threading.Thread(target=lambda: [lines.put(line) for line in proc.stderr] + [lines.put(None)], daemon=True).start()
     log, engine_pid = [], proc.pid
+    ready = "importing asyncio" if importing else "history sync under way"
     try:
-        while (line := lines.get(timeout=30)) is not None and "history sync under way" not in line:
+        while (line := lines.get(timeout=30)) is not None and ready not in line:
             log.append(line)
         if pid1:
             engine_pid = int(Path(f"/proc/{proc.pid}/task/{proc.pid}/children").read_text().split()[0])
@@ -2072,22 +2108,26 @@ def test_a_stop_while_the_engine_starts_is_taken_not_left_to_the_default():
     assert "Signal 15 received while starting: not starting." in err and "Map established" not in err, err
 
 
-def _can_unshare_pid():
-    try:
-        return subprocess.run(["unshare", "--pid", "--fork", "--kill-child", "true"], capture_output=True,
-                              timeout=10).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-@pytest.mark.skipif(not sys.platform.startswith("linux") or not _can_unshare_pid(),
-                    reason="needs a PID namespace (unshare --pid)")
+@pytest.mark.skipif(not sys.platform.startswith("linux") or not _pid_namespace(),
+                    reason="needs a PID namespace (unshare --pid, or unshare --user --pid)")
 def test_as_a_containers_pid_1_a_stop_while_starting_is_not_lost():
     # `docker stop` of an engine run as the container's PID 1 (no --init): v1.16's kernel-dropped SIGTERM let it start,
     # trade, and be killed by the SIGKILL at the end of the grace period.
     code, err = _stop_while_starting(pid1=True)
     assert code == 143, err
     assert "Signal 15 received while starting: not starting." in err and "Map established" not in err, err
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux") or not _pid_namespace(),
+                    reason="needs a PID namespace (unshare --pid, or unshare --user --pid)")
+def test_as_a_containers_pid_1_a_stop_while_the_engine_loads_its_imports_is_not_lost():
+    # v1.17 took the stop signals as main() started, but `python engine.py` spends about 0.4 s on its imports first
+    # (longer on a cold start), with SIGTERM at its default: as PID 1 a `docker stop` then was dropped, and the engine
+    # started and traded after it.
+    code, err = _stop_while_starting(pid1=True, importing=True)
+    assert code == 143, err
+    assert "received while starting: not starting" in err and "Map established" not in err, err
+    assert "IP verification" not in err and "history sync under way" not in err, err     # nothing started
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
@@ -2109,3 +2149,139 @@ def test_an_engine_that_no_stop_signal_can_reach_says_so():
     assert "thread [0]" in proc.stdout and "main 0" in proc.stdout, proc.stdout + proc.stderr
     assert proc.stderr.count("cannot reach this engine") == 1, proc.stderr
     assert "SIGINT, SIGTERM, SIGHUP cannot reach this engine (it runs off the main thread" in proc.stderr
+
+
+# ---------------------------------------------------------------- round 18: the start-up history of a host running ahead
+def test_the_kite_start_up_history_stops_a_bar_before_the_host_clock(monkeypatch):
+    # Kite serves the running candle. At host 10:05:15 on a host 20 s ahead, the exchange is at 10:04:55: v1.17 synced
+    # history to the host's now, kept 10:00's candle as complete, and the feed's first bars (partial) never replaced it,
+    # so the short bar sat in every later RVOL baseline. History now stops a bar earlier; the feed back-fills the rest.
+    real_adapter, bars, seen = engine.ZerodhaKiteAdapter, engine.CsvReplayAdapter.load(FIXTURE), []
+
+    class Kite:
+        def instruments(self, exchange=None):
+            return [{"tradingsymbol": "SWIGGY", "instrument_token": 1234, "tick_size": 0.05}]
+
+        def historical_data(self, instrument_token, from_date, to_date, interval):
+            to = datetime.strptime(to_date, "%Y-%m-%d %H:%M:%S").replace(tzinfo=engine.IST)
+            return [{"date": t.to_pydatetime(), "open": r.Open, "high": r.High, "low": r.Low, "close": r.Close,
+                     "volume": int(r.Volume)} for t, r in bars.iterrows() if t <= to]
+
+    def feed(api_key, access_token, tokens, tick_adapter, feed_dead):
+        seen.append(tick_adapter.market_state["SWIGGY"].index[-1])
+        tick_adapter.loop.call_later(0.1, feed_dead.set)
+        return types.SimpleNamespace(close=lambda: None)
+
+    class HostAhead(FarFuture):
+        FIXED = datetime(2026, 9, 25, 10, 5, 15, tzinfo=engine.IST)
+
+    kite_env(monkeypatch, feed)
+    monkeypatch.setattr(engine, "datetime", HostAhead)
+    monkeypatch.setattr(engine, "ZerodhaKiteAdapter", lambda key, token: real_adapter(key, token, kite=Kite()))
+    asyncio.run(engine.main(["--source", "kite", "--listing-date", "2026-09-08", "--live-feed", "--run-seconds", "30"]))
+    assert seen == [pd.Timestamp(datetime(2026, 9, 25, 9, 55, tzinfo=engine.IST))]    # v1.17: 10:00, still forming
+
+
+# ---------------------------------------------------------------- round 18: the run's start, and a stop before main()
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+@pytest.mark.parametrize("loop_kind", ["asyncio", "uvloop"])
+@pytest.mark.parametrize("case", ["guard", "guard, beside a later engine", "handler set while starting"])
+def test_an_engine_takes_the_stop_signals_again_as_its_run_starts(loop_kind, case):
+    # v1.17 hooked only at main()'s first step, which runs at the host's next await. Inside a short SIG_IGN guard there
+    # (no engine running yet) it skipped SIGTERM for good, and a handler the host set while it started kept the signal.
+    # A supervisor's stop then went to the host's handler (or the default killed it mid-entry), or to a later engine
+    # alone. As up to v1.16, the run's start takes them again; what the host set is handed back.
+    if loop_kind == "uvloop":
+        pytest.importorskip("uvloop")
+    code, out, err = run_host(f"""
+        host = lambda signum, frame: got.append("host")
+        signal.signal(signal.SIGTERM, host)
+        a = asyncio.create_task(engine.main(ARGS + ["5"]))
+        if {case!r} == "handler set while starting":
+            await asyncio.sleep(0)                                     # a's first step: it hooks
+            signal.signal(signal.SIGTERM, host)
+        else:
+            old = signal.signal(signal.SIGTERM, signal.SIG_IGN)        # a guard around spawning a worker
+            helper = await asyncio.create_subprocess_exec("true")     # a's first step runs here
+            signal.signal(signal.SIGTERM, old)
+            await helper.wait()
+        beside = "beside" in {case!r}
+        b = asyncio.create_task(engine.main(ARGS + ["5", "--symbol", "BBB"])) if beside else a
+        await hooked(2 if beside else 1, b, signal.SIGINT)             # running (SIGINT was left alone)
+        os.kill(os.getpid(), signal.SIGTERM)
+        print("engines", await a, await b, "host got", got, flush=True)
+        print("after", await delivered(signal.SIGTERM), flush=True)
+    """, uvloop=loop_kind == "uvloop")
+    assert code == 0, out + err
+    assert "engines 143 143 host got []" in out and "after ['host']" in out, out + err
+
+
+def _stop_before_main(signum, nohup, *extra):
+    """engine.py run as a script, as a PID namespace's PID 1; ``signum`` is sent while it imports pandas."""
+    engine_py = str(Path(engine.__file__))
+    args = ["--source", "csv", "--csv", str(FIXTURE), "--no-simulate", "--run-seconds", "0.5", *extra]
+    code = "\n".join([DEFAULT_STOPS, "signal.signal(signal.SIGHUP, signal.SIG_IGN)" if nohup else "", textwrap.dedent(f"""
+        import runpy, sys, time
+
+        class Gate:                                   # holds one of engine.py's imports while the stop is sent
+            held = False
+
+            def find_spec(self, name, path=None, target=None):
+                if name == "asyncio" and not self.held:     # engine.py's second import, after its stop recorder
+                    self.held = True
+                    print("importing asyncio", file=sys.stderr, flush=True)
+                    time.sleep(1.0)
+
+        sys.meta_path.insert(0, Gate())
+        sys.argv = [{engine_py!r}, *{args!r}]
+        try:
+            runpy.run_path({engine_py!r}, run_name="__main__")        # as `python engine.py`
+        finally:
+            print("after run: SIGTERM default", signal.getsignal(signal.SIGTERM) == signal.SIG_DFL, file=sys.stderr)
+    """)])
+    proc = subprocess.Popen(["unshare", "--pid", "--fork", "--kill-child", sys.executable, "-c", code],
+                            stderr=subprocess.PIPE, text=True)
+    lines = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in proc.stderr] + [lines.put(None)], daemon=True).start()
+    log, engine_pid = [], proc.pid
+    try:
+        while (line := lines.get(timeout=30)) is not None and "importing asyncio" not in line:
+            log.append(line)
+        engine_pid = int(Path(f"/proc/{proc.pid}/task/{proc.pid}/children").read_text().split()[0])
+        os.kill(engine_pid, signum)                                     # docker stop, before main() has started
+        code = proc.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        code = "still running 20 s after the stop"
+    finally:
+        for pid in {engine_pid, proc.pid}:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        proc.wait()
+    while (line := lines.get(timeout=10)) is not None:
+        log.append(line)
+    return code, "".join(log)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux") or not _pid_namespace(),
+                    reason="needs a PID namespace (unshare --pid, or unshare --user --pid)")
+def test_as_a_containers_pid_1_a_stop_before_main_is_not_lost():
+    # engine.py imports for a few hundred ms before main() takes the signals, and as PID 1 the kernel dropped a stop
+    # left at its default: v1.17 then started and traded until the supervisor's SIGKILL. It is recorded from the
+    # script's first line, and main() takes it as a stop while starting, before any start-up work (the IP check here).
+    # The default is what run() hands back.
+    code, err = _stop_before_main(signal.SIGTERM, False, "--expect-ip", "203.0.113.7")
+    assert code == 143, err
+    assert "Signal 15 received while starting: not starting." in err and "Map established" not in err, err
+    assert "IP verification" not in err, err
+    assert "after run: SIGTERM default True" in err, err
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux") or not _pid_namespace(),
+                    reason="needs a PID namespace (unshare --pid, or unshare --user --pid)")
+def test_under_nohup_a_hangup_before_main_is_still_ignored():
+    # Control: the script records only a stop left at its default; one the parent ignored stays ignored.
+    code, err = _stop_before_main(signal.SIGHUP, True)
+    assert code == 0, err
+    assert "Signal 1 received" not in err and "Map established" in err, err

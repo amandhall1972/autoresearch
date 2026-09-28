@@ -1,5 +1,123 @@
 # Changelog
 
+## v1.18 (2026-09-28)
+
+v1.17 went through an eighteenth adversarial review on a frozen snapshot
+(`b24c2ab`), with the same four areas. Every finder and skeptic completed.
+There were 11 findings, 10 distinct: the lifecycle and the docs reviewer each
+found the stop a container's PID 1 drops before `main()` (R18-LIFECYCLE-2 is
+R18-DATA-DOCS-1). None was refuted: 8 confirmed, 2 with part of the claim
+overstated (R18-FEED-2, R18-DATA-DOCS-2; R18-DATA-DOCS-4 too, in its docs). 4
+are medium and 6 low. One medium, R18-LIFECYCLE-1, is a v1.17 regression; the
+other three are older than every round that reviewed them. Where the fix is not
+the finder's:
+- R18-FEED-2: the finder's rule (an unstamped print received before the bar's
+  end joins it) left the two seconds of the bar clock's grace, and the finder's
+  fix leaves a forward-stamped update of the *next* bucket, which closes the
+  open bar directly through the ordinary boundary rule. That path cannot be
+  refused: on a host behind the exchange by more than its latency, every bar's
+  genuine first prints are stamped ahead of their receipt, so refusing them
+  would discard every bar. It is a Known limitation instead. The join now uses
+  the same clamped-lag receipt as the bar clock, so the two agree.
+- R18-LIFECYCLE-1: the finder added a `rehook` method with its own bookkeeping;
+  v1.18 makes `hook()` idempotent for a callback already on a route and calls
+  it again in the same synchronous step that starts the run, so no stop can
+  fall between the two.
+- R18-LIFECYCLE-2 / R18-DATA-DOCS-1: two fixes for one hole. The docs
+  reviewer's installs an `os._exit(128 + N)` handler only as PID 1; the
+  lifecycle reviewer's records the signal from the script's first line and
+  lets `main()` take it as a stop while starting, which logs the stop and
+  exits through the normal path with `run()` handing back the default. v1.18
+  ships the recorder. The interpreter's own start-up before that line cannot
+  be covered by either, so the README recommends an init.
+- R18-ORDERS-1: the finder put a directly stalled TLS handshake on the
+  never-sent path (one 15 s window). The skeptic classifies it as a refused
+  tunnel, like the same stall behind a proxy in v1.17: the entry is released,
+  and the GTT loop keeps every attempt with book polls between them and no
+  duplicate watch.
+- R18-DATA-DOCS-2: the finder's fix to the forked-worker test is taken; its
+  claim that the test no longer exercised its purpose was overstated (it still
+  caught a child whose engine never hooked), so it is marked partly confirmed.
+- R18-DATA-DOCS-4: docs only, without the finder's "bounded by its client
+  timeout" (the timeouts are per socket operation) and without repeating that
+  repeats are ignored, which the README already said.
+
+Every v1.18 regression test fails on the v1.17 snapshot and passes here, on
+Python 3.11 and 3.10 (the same results on both). The exceptions are these
+controls and pins:
+- `test_a_retried_hole_does_not_make_the_live_bar_before_an_unstamped_prints_bar_look_double_counted`:
+  a retry must not make a live bar history kept look double-counted (a
+  missed signal).
+- `test_an_entry_whose_tls_handshake_timed_out_releases_the_symbol[True]`: a
+  reply lost after the request was sent stays ambiguous.
+- `test_under_nohup_a_hangup_before_main_is_still_ignored`: the recorder is not
+  installed over `nohup`'s `SIG_IGN`.
+- `test_a_forked_worker_takes_its_own_stop_signals`, whose wait now needs a
+  running engine: it takes the orderly path again on both versions.
+
+Every v1.18 rule was also mutated on a copy, and each mutant failed its pins:
+- a failed back-fill's hole never remembered, as in v1.17 (1 test), never
+  cleared (1), its old bars played again (1), and the ambiguity check applied
+  to a retried live bar (1, the control);
+- the bar clock trusting a negative lag, as in v1.17 (2), an unstamped print's
+  join trusting it (2), and the join held only until the bar's end, as the
+  finder had it (1);
+- the Kite start-up sync at the host's now, as in v1.17 (1);
+- a directly stalled handshake still counting as possibly sent, as in v1.17
+  (4);
+- no re-hook as the run starts, as in v1.17 (6), and `hook()` appending a
+  callback twice (6 older tests, over the whole end-to-end file);
+- no early-stop check in `main()`, as in v1.17 (2), no yield after it (1), the
+  recorder installed over `SIG_IGN` too (1, the `nohup` control), and `run()`
+  handing the recorder back instead of the default (1).
+
+Existing tests changed:
+- `test_a_host_clock_behind_the_exchange_is_corrected_not_ignored`: on a host
+  19.7 s behind, the bar now closes at its end plus the grace on the host
+  clock, not 19.7 s earlier. Signal ages are still corrected.
+- `test_a_forked_worker_takes_its_own_stop_signals`: the worker waits for a
+  running engine, not a hooked one, so it exercises the orderly path again
+  (the v1.17 helper change had missed this wait).
+- The PID 1 tests fall back to `unshare --user --map-root-user --pid` where
+  plain `unshare --pid` is refused, so they run unprivileged where user
+  namespaces are enabled.
+- The tests that land a stop while `python engine.py` loads its imports gate
+  `asyncio` (its second import, after the recorder) rather than `pandas`, and
+  the TLS-handshake test builds its throwaway certificate with literal dates:
+  the suite's clock-shifted runs preload `pandas` and replace
+  `datetime.datetime`, which had failed four tests only there.
+
+### Live feed
+
+| Sev | Verdict | v1.17 defect | v1.18 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | A failed back-fill's hole was never retried. The bar after it was not evaluated, but the next one was, on a history that lacked the hole's bars: a surge during a websocket outage (or a discarded spill pair) was missing from the 20-bar RVOL baseline, and a breakout the exchange's bars do not show could fire. v1.3's "a failed back-fill read as nothing traded", one bar later. | The hole stays pending: every later bar retries it (from its start) before it is evaluated, and is not evaluated while the fetch fails. A retry adds only missing bars, plays only the new hole's bars to the paper OCO, and judges an unstamped print's bar only on a bar before it that the retry added. | `test_a_failed_backfills_hole_is_retried_and_no_later_bar_is_evaluated_across_it`, and a control |
+| medium | ◐ | A forward-stamped update (up to 30 s ahead, which the 30 s rule accepts) that was the lag window's only sample read as a host running behind. The bar clock closed the open bar up to 30 s early, and an unstamped print received in its last seconds closed it too: the tail was dropped as late (or filed in the next bucket) and credited to the next bar, which could fake a breakout on a synced host. (Overstated: the proposed fix left a forward stamp of the *next* bucket, which closes the bar directly and cannot be refused without discarding every bar on a host slightly behind: now a Known limitation.) | A negative lag no longer closes a bar early: the bar clock closes on the host clock (a positive lag still delays it), and an unstamped print received before the bar's end plus the grace joins it (a spill). On a host really behind, a bar no later print closes closes up to the offset late; signal ages stay corrected. | `test_a_lone_forward_stamped_update_does_not_close_a_bar_before_its_end` (the bar clock, an unstamped print before the end and within the grace) |
+| low | ✔ | The Kite start-up sync used the host's now. On a host running ahead, a start within its lead before a bucket's end kept the exchange's running candle as complete, and the feed never replaced it (its own bar was partial, the next bar contiguous): a short bar in every later RVOL baseline. | The Kite start-up sync stops a bar before the host's now; the feed's first kept bar back-fills the rest with the request it makes anyway. | `test_the_kite_start_up_history_stops_a_bar_before_the_host_clock` |
+
+### Lifecycle
+
+| Sev | Verdict | v1.17 defect | v1.18 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | v1.17 hooked the stop signals in `main()`'s first step, which runs at the host's next yield, and never again. A host whose `SIG_IGN` guard (the README's own pattern around a fork or a subprocess) spanned that step, or that set its own handler after it but before the run began, left the engine with no route for its whole run, and nothing was logged. Alone, SIGTERM then killed it mid-entry; beside a later engine only that one took the stop; with a host `loop.stop` callback the entry was cut short. A v1.17 regression. | `hook()` is idempotent for a callback already on a route, and `main()` hooks again in the synchronous step that starts the run: a signal still owned is a no-op, one the host took is re-taken (what the host set is kept for the hand-back), one still ignored joins with a reclaim, one lifted since is taken fresh; `nohup`'s is left alone. | `test_an_engine_takes_the_stop_signals_again_as_its_run_starts` (a guard, a guard beside a later engine, a handler set while starting; asyncio and uvloop) |
+| low | ✔ | As a container's PID 1, a stop during the interpreter's start-up and `engine.py`'s imports (about 0.4 s, longer on a cold start) was still dropped by the kernel, since SIGTERM and SIGHUP were at their default until `main()` hooked. The engine then started and traded until the supervisor's SIGKILL, the consequence v1.17 listed as fixed. Found by two reviewers (R18-DATA-DOCS-1 rated it medium). | Run as a script, `engine.py` records SIGTERM and SIGHUP from its first line where they are at their default (`nohup`'s `SIG_IGN` is kept), and `main()` takes a recorded stop as a stop while starting before any start-up work; `run()` hands back the default in the recorder's place. The README recommends an init for the interpreter's own start. | `test_as_a_containers_pid_1_a_stop_before_main_is_not_lost`, `test_as_a_containers_pid_1_a_stop_while_the_engine_loads_its_imports_is_not_lost`, and the `nohup` control |
+
+### Real-money safety: orders
+
+| Sev | Verdict | v1.17 defect | v1.18 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| low | ✔ | v1.17 counted a Kite TLS handshake that stalled behind a proxy as a refused tunnel, but the same stall on a direct connection (no proxy, or Kite in `NO_PROXY`) raised its timeout from urllib3's pre-request connect step with the request's path, like a lost reply. An unsent entry was looked up and blocked the symbol for the session; a filled position gave up after one GTT attempt with GTT STATE UNKNOWN, although no request byte was sent. | A read timeout raised from urllib3's connect step (`_validate_conn`, before the request is written) counts as a refused tunnel, directly or through a proxy; the docs say no request byte was sent. | `test_a_tls_handshake_that_timed_out_counts_as_a_refused_tunnel_with_or_without_a_proxy`, `test_an_entry_whose_tls_handshake_timed_out_releases_the_symbol`, `test_stalled_handshakes_are_ridden_out_like_refused_tunnels`, with controls |
+
+### Tests and docs
+
+| Sev | Verdict | v1.17 defect | v1.18 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | The README presented the PID 1 case as solved, though a stop before `main()` was still dropped, and never recommended an init. | See R18-LIFECYCLE-2 above; the README's start-up paragraph, Supervisors section and a new Known limitations entry say what is covered, what is not, and to run under an init. | (the PID 1 import-window test above) |
+| low | ◐ | `test_a_forked_worker_takes_its_own_stop_signals` kept its old "hooked" wait, so since v1.17 it always stopped the worker while it started and no test took a forked worker's running engine through the orderly path. The v1.17 no-abandon mutant count (5) was 6 over the whole file. (Overstated: the test still caught a child whose engine never hooked.) | The worker waits for a running engine; the v1.17 count is corrected (marked). | `test_a_forked_worker_takes_its_own_stop_signals` |
+| low | ✔ | The v1.17 CHANGELOG's mutation evidence for the newest-stamp pin came from a `min()` mutant that keeps the connection's earliest stamp and passes the pin (it failed only genuine-proof controls); a test row it said was replaced was kept beside the new one; the claim that the feed-time pin was caught by no other test was wrong. | Corrected in the v1.17 section, each marked. | (docs) |
+| low | ◐ | The README said a stop while starting ends the process "at once"; it exits once the start-up request in flight returns, since a read in a worker thread cannot be interrupted. (Overstated: the finder's own wording, and its claim about a second Ctrl-C on 3.11, were inaccurate.) | Docs: the exit table and the start-up paragraph say so. | (docs) |
+| low | ✔ | The PID 1 test needed `unshare --pid`, which needs `CAP_SYS_ADMIN`, so it was skipped for every non-root developer and CI runner, and the README's skip list did not say so. | The tests fall back to a user namespace, and the README's skip list names the case that remains. | (the PID 1 tests, run unprivileged) |
+
 ## v1.17 (2026-09-28)
 
 v1.16 went through a seventeenth adversarial review on a frozen snapshot
@@ -38,29 +156,44 @@ Python 3.11 and 3.10. The exceptions are these controls and pins:
 - The new synced-host row of
   `test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket`:
   a pin of v1.16's feed-time check that no other test caught alone.
+  (Corrected in v1.18: reverting that check alone already failed the two
+  host-ahead rows and, on a synced host, the changed `filed_in_that_bucket`
+  test, though only through the bar's ambiguous flag; this row pins the
+  evaluated bar there.)
 
 Every v1.17 rule was also mutated on a copy, and each mutant failed its pins:
-- a stop while starting not abandoning the start (5 tests), the engine's own
-  cancel left on the host's task (1), and the start-up handler left in place
-  after main() (1);
+- a stop while starting not abandoning the start (5 tests; corrected in
+  v1.18: 6 over the whole file, as `test_a_forked_worker_takes_its_own_stop_signals`
+  stopped its worker while it started, see below), the engine's own cancel
+  left on the host's task (1), and the start-up handler left in place after
+  main() (1);
 - no warning when no stop signal can reach the engine (1);
 - a stalled CONNECT still counting as possibly sent, as in v1.16 (4), any read
   timeout counting as a refused tunnel (3), and a TLS proxy's stalled
   handshake not counted (1);
 - the cancel error not named (1), the state-read error not named (1), and a
   successful read not clearing it (1);
-- the earliest proving stamp kept instead of the newest (5);
+- the earliest proving stamp kept instead of the newest (5; corrected in
+  v1.18: that mutant, `min()`, kept the connection's earliest stamp, which
+  proves nothing, so it failed only the genuine-proof controls and passed the
+  pin's `after_feed_time` row; the finder's change, the earliest stamp of the
+  newest bucket, fails that row alone);
 - the stamp checked only against the print's receipt, as in v1.15 (5, the new
   synced-host row among them).
 
 Existing tests changed:
 - The end-to-end sync helpers `hooked()`, `until_hooked()` and
   `stop_once_hooked` wait for running engines, not hooked ones: an engine now
-  hooks before it starts.
+  hooks before it starts. (Corrected in v1.18: the forked worker of
+  `test_a_forked_worker_takes_its_own_stop_signals` still waited for a hooked
+  engine, so its stop always came while it started and no test stopped a
+  forked worker's running engine; v1.18 makes it wait for a running one.)
 - `test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket`:
   its synced-host row (a stamp 0.45 s ahead, which the own-receipt check
   already rejects) is replaced by one only the feed-time check rejects (a stamp
   ahead by less than its update's latency, and a print slower than it).
+  (Corrected in v1.18: the 0.45 s row is kept, and the new row added beside it,
+  as the v1.16 section says.)
 
 ### Lifecycle
 
