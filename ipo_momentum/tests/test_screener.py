@@ -2,8 +2,10 @@
 import asyncio
 import json
 import logging
+import os
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -393,8 +395,9 @@ def test_yahoo_source_uses_the_public_adapter_and_its_history_limit(monkeypatch,
         return breakout_frame() if symbol == "BRK" else engine.empty_bars()
 
     monkeypatch.setattr(engine.PublicExchangeAdapter, "fetch_historical_bars", fake_fetch)
-    # A listing older than Yahoo's ~60 days of 5m bars is unread without --allow-partial-history: the adapter would
-    # have clamped its start (calls[0]); with the flag the frame is anchored at its first bar.
+    # A listing older than Yahoo's ~60 days of 5m bars is unread without --allow-partial-history (calls[0][1] is the
+    # orchestrator's start, the listing itself: the clamp lives in the replaced method, see the round-19 test below);
+    # with the flag the frame is anchored at its first bar.
     assert asyncio.run(screener.main(["BRK=2026-06-01", "NONE", "--source", "yahoo"])) == 1
     assert [c[0] for c in calls] == ["BRK", "NONE"] and calls[0][1] >= ist(2026, 6, 1)   # never before the listing
     assert "the IPO base and AVWAP anchor are unknown" in caplog.text
@@ -412,6 +415,7 @@ def test_screener_module_exposes_no_order_path():
         assert forbidden not in source
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
 def test_a_stop_signal_ends_the_screener_with_the_conventional_code(tmp_path):
     """Ctrl-C during the run: 130, no traceback (the screener is a batch job; engine.py's signal routing is not used)."""
     code = f"""
@@ -463,3 +467,432 @@ def test_session_bars_helper_builds_contiguous_sessions():
     df = session_bars([[1.0, 2.0], [3.0]])
     assert list(df.index) == [ist(2026, 9, 1, 9, 15), ist(2026, 9, 1, 9, 20), ist(2026, 9, 2, 9, 15)]
     assert df["Open"].iloc[2] == 2.0
+
+
+# --------------------------------------------------------------------------------------------------- round 19
+# Regression tests for the findings of the screener's adversarial review (CHANGELOG v1.19), by finding.
+def dated_sessions(days, closes_by_day, volumes_by_day=None):
+    """Contiguous 5-minute sessions on the given (month, day) dates of 2026, 09:15 onwards."""
+    frames = []
+    for i, ((m, d), closes) in enumerate(zip(days, closes_by_day, strict=True)):
+        vols = None if volumes_by_day is None else volumes_by_day[i]
+        frames.append(make_bars(closes, vols, start=ist(2026, m, d, 9, 15)))
+    df = pd.concat(frames)
+    for k in range(1, len(frames)):
+        row = sum(len(f) for f in frames[:k])
+        df.iloc[row, df.columns.get_loc("Open")] = df["Close"].iloc[row - 1]
+    return df
+
+
+def weekend_frame():
+    """The base on Wed 09-23 and Thu 09-24; a breakout on Fri 09-25's last bar at 5x volume; Mon 09-28 closes above."""
+    day1 = BASE[:SESSION_BARS]
+    day2 = BASE[SESSION_BARS:] + [102.0] * (SESSION_BARS - len(BASE[SESSION_BARS:]))
+    day3 = [102.0] * (SESSION_BARS - 1) + [106.0]
+    day4 = [106.5] * 10
+    vols = [[100_000] * SESSION_BARS, [100_000] * SESSION_BARS, [100_000] * (SESSION_BARS - 1) + [500_000], [100_000] * 10]
+    return dated_sessions([(9, 23), (9, 24), (9, 25), (9, 28)], [day1, day2, day3, day4], vols)
+
+
+class FakeKite:
+    """Serves 5m candles up to and including the running one, as Kite does."""
+    def __init__(self, df, symbol="IPO"):
+        self.df, self.symbol = df, symbol
+
+    def instruments(self, exchange):
+        return [{"tradingsymbol": self.symbol, "instrument_token": 1, "tick_size": 0.05}]
+
+    def historical_data(self, instrument_token, from_date, to_date, interval):
+        lo, hi = pd.Timestamp(from_date).tz_localize(engine.IST), pd.Timestamp(to_date).tz_localize(engine.IST)
+        return [{"date": ts.to_pydatetime(), "open": r.Open, "high": r.High, "low": r.Low, "close": r.Close,
+                 "volume": int(r.Volume)} for ts, r in self.df.iterrows() if lo <= ts <= hi]
+
+
+def fake_kite(monkeypatch, df):
+    """--source kite on a fake SDK: no kiteconnect needed, credentials set."""
+    fake = FakeKite(df)
+
+    class Adapter(engine.ZerodhaKiteAdapter):
+        def __init__(self, api_key, access_token, exchange="NSE", kite=None):
+            super().__init__(api_key, access_token, exchange, kite=fake)
+
+    monkeypatch.setattr(screener, "ZerodhaKiteAdapter", Adapter)
+    monkeypatch.setenv("KITE_API_KEY", "k")
+    monkeypatch.setenv("KITE_ACCESS_TOKEN", "t")
+
+
+def freeze(monkeypatch, now):
+    """screener's datetime.now() answers ``now`` (aware), in whatever zone is asked for."""
+    now_utc = now.astimezone(timezone.utc)
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now_utc if tz is None else now_utc.astimezone(tz)
+
+    monkeypatch.setattr(screener, "datetime", Frozen)
+
+
+def spy_screen(monkeypatch):
+    """Records the as-of time main() passes and the rows screen() returns."""
+    got, real = {}, screener.screen
+
+    async def spy(watchlist, adapter, alpha, as_of=None, **kw):
+        got["as_of"] = as_of
+        got["rows"] = await real(watchlist, adapter, alpha, as_of=as_of, **kw)
+        return got["rows"]
+
+    monkeypatch.setattr(screener, "screen", spy)
+    return got
+
+
+def kite_frame(running_start):
+    """The base, 19 quiet bars, a breakout on the bar before ``running_start``, then the running candle."""
+    start = running_start - timedelta(minutes=5 * 170)
+    return make_bars(BASE + [102.0] * 19 + [106.0, 106.2], [100_000] * 169 + [500_000, 3_000], start=start)
+
+
+# R19-READINGS-1
+@pytest.mark.parametrize("seconds_past", [30, 150, 299])
+def test_with_kite_the_row_is_the_last_closed_bar_once_it_is_30_s_old(monkeypatch, seconds_past):
+    running = ist(2026, 9, 28, 14, 35)
+    now = running + timedelta(seconds=seconds_past)
+    freeze(monkeypatch, now)
+    fake_kite(monkeypatch, kite_frame(running))
+    got = spy_screen(monkeypatch)
+    assert asyncio.run(screener.main(["IPO=2026-09-28", "--source", "kite"])) == 0
+    assert got["as_of"] == now - timedelta(seconds=30)
+    row = got["rows"][0]
+    assert row.last_bar == running - timedelta(minutes=5) and row.status == "BREAKOUT" and row.breakouts == 1
+
+
+def test_with_kite_a_bar_closed_less_than_30_s_ago_is_not_counted_yet(monkeypatch):
+    running = ist(2026, 9, 28, 14, 35)
+    freeze(monkeypatch, running + timedelta(seconds=29))
+    fake_kite(monkeypatch, kite_frame(running))
+    got = spy_screen(monkeypatch)
+    assert asyncio.run(screener.main(["IPO=2026-09-28", "--source", "kite"])) == 0
+    row = got["rows"][0]
+    assert row.last_bar == running - timedelta(minutes=10) and row.status != "BREAKOUT" and row.breakouts == 0
+
+
+def test_the_kite_allowance_is_the_engines_own_clock_tolerance():
+    assert screener.KITE_CLOCK_ALLOWANCE == timedelta(seconds=engine.LiveTickAdapter.max_stamp_ahead)
+    now = ist(2026, 9, 28, 14, 37, 30)
+    assert screener.source_as_of("kite", now=now) == now - timedelta(seconds=30)
+    assert screener.source_as_of("yahoo", now=now) == now
+
+
+# R19-READINGS-2
+def test_csv_as_of_never_passes_the_start_of_the_bar_now_forming(tmp_path):
+    now = ist(2026, 9, 28, 14, 37, 30)
+    running = ist(2026, 9, 28, 14, 35)
+    start = running - timedelta(minutes=5 * 169)
+    df = make_bars(BASE + [102.0] * 19 + [106.0], [100_000] * 169 + [500_000], start=start)   # last row: the running bar
+    files = {"LIVE": write_bars(tmp_path / "LIVE_5m.csv", df)}
+    as_of = screener.csv_as_of(files, now=now)
+    assert as_of == running and screener.source_as_of("csv", files, now=now) == running
+    rows = asyncio.run(screener.screen({"LIVE": None}, engine.CsvReplayAdapter(files), engine.AlphaEngine(), as_of=as_of))
+    assert rows[0].last_bar == running - timedelta(minutes=5) and rows[0].status != "BREAKOUT"
+    old = {"A": write_bars(tmp_path / "A_5m.csv", make_bars([1.0, 2.0], start=ist(2026, 9, 1, 9, 15)))}
+    assert screener.csv_as_of(old, now=now) == ist(2026, 9, 1, 9, 25)          # a file from the past: unchanged
+    assert screener.csv_as_of({}, now=now) == now
+
+
+# R19-READINGS-3
+@pytest.mark.parametrize("base_high,close", [(100.0, 97.0), (200.0, 194.0), (50.0, 48.5), (1000.0, 970.0)])
+def test_a_close_exactly_near_pct_below_a_round_base_high_is_a_setup(base_high, close):
+    low = round(base_high * 0.9, 2)
+    df = make_bars([low] * 149 + [base_high] + [close] * 20, spread=0.0)     # close above the AVWAP (~0.91 x base)
+    row = screener.classify("IPO", df, engine.AlphaEngine())
+    assert row.close > row.avwap and row.base_high == base_high
+    assert row.status == "SETUP" and row.note == "3.00% below the base, above the AVWAP"
+    assert screener.classify("IPO", df, engine.AlphaEngine(), near_pct=2.99).status == "BELOW"
+
+
+# R19-READINGS-5
+def test_a_close_at_the_base_high_is_not_a_negative_distance_below_it():
+    row = screener.classify("IPO", make_bars(BASE + [102.0] * 19 + [104.5]), engine.AlphaEngine())
+    assert row.status == "SETUP" and row.gap_pct == 0
+    assert row.note == "0.00% below the base, above the AVWAP"
+
+
+# R19-READINGS-6 / R19-TESTS-DOCS-10
+def test_evaluation_starts_after_max_of_base_and_volume_baseline_not_their_sum():
+    alpha = engine.AlphaEngine(base_sessions=1)
+    d1 = make_bars([100.0] * 10, start=ist(2026, 9, 1, 9, 15))
+    for n2, expected in ((10, "BASE"), (11, "ABOVE")):
+        df = pd.concat([d1, make_bars([101.0] * n2, start=ist(2026, 9, 2, 9, 15))])
+        assert screener.classify("IPO", df, alpha).status == expected
+    readme = (Path(screener.__file__).parent / "README.md").read_text(encoding="utf-8")
+    assert "volume baseline after it" not in readme
+
+
+# R19-READINGS-7
+def test_the_above_note_does_not_blame_thin_volume_alone_for_an_avwap_refusal():
+    closes = BASE + [130.0] * 300 + [104.0] * 20 + [106.0]
+    df = make_bars(closes, [100_000] * (len(closes) - 1) + [500_000])
+    row = screener.classify("IPO", df, engine.AlphaEngine())
+    assert row.status == "ABOVE" and row.rvol == pytest.approx(5.0) and row.close < row.avwap
+    assert "AVWAP" in row.note
+
+
+# R19-READINGS-8
+def test_breakout_is_evaluates_own_test_even_on_a_duplicated_last_timestamp():
+    alpha = engine.AlphaEngine()
+    df = make_bars(BASE + [102.0] * 19 + [106.0], [100_000] * 169 + [500_000])
+    dup = pd.concat([df, df.iloc[[-1]].assign(Close=100.0, Volume=1.0)])
+    for frame in (dup, engine.harmonize_bars(dup)):
+        assert (screener.classify("IPO", frame, alpha).status == "BREAKOUT") == (alpha.evaluate("IPO", frame) is not None)
+
+
+# R19-READINGS-S2
+def test_a_listing_date_after_the_as_of_time_is_named_as_the_reason(tmp_path):
+    files = {"OLD": write_bars(tmp_path / "OLD_5m.csv", make_bars([1.0, 2.0], start=ist(2026, 9, 1, 9, 15)))}
+    as_of = screener.csv_as_of(files, now=ist(2026, 9, 28, 12, 0))          # 2026-09-01 09:25
+
+    def screen(listing):
+        return asyncio.run(screener.screen({"OLD": listing}, engine.CsvReplayAdapter(files), engine.AlphaEngine(), as_of=as_of))[0]
+
+    row = screen(ist(2026, 10, 13))
+    assert row.status == "NO_DATA" and row.note == "listing date 2026-10-13 is after the as-of time 2026-09-01 09:25 IST"
+    row = screen(ist(2026, 8, 20))                                             # before it: the orchestrator's own reason
+    assert row.status == "NO_DATA" and row.note.startswith("History starts 2026-09-01, 12 days after the 2026-08-20 listing")
+
+
+# R19-CLI-DATA-1 / R19-TESTS-DOCS-5
+def test_a_universe_saved_by_a_spreadsheet_with_a_bom_and_crlf_is_read(tmp_path):
+    path = tmp_path / "ipos.csv"
+    path.write_text("symbol,listing_date\r\nSWIGGY,2024-11-13\r\n", encoding="utf-8-sig")
+    assert path.read_bytes().startswith(b"\xef\xbb\xbf")
+    args = screener.build_arg_parser().parse_args(["--universe", str(path)])
+    assert screener.watchlist_from(args) == {"SWIGGY": ist(2024, 11, 13)}
+    path.write_bytes(b"\xef\xbb\xbfSWIGGY\r\n")                             # no header: the BOM sits on a symbol
+    assert screener.watchlist_from(args) == {"SWIGGY": None}
+    path.write_bytes(b"# Caf\xe9 list\nSWIGGY\n")                            # cp1252: not a UTF-8 file
+    with pytest.raises(ValueError, match=r"^Cannot read --universe .*ipos\.csv"):
+        screener.watchlist_from(args)
+
+
+# R19-CLI-DATA-2 / R19-READINGS-4 / R19-TESTS-DOCS-3
+def test_help_and_readme_state_the_20_day_window_of_a_symbol_without_a_date():
+    assert "at most 20" in " ".join(screener.build_arg_parser().format_help().split())   # argparse wraps lines
+    readme = (Path(screener.__file__).parent / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## Screening several IPOs", 1)[1].split("\n## ", 1)[0]
+    assert "at most 20" in section and "20 days" in section
+
+
+def test_a_symbol_without_a_listing_date_is_read_from_at_most_20_days_back(tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    days = pd.bdate_range("2026-08-03", "2026-09-11")                                  # 30 sessions
+    df = pd.concat([make_bars([100.0] * 75, start=ist(d.year, d.month, d.day, 9, 15)) for d in days])
+    files = {"LONG": write_bars(tmp_path / "LONG_5m.csv", df)}
+    as_of = screener.csv_as_of(files)
+
+    def screen(listing, **kw):
+        return asyncio.run(screener.screen({"LONG": listing}, engine.CsvReplayAdapter(files), engine.AlphaEngine(),
+                                           as_of=as_of, **kw))[0]
+
+    dateless, dated = screen(None), screen(ist(2026, 8, 3))
+    assert dateless.sessions == 15 and dateless.bars == 15 * 75                        # 2026-08-24 .. 09-11
+    assert dated.sessions == 30 and dated.bars == 30 * 75
+    assert screen(None, max_lookback_days=10).sessions == 8                            # min(20, --max-lookback-days)
+    for extra in ((), ("--max-lookback-days", "60")):                                  # the flag does not widen it
+        assert asyncio.run(screener.main(["--source", "csv", "--csv-dir", str(tmp_path), "LONG", *extra])) == 0
+    assert caplog.text.count("[LONG] Replaying 1125 bars") == 3                     # screen(None) and both CLI runs
+    assert caplog.text.count("Replaying 2250") == 1                                    # the dated screen() only
+    assert "treating the first bar (2026-08-24 09:15) as the listing" in caplog.text
+
+
+# R19-CLI-DATA-3
+def test_a_narrow_stdout_encoding_cannot_lose_the_table_or_the_reports(tmp_path):
+    csv_dir = tmp_path / "dir-é"
+    csv_dir.mkdir()
+    env = dict(os.environ, PYTHONIOENCODING="ascii")
+    env.pop("PYTHONUTF8", None)
+    proc = subprocess.run([sys.executable, screener.__file__, "--source", "csv", "--csv-dir", str(csv_dir), "NOPE",
+                           "--json", str(tmp_path / "u.json"), "--csv-out", str(tmp_path / "u.csv")],
+                          capture_output=True, text=True, timeout=90, env=env)
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert proc.returncode == 1                                                        # nothing read, as documented
+    assert proc.stdout.splitlines()[2].split()[:2] == ["NOPE", "NO_DATA"]
+    assert (tmp_path / "u.json").exists() and (tmp_path / "u.csv").exists()
+    assert json.loads((tmp_path / "u.json").read_text(encoding="utf-8"))["rows"][0]["note"].count("dir-é") == 1
+
+
+# R19-CLI-DATA-S1
+@pytest.mark.skipif(not Path("/dev/full").exists(), reason="needs /dev/full")
+def test_a_table_that_cannot_be_printed_still_writes_the_reports(tmp_path):
+    with open("/dev/full", "w") as full:
+        proc = subprocess.run([sys.executable, screener.__file__, "--source", "csv", "SWIGGY", "--json", str(tmp_path / "o.json")],
+                              stdout=full, stderr=subprocess.PIPE, text=True, timeout=90)
+    assert proc.returncode == 1, proc.stderr
+    assert "Cannot print the table" in proc.stderr and "Traceback" not in proc.stderr and "Exception ignored" not in proc.stderr
+    assert json.loads((tmp_path / "o.json").read_text())["rows"][0]["status"] == "FAILED"
+
+
+# R19-CLI-DATA-4
+def test_json_and_csv_out_must_be_different_files(tmp_path):
+    same = tmp_path / "same.out"
+    assert asyncio.run(screener.main(["--source", "csv", "SWIGGY", "--json", str(same), "--csv-out", str(same)])) == 2
+    assert not same.exists()
+    other = tmp_path / "sub" / ".." / "same.out"                                       # the same file spelled differently
+    assert asyncio.run(screener.main(["--source", "csv", "SWIGGY", "--json", str(same), "--csv-out", str(other)])) == 2
+
+
+# R19-CLI-DATA-5
+def test_kite_source_without_the_sdk_is_a_configuration_error(monkeypatch, caplog):
+    monkeypatch.setenv("KITE_API_KEY", "x")
+    monkeypatch.setenv("KITE_ACCESS_TOKEN", "y")
+    monkeypatch.setitem(sys.modules, "kiteconnect", None)                              # 'import kiteconnect' raises
+    assert asyncio.run(screener.main(["SWIGGY=2024-11-13", "--source", "kite"])) == 2
+    assert "kiteconnect" in caplog.text
+
+
+# R19-CLI-DATA-6
+def test_symbols_may_surround_an_option():
+    ns = screener.build_arg_parser().parse_intermixed_args(["--source", "csv", "A", "--near-pct", "2", "B"])
+    assert ns.symbols == ["A", "B"]
+    assert asyncio.run(screener.main(["--source", "csv", "SWIGGY", "--near-pct", "2", "NOPE"])) == 0
+
+
+# R19-TESTS-DOCS-1
+def test_the_recent_window_counts_sessions_not_calendar_days():
+    df = weekend_frame()
+    assert sorted(set(df.index.date)) == [ist(2026, 9, d).date() for d in (23, 24, 25, 28)]
+    alpha = engine.AlphaEngine()
+    row = screener.classify("IPO", df, alpha, recent_sessions=3)                       # Thu, Fri, Mon
+    assert row.status == "HOLDING" and row.last_breakout == ist(2026, 9, 25, 15, 25)
+    assert screener.classify("IPO", df, alpha, recent_sessions=2).status == "HOLDING"  # Fri, Mon: a weekend between
+    assert screener.classify("IPO", df, alpha, recent_sessions=1).status == "ABOVE"    # Mon only
+
+
+# R19-TESTS-DOCS-2
+def test_cli_applies_every_reading_parameter_and_echoes_it(tmp_path):
+    write_bars(tmp_path / "BRK_5m.csv", breakout_frame())                             # RVOL 5.0 on the last bar
+    write_bars(tmp_path / "SET_5m.csv", make_bars(BASE + [102.0] * 19 + [103.0]))     # 1.44% below the base
+    out = tmp_path / "out.json"
+
+    def rows(*flags):
+        proc = cli("--source", "csv", "--csv-dir", str(tmp_path), "BRK", "SET", "--json", str(out), *flags)
+        assert proc.returncode == 0, proc.stderr
+        doc = json.loads(out.read_text())
+        return {r["symbol"]: r for r in doc["rows"]}, doc["parameters"]
+
+    by, params = rows("--near-pct", "1")
+    assert by["SET"]["status"] == "BELOW" and params["near_pct"] == 1.0
+    by, params = rows("--rvol-threshold", "6")
+    assert by["BRK"]["status"] == "ABOVE" and by["BRK"]["breakouts"] == 0 and params["rvol_threshold"] == 6.0
+    by, params = rows("--risk-reward", "2")
+    brk = by["BRK"]
+    assert brk["status"] == "BREAKOUT" and params["risk_reward"] == 2.0
+    assert brk["target"] == pytest.approx(brk["close"] + (brk["close"] - brk["stop"]) * 2)
+    by, params = rows("--base-sessions", "1")                                          # every bar is session 1
+    assert by["BRK"]["status"] == "BASE" and by["SET"]["status"] == "BASE" and params["base_sessions"] == 1
+    by, params = rows("--rvol-mode", "time_of_day")
+    assert params["rvol_mode"] == "time_of_day"
+
+
+def test_cli_applies_recent_sessions_and_max_lookback_days(tmp_path):
+    write_bars(tmp_path / "HLD_5m.csv", weekend_frame())                              # breakout Fri, screened Mon
+    out = tmp_path / "out.json"
+
+    def run(*flags):
+        proc = cli("--source", "csv", "--csv-dir", str(tmp_path), "--json", str(out), *flags)
+        doc = json.loads(out.read_text())
+        return proc.returncode, doc["rows"][0], doc["parameters"]
+
+    rc, row, params = run("HLD")
+    assert rc == 0 and row["status"] == "HOLDING" and params["recent_sessions"] == 3
+    rc, row, params = run("HLD", "--recent-sessions", "1")
+    assert rc == 0 and row["status"] == "ABOVE" and params["recent_sessions"] == 1
+    # as-of is on Mon 09-28; a 2-day lookback starts 09-27, after the 09-23 listing
+    rc, row, params = run("HLD=2026-09-23", "--max-lookback-days", "2")
+    assert rc == 1 and row["status"] == "NO_DATA" and params["max_lookback_days"] == 2
+    assert row["note"].startswith("The 2-day lookback starts 2026-09-27, after the 2026-09-23 listing")
+    rc, row, params = run("HLD=2026-09-23", "--max-lookback-days", "6")
+    assert rc == 0 and row["status"] == "HOLDING" and params["max_lookback_days"] == 6
+
+
+# R19-TESTS-DOCS-6
+def test_rank_orders_by_gap_within_a_status_not_by_symbol():
+    rows = [screener.Row("B", "SETUP", gap_pct=-2.0), screener.Row("C", "SETUP", gap_pct=-1.0),
+            screener.Row("A", "ABOVE", gap_pct=0.5), screener.Row("D", "ABOVE", gap_pct=4.0),
+            screener.Row("E", "BELOW", gap_pct=-9.0), screener.Row("F", "BELOW", gap_pct=-4.0)]
+    assert [r.symbol for r in screener.rank(rows)] == ["C", "B", "D", "A", "F", "E"]
+
+
+# R19-TESTS-DOCS-7
+def test_a_close_exactly_at_the_base_high_after_a_recent_signal_is_failed():
+    row = screener.classify("IPO", breakout_frame(after=[(104.5, 100_000)]), engine.AlphaEngine())
+    assert row.status == "FAILED" and row.gap_pct == 0 and "back at or below the base" in row.note
+
+
+def test_near_pct_zero_still_admits_a_close_at_the_base_high():
+    df = make_bars(BASE + [102.0] * 19 + [104.5])
+    assert screener.classify("IPO", df, engine.AlphaEngine(), near_pct=0.0).status == "SETUP"
+    df = make_bars(BASE + [102.0] * 19 + [104.4999])
+    assert screener.classify("IPO", df, engine.AlphaEngine(), near_pct=0.0).status == "BELOW"
+
+
+def test_last_signal_is_the_last_of_several():
+    df = breakout_frame(after=[(106.5, 100_000)] * 3 + [(103.0, 100_000)] * 2 + [(120.0, 5_000_000)])
+    full = screener.classify("IPO", df, engine.AlphaEngine())
+    cut = screener.classify("IPO", df.iloc[:-1], engine.AlphaEngine())
+    assert full.breakouts == 2 and full.last_breakout == df.index[-1]
+    assert cut.breakouts == 1 and cut.last_breakout == df.index[170]
+
+
+# R19-TESTS-DOCS-8
+def test_yahoo_history_is_read_up_to_now_and_kite_history_30_s_before(monkeypatch):
+    ends = {}
+
+    async def fake_fetch(self, symbol, start_date, end_date, interval="5m"):
+        ends[type(self).__name__] = end_date
+        return engine.empty_bars()
+
+    class FakeKiteAdapter(engine.BrokerAdapter):
+        def __init__(self, api_key, access_token):
+            pass
+        fetch_historical_bars = fake_fetch
+
+    monkeypatch.setattr(engine.PublicExchangeAdapter, "fetch_historical_bars", fake_fetch)
+    monkeypatch.setattr(screener, "ZerodhaKiteAdapter", FakeKiteAdapter)
+    monkeypatch.setenv("KITE_API_KEY", "k")
+    monkeypatch.setenv("KITE_ACCESS_TOKEN", "t")
+    before = datetime.now(timezone.utc)
+    asyncio.run(screener.main(["X=2026-09-01", "--source", "yahoo"]))
+    asyncio.run(screener.main(["X=2026-09-01", "--source", "kite"]))
+    after = datetime.now(timezone.utc)
+    assert before <= ends["PublicExchangeAdapter"] <= after
+    assert before - timedelta(seconds=30) <= ends["FakeKiteAdapter"] <= after - timedelta(seconds=30)
+
+
+# R19-TESTS-DOCS-9
+def test_yahoo_history_limit_clamps_the_start_and_excludes_an_older_listing(monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="QUANT_ENGINE")
+    cutoff = engine.PublicExchangeAdapter().history_cutoff()
+    listing = cutoff - timedelta(days=30)
+    asked = []
+
+    def fake_read_url(req, timeout):
+        query = dict(part.split("=") for part in req.full_url.split("?")[1].split("&"))
+        asked.append(datetime.fromtimestamp(int(query["period1"]), timezone.utc))
+        bars = make_bars([100.0] * 200, start=cutoff + timedelta(hours=9, minutes=15))
+        return json.dumps({"chart": {"result": [{"timestamp": [int(t.timestamp()) for t in bars.index],
+                                                  "indicators": {"quote": [{c.lower(): list(bars[c]) for c in engine.OHLCV}]}}]}})
+
+    monkeypatch.setattr(engine, "_read_url", fake_read_url)
+    assert asyncio.run(screener.main([f"OLD={listing:%Y-%m-%d}", "--source", "yahoo"])) == 1
+    assert asked == [cutoff]                                                            # the request itself was clamped
+    assert f"[OLD] Yahoo intraday history is limited; clamping start to {cutoff:%Y-%m-%d}." in caplog.text
+    assert f"[OLD] History starts {cutoff:%Y-%m-%d}, 30 days after the {listing:%Y-%m-%d} listing" in caplog.text
+
+
+# R19-TESTS-DOCS-12
+def test_a_further_column_may_contain_an_equals_sign():
+    assert screener.parse_universe(["SWIGGY,2026-09-08,base=150"]) == {"SWIGGY": ist(2026, 9, 8)}
+    assert screener.parse_universe(["SWIGGY=2026-09-08,Swiggy Ltd,note=x"]) == {"SWIGGY": ist(2026, 9, 8)}
+    assert screener.parse_universe(["SWIGGY,,name=Swiggy"]) == {"SWIGGY": None}
+    with pytest.raises(ValueError, match="line 1: listing date 'name=x' is not YYYY-MM-DD"):
+        screener.parse_universe(["SWIGGY,name=x"])

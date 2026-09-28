@@ -8,18 +8,24 @@ orders and opens no live feed: run engine.py on a symbol to trade it.
 
 Quick start (see README.md, "Screening several IPOs"):
     python screener.py --source csv SWIGGY                          # bundled real bars, fully offline
-    python screener.py SWIGGY=2024-11-13 ATHERENERG=2025-05-06      # Yahoo history (5m bars reach back ~60 days)
-    python screener.py --universe ipos.csv --source kite            # Zerodha history (KITE_API_KEY, KITE_ACCESS_TOKEN)
+    python screener.py NEWIPO=2026-09-08 OTHER=2026-09-15           # Yahoo history (5m bars reach back ~60 days)
+    python screener.py --universe ipos.csv --source kite            # Zerodha history (KITE_API_KEY, KITE_ACCESS_TOKEN;
+                                                                    #   --max-lookback-days N for a listing older than 180 days)
 
 Statuses, best first:
     BREAKOUT  the rule fired on the last closed bar (the row carries the engine's stop and target)
     HOLDING   it fired within the last --recent-sessions sessions and the close is still above the base high
     SETUP     no recent signal; the close is within --near-pct below the base high and above the AVWAP
-    ABOVE     the close is above the base high, but no signal in the window (crossed on thin volume, or earlier)
+    ABOVE     the close is above the base high, but no signal in the window (crossed on thin volume or below the
+              AVWAP, or before the window)
     FAILED    it fired within the window and the close is back at or below the base high
     BELOW     the base is complete and none of the above holds
-    BASE      the IPO base, or the volume baseline after it, is not complete yet
+    BASE      the IPO base is not complete, or fewer than 20 bars (the volume baseline) have traded since the listing
     NO_DATA   the history could not be read or does not reach the listing (the note says why)
+Time is kept as the engine keeps it, per source: Yahoo history is read up to now; Kite history up to 30 s before
+the host clock (Kite serves the running candle: the allowance is the engine's own for a host clock ahead of the
+exchange, so keep the clock synced); a CSV file up to a bar after its newest bar, but never past the start of the
+bar now forming. A symbol without a listing date is fetched from at most 20 days back (the engine's demo window).
 Nothing here is investment advice.
 ====================================================================================
 """
@@ -50,6 +56,9 @@ STATUS_ORDER = ("BREAKOUT", "HOLDING", "SETUP", "ABOVE", "FAILED", "BELOW", "BAS
 DEFAULT_CSV_DIR = engine.DEFAULT_CSV.parent
 DEFAULT_RECENT_SESSIONS = 3
 DEFAULT_NEAR_PCT = 3.0
+# Kite serves the running candle, so a bar counts as closed only this long after its end on the host clock: the
+# engine's max_stamp_ahead, how far a host clock may run ahead of the exchange before its stamps are not believed.
+KITE_CLOCK_ALLOWANCE = timedelta(seconds=30)
 
 
 @dataclass
@@ -93,11 +102,10 @@ def parse_universe(lines: Iterable[str], where: str = "universe", header: bool =
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
-        if "=" in line:
-            sym, _, when = line.partition("=")
-        else:
-            parts = line.split(",")
-            sym, when = parts[0], parts[1] if len(parts) > 1 else ""
+        parts = line.split(",")                      # further columns may hold anything, '=' included
+        sym, eq, when = parts[0].partition("=")
+        if not eq and len(parts) > 1:
+            when = parts[1]
         sym, when = sym.strip().upper(), when.strip()
         if first and sym == "SYMBOL":
             first = False
@@ -133,9 +141,11 @@ def csv_files(csv_dir: Path, symbols: Iterable[str]) -> Dict[str, Path]:
     return files
 
 
-def csv_as_of(files: Dict[str, Path]) -> datetime:
+def csv_as_of(files: Dict[str, Path], now: Optional[datetime] = None) -> datetime:
     """A bar after the newest bar in any readable file, so every file's last bar counts as closed (a file's own clock,
-    as engine.py --source csv keeps time, so the screen reads the same on any date)."""
+    as engine.py --source csv keeps time, so the screen reads the same on any date), but never past the start of the
+    bar now forming on the host clock: a file written during the session may end with the running bar."""
+    now = now or datetime.now(timezone.utc)
     last: List[pd.Timestamp] = []
     for path in files.values():
         if not path.exists():
@@ -148,8 +158,20 @@ def csv_as_of(files: Dict[str, Path]) -> datetime:
         if len(df):
             last.append(df.index[-1])
     if not last:
-        return datetime.now(timezone.utc)
-    return (max(last) + pd.Timedelta(minutes=BAR_MINUTES)).to_pydatetime()
+        return now
+    forming = engine.bar_floor(now.astimezone(IST))
+    return min((max(last) + pd.Timedelta(minutes=BAR_MINUTES)).to_pydatetime(), forming)
+
+
+def source_as_of(source: str, files: Optional[Dict[str, Path]] = None, now: Optional[datetime] = None) -> datetime:
+    """Up to when a source's history is read (see the module docstring): the last closed bar is the last bar that
+    ends at or before this."""
+    now = now or datetime.now(timezone.utc)
+    if source == "kite":
+        return now - KITE_CLOCK_ALLOWANCE
+    if source == "csv":
+        return csv_as_of(files or {}, now)
+    return now
 
 
 # ------------------------------------------------------------------------------ the reading
@@ -184,7 +206,7 @@ def classify(symbol: str, df: pd.DataFrame, alpha: AlphaEngine, recent_sessions:
         row.last_breakout = fired[-1].to_pydatetime()
     window = set(sorted(set(df.index.date))[-recent_sessions:])
     above = row.close > row.base_high
-    if len(fired) and fired[-1] == last_ts:
+    if bool(ind["Breakout"].iloc[-1]):                   # evaluate()'s own test
         row.status = "BREAKOUT"
         signal = alpha.evaluate(symbol, df)              # logs the trigger as the engine would
         if signal is not None:
@@ -196,16 +218,17 @@ def classify(symbol: str, df: pd.DataFrame, alpha: AlphaEngine, recent_sessions:
                     + ("still above the base" if above else "back at or below the base"))
     elif above:
         row.status = "ABOVE"
-        row.note = "above the base with no signal in the window (crossed on thin volume, or earlier)"
-    elif row.gap_pct >= -near_pct and row.avwap is not None and row.close > row.avwap:
+        row.note = "above the base with no signal in the window (crossed on thin volume or below the AVWAP, or before it)"
+    # Tick-grid prices land a hair past a round percentage in floating point (97/100 -> -3.0000000000000027).
+    elif row.gap_pct + near_pct >= -1e-9 and row.avwap is not None and row.close > row.avwap:
         row.status = "SETUP"
-        row.note = f"{-row.gap_pct:.2f}% below the base, above the AVWAP"
+        row.note = f"{abs(row.gap_pct):.2f}% below the base, above the AVWAP"
     else:
         row.status = "BELOW"
         if row.avwap is not None and row.close <= row.avwap:
-            row.note = f"{-row.gap_pct:.2f}% below the base, at or below the AVWAP {row.avwap:.2f}"
+            row.note = f"{abs(row.gap_pct):.2f}% below the base, at or below the AVWAP {row.avwap:.2f}"
         else:
-            row.note = f"{-row.gap_pct:.2f}% below the base"
+            row.note = f"{abs(row.gap_pct):.2f}% below the base"
     return row
 
 
@@ -245,10 +268,16 @@ async def screen(watchlist: Dict[str, Optional[datetime]], adapter: BrokerAdapte
     finally:
         engine.logger.removeHandler(reasons)
     rows = []
+    end = (as_of or datetime.now(timezone.utc)).astimezone(IST)
     for sym in watchlist:
         df = orchestrator.market_state.get(sym)
         if df is None:
-            rows.append(Row(sym, "NO_DATA", note=reasons.by_symbol.get(sym) or reasons.general or "no history"))
+            listing = orchestrator.watchlist.get(sym)
+            if listing is not None and listing > end:        # a typo in the date: nothing can have traded yet
+                note = f"listing date {listing:%Y-%m-%d} is after the as-of time {end:%Y-%m-%d %H:%M} IST"
+            else:
+                note = reasons.by_symbol.get(sym) or reasons.general or "no history"
+            rows.append(Row(sym, "NO_DATA", note=note))
         else:
             rows.append(classify(sym, df, alpha, recent_sessions, near_pct))
     return rank(rows)
@@ -317,8 +346,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="IPO momentum screener: where each listing stands against the engine's "
                                             "base-breakout rule on its last closed bar. No orders, no live feed.")
     p.add_argument("symbols", nargs="*", metavar="SYMBOL[=YYYY-MM-DD]",
-                   help="NSE tradingsymbols, each with its IPO listing date (without one, the first bar fetched is "
-                        "treated as the listing: demo semantics)")
+                   help="NSE tradingsymbols, each with its IPO listing date (without one, only the last 20 days are "
+                        "fetched and their first bar is treated as the listing: demo semantics)")
     p.add_argument("--universe", type=Path, help="file of SYMBOL, SYMBOL=YYYY-MM-DD or SYMBOL,YYYY-MM-DD lines "
                                                  "(a symbol,listing_date header and # comments are skipped)")
     p.add_argument("--source", choices=["yahoo", "csv", "kite"], default="yahoo", help="historical data source (default: yahoo)")
@@ -326,7 +355,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="for --source csv: directory of SYMBOL_*.csv bar files (default: the bundled data directory)")
     p.add_argument("--base-sessions", type=int, help="define the IPO base as the first N sessions (default: first 150 bars)")
     p.add_argument("--max-lookback-days", type=_lookback_days, default=180,
-                   help="fetch history from at most this many days back (default: 180)")
+                   help="fetch history from at most this many days back (default: 180; a symbol without a listing "
+                        "date uses at most 20, as the engine's demos do)")
     p.add_argument("--allow-partial-history", action="store_true",
                    help="screen symbols whose history does not reach the listing (base anchored at the first bar)")
     p.add_argument("--rvol-threshold", type=_positive, default=2.0)
@@ -347,8 +377,8 @@ def watchlist_from(args: argparse.Namespace) -> Dict[str, Optional[datetime]]:
     watchlist = parse_universe(args.symbols, "argument", header=False)
     if args.universe is not None:
         try:
-            lines = args.universe.read_text(encoding="utf-8").splitlines()
-        except OSError as e:
+            lines = args.universe.read_text(encoding="utf-8-sig").splitlines()   # a spreadsheet's BOM is skipped
+        except (OSError, UnicodeDecodeError) as e:
             raise ValueError(f"Cannot read --universe {args.universe}: {e}") from e
         for sym, listing in parse_universe(lines, str(args.universe)).items():
             if sym in watchlist:
@@ -364,6 +394,8 @@ def _config_error(args: argparse.Namespace) -> Optional[str]:
         return f"--csv-dir {args.csv_dir} is not a directory."
     if args.source == "kite" and not all((os.environ.get("KITE_API_KEY"), os.environ.get("KITE_ACCESS_TOKEN"))):
         return "Set KITE_API_KEY and KITE_ACCESS_TOKEN for --source kite."
+    if args.json is not None and args.csv_out is not None and args.json.resolve() == args.csv_out.resolve():
+        return "--json and --csv-out must be different files."
     return None
 
 
@@ -389,7 +421,7 @@ def _write_reports(args: argparse.Namespace, rows: List[Row], as_of: datetime) -
 
 async def main(argv: Optional[List[str]] = None) -> int:
     """Exit 0 when at least one symbol was read (whatever its status), 1 when none was, 2 for a bad configuration."""
-    args = build_arg_parser().parse_args(argv)
+    args = build_arg_parser().parse_intermixed_args(argv)    # symbols may come before and after the options
     logger.info("=== IPO MOMENTUM SCREENER ===")
     problem = _config_error(args)
     if problem is None:
@@ -404,14 +436,19 @@ async def main(argv: Optional[List[str]] = None) -> int:
         logger.critical(problem)
         return 2
 
+    files = None
     if args.source == "kite":
-        adapter: BrokerAdapter = ZerodhaKiteAdapter(os.environ["KITE_API_KEY"], os.environ["KITE_ACCESS_TOKEN"])
-        as_of = datetime.now(timezone.utc) - timedelta(minutes=BAR_MINUTES)     # Kite serves the running candle
+        try:
+            adapter: BrokerAdapter = ZerodhaKiteAdapter(os.environ["KITE_API_KEY"], os.environ["KITE_ACCESS_TOKEN"])
+        except ImportError as e:                     # the optional SDK (pip install kiteconnect) is not installed
+            logger.critical(str(e))
+            return 2
     elif args.source == "csv":
         files = csv_files(args.csv_dir, watchlist)
-        adapter, as_of = CsvReplayAdapter(files), csv_as_of(files)
+        adapter = CsvReplayAdapter(files)
     else:
-        adapter, as_of = PublicExchangeAdapter(), datetime.now(timezone.utc)
+        adapter = PublicExchangeAdapter()
+    as_of = source_as_of(args.source, files)
     alpha = AlphaEngine(rvol_threshold=args.rvol_threshold, risk_reward_ratio=args.risk_reward,
                         rvol_mode=args.rvol_mode, base_sessions=args.base_sessions)
     logger.info(f"Screening {len(watchlist)} symbol(s) from {args.source} as of {as_of.astimezone(IST):%Y-%m-%d %H:%M} IST.")
@@ -419,8 +456,17 @@ async def main(argv: Optional[List[str]] = None) -> int:
                         allow_partial_history=args.allow_partial_history, recent_sessions=args.recent_sessions,
                         near_pct=args.near_pct)
 
-    print(render_table(rows), flush=True)
-    if not _write_reports(args, rows, as_of):
+    try:
+        print(render_table(rows), flush=True)
+        printed = True
+    except OSError as e:                             # stdout on a full disk or a failed device; the reports still go out
+        logger.error(f"Cannot print the table: {e}")
+        printed = False
+        try:                                          # what stdout still holds is flushed at exit: let it go nowhere, quietly
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except OSError:
+            pass
+    if not _write_reports(args, rows, as_of) or not printed:
         return 1
 
     counts = {status: sum(1 for r in rows if r.status == status) for status in STATUS_ORDER}
@@ -431,6 +477,8 @@ async def main(argv: Optional[List[str]] = None) -> int:
 
 def run(argv: Optional[List[str]] = None) -> int:
     configure_logging()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")     # a note may carry a path the console's code page cannot show
     try:
         return asyncio.run(main(argv))
     except KeyboardInterrupt:

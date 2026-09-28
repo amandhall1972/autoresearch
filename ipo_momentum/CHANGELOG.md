@@ -26,6 +26,88 @@ Validation section), the Yahoo history limit, Ctrl-C, that no reading looks
 past its bar, and that the screener's source names no order or feed code. The
 suite passes on the same seven configurations as v1.18.
 
+The screener then went through one adversarial review round of its own (round
+19, on a frozen copy of commit `0f400dd`), with three areas: the readings, the
+CLI and data sources, and tests and docs. Every finder and skeptic completed:
+20 findings and 3 more from the skeptics, none refuted (18 confirmed, 1
+partly: R19-CLI-DATA-6, whose usage error already named the stray argument);
+2 high, 6 medium, 15 low. Where the fix is not the finder's:
+- R19-READINGS-1: the finder read Kite history up to the host's now; the
+  skeptic showed a host clock ahead of the exchange would then count the
+  running candle as closed, and asked for the engine's own allowance. v1.19
+  reads Kite history up to 30 s before the host clock (`KITE_CLOCK_ALLOWANCE`,
+  the engine's `max_stamp_ahead`): the row is the last closed bar once it is
+  30 s old, and a host clock more than 30 s ahead is the same fault the engine
+  documents. The engine's own Kite start-up stops a whole bar earlier because
+  its feed back-fills the rest, which the screener cannot.
+- R19-READINGS-4 / R19-CLI-DATA-2 / R19-TESTS-DOCS-3: the finder offered to
+  widen a dateless symbol's window to `--max-lookback-days` for CSV; that
+  would make the screener disagree with `engine.py --source csv` on the same
+  file, so the 20-day demo window stays and is documented.
+- R19-CLI-DATA-S1: a table that cannot be printed (a full disk) is logged,
+  the reports are still written, and the exit code is 1; what stdout still
+  holds is sent nowhere so the interpreter's exit flush stays quiet.
+
+Every v1.19 regression test fails on the round's snapshot and passes here, on
+Python 3.11 and 3.10, except these pins, which pass on both:
+`test_the_recent_window_counts_sessions_not_calendar_days`,
+`test_cli_applies_every_reading_parameter_and_echoes_it`,
+`test_cli_applies_recent_sessions_and_max_lookback_days`,
+`test_a_symbol_without_a_listing_date_is_read_from_at_most_20_days_back`,
+`test_rank_orders_by_gap_within_a_status_not_by_symbol`,
+`test_a_close_exactly_at_the_base_high_after_a_recent_signal_is_failed`,
+`test_near_pct_zero_still_admits_a_close_at_the_base_high`,
+`test_last_signal_is_the_last_of_several`,
+`test_yahoo_history_limit_clamps_the_start_and_excludes_an_older_listing` and
+`test_with_kite_a_bar_closed_less_than_30_s_ago_is_not_counted_yet` (a control:
+the snapshot's whole-bar lag showed the same earlier bar). Tests: 634 (33
+added in the round). The suite passes on the seven configurations.
+
+### Screener: the readings
+
+| Sev | Verdict | Defect at 0f400dd | v1.19 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ✔ | With `--source kite` history stopped a whole bar before the host clock, as the engine's does, but the screener has no feed to back-fill the rest: the row was the bar *before* the last closed one for the whole five minutes, so a breakout on the last closed bar showed one bar late. | Kite history is read up to 30 s before the host clock (the engine's `max_stamp_ahead`); the row is the last closed bar once it is 30 s old. | `test_with_kite_the_row_is_the_last_closed_bar_once_it_is_30_s_old`, `test_with_kite_a_bar_closed_less_than_30_s_ago_is_not_counted_yet`, `test_yahoo_history_is_read_up_to_now_and_kite_history_30_s_before` |
+| medium | ✔ | The CSV as-of time was a bar after the newest bar in any file, unconditionally: a file written during the session that ends with the running bar had that bar judged as closed, a possible fake `BREAKOUT`. | The CSV as-of time never passes the start of the bar now forming on the host clock. | `test_csv_as_of_never_passes_the_start_of_the_bar_now_forming` |
+| medium | ✔ | A close exactly `--near-pct` below a round base high (97 against 100) read `BELOW`: the ratio lands at −3.0000000000000027 in floating point. | The comparison allows 1e-9 of a percent, far below any tick's share of a price. | `test_a_close_exactly_near_pct_below_a_round_base_high_is_a_setup` |
+| medium | ✔ | A symbol without a listing date was fetched from at most 20 days back (the orchestrator's demo window), which the README, the CLI table and `--help` never said; a dateless CSV file more than 20 days older than the newest read `NO_DATA` with a reason that did not say why. Found by all three finders. | Docs: the paragraph, the flag row, `--help`; the code stays, so the screener agrees with `engine.py --source csv`. | `test_help_and_readme_state_the_20_day_window_of_a_symbol_without_a_date`, `test_a_symbol_without_a_listing_date_is_read_from_at_most_20_days_back` |
+| low | ✔ | A close at the base high was noted as "-0.00% below the base". | The notes print the distance's magnitude. | `test_a_close_at_the_base_high_is_not_a_negative_distance_below_it` |
+| low | ✔ | `BASE` was described as waiting for "the 20-bar volume baseline after" the base; evaluation starts after max(base, 20) bars, as in the engine. | Docs. | `test_evaluation_starts_after_max_of_base_and_volume_baseline_not_their_sum` |
+| low | ✔ | The `ABOVE` note blamed thin volume when the AVWAP filter refused a heavy-volume cross. | The note names both. | `test_the_above_note_does_not_blame_thin_volume_alone_for_an_avwap_refusal` |
+| low | ✔ | `BREAKOUT` was decided by the last fired timestamp equalling the last bar's, not by `evaluate()`'s own positional test: a frame with a duplicated last stamp (unreachable through the adapters) disagreed with the engine. | `evaluate()`'s test. | `test_breakout_is_evaluates_own_test_even_on_a_duplicated_last_timestamp` |
+| low | ✔ | (Skeptic) The Kite example said "any age", but a listing older than the 180-day default lookback reads `NO_DATA`. | Docs. | (docs) |
+| low | ✔ | (Skeptic) A listing date typed after the as-of time read `NO_DATA` with "No historical bars acquired", blaming the source. | The note names the date and the as-of time. | `test_a_listing_date_after_the_as_of_time_is_named_as_the_reason` |
+
+### Screener: the CLI and data sources
+
+| Sev | Verdict | Defect at 0f400dd | v1.19 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| high | ✔ | A universe file saved by a spreadsheet as "CSV UTF-8" carries a byte-order mark: the header was not recognised (and rejected as a bad date), or the first symbol silently became "﻿SWIGGY" and `NO_DATA`; a file in another encoding was a traceback. Found by two finders. | The file is read as `utf-8-sig`; a decoding error is a configuration error naming the file. | `test_a_universe_saved_by_a_spreadsheet_with_a_bom_and_crlf_is_read` |
+| high | ✔ | The 20-day demo window (see the readings table). | Docs. | (above) |
+| medium | ✔ | The table went to a stdout with the console's strict encoding: a note carrying a path with a character outside it (a `--csv-dir` under a non-ASCII user name on a Windows code page) was a traceback, exit 1, and the reports were never written. | stdout is reconfigured with `errors="replace"`, as stderr already was. | `test_a_narrow_stdout_encoding_cannot_lose_the_table_or_the_reports` |
+| low | ✔ | `--json` and `--csv-out` to the same path: the CSV silently overwrote the JSON. | A configuration error, before anything runs. | `test_json_and_csv_out_must_be_different_files` |
+| low | ✔ | `--source kite` without the `kiteconnect` SDK was an `ImportError` traceback, not the documented exit 2. | Exit 2 with the SDK's own message. | `test_kite_source_without_the_sdk_is_a_configuration_error` |
+| low | ◐ | Symbols on both sides of an option were "unrecognized arguments" (partly: the usage error named the argument). | `parse_intermixed_args`. | `test_symbols_may_surround_an_option` |
+| low | ✔ | (Skeptic) A stdout that cannot be written (a full disk) was a traceback and the reports were not written. | Logged; the reports are written; exit 1; stdout's remainder is discarded quietly. | `test_a_table_that_cannot_be_printed_still_writes_the_reports` |
+
+### Screener: tests and docs
+
+| Sev | Verdict | Defect at 0f400dd | v1.19 fix | Pinned by |
+| --- | --- | --- | --- | --- |
+| medium | ✔ | The Yahoo and Kite quick-start examples read nothing as written: both listings shown were older than Yahoo's 60 days, and "any age" needed a flag the Kite line omitted. | Docs: placeholder listings inside the window, the Kite line names `--max-lookback-days`. | (docs) |
+| medium | ✔ | The universe file's BOM (see the CLI table). | (above) | (above) |
+| medium → low | ✔ | The "sessions" window was not pinned: a window counted in calendar days passed every test. | A weekend-gap pin. | `test_the_recent_window_counts_sessions_not_calendar_days` |
+| medium → low | ✔ | No test ran a non-default `--recent-sessions`, `--near-pct`, `--base-sessions`, `--max-lookback-days`, `--rvol-threshold`, `--rvol-mode` or `--risk-reward` through `main()`: dropping the wiring passed every test. | Two CLI pins that apply each and read it back from the JSON. | `test_cli_applies_every_reading_parameter_and_echoes_it`, `test_cli_applies_recent_sessions_and_max_lookback_days` |
+| medium → low | ✔ | The 20-day window (see the readings table). | (above) | (above) |
+| low | ✔ | The rank tests did not pin the gap ordering: every fixture's alphabetical order coincided with its gap order. | A pin whose symbol order contradicts its gap order. | `test_rank_orders_by_gap_within_a_status_not_by_symbol` |
+| low | ✔ | Three documented boundaries were unpinned: a close exactly at the base high after a recent signal (`FAILED`), `--near-pct 0` admitting a close at the base high (`SETUP`), and `Last signal` being the last of several. | Three pins. | `test_a_close_exactly_at_the_base_high_after_a_recent_signal_is_failed`, `test_near_pct_zero_still_admits_a_close_at_the_base_high`, `test_last_signal_is_the_last_of_several` |
+| low | ✔ | The per-source as-of rules were documented but untested. | A pin for both sources (updated for the Kite allowance). | `test_yahoo_history_is_read_up_to_now_and_kite_history_30_s_before` |
+| low | ✔ | The Yahoo test replaced the method that holds the 60-day clamp, so it never exercised the limit, and its comment described the opposite of what it asserted. | A test below the clamp (`_read_url`), the comment corrected. | `test_yahoo_history_limit_clamps_the_start_and_excludes_an_older_listing` |
+| low | ✔ | The `BASE` wording (see the readings table). | (above) | (above) |
+| low | ✔ | The Ctrl-C test lacked the suite's Windows skip. | Skipped on Windows, and the README's skip list says so. | (harness) |
+| low | ✔ | "Further columns are ignored" failed when one held `=`: the line was split on `=` before `,`. | Comma first, then `=` inside the first column; every line accepted before parses the same. | `test_a_further_column_may_contain_an_equals_sign` |
+| low | ✔ | (Skeptic) The README said `--csv-out` carried the parameters and the as-of time; only the JSON does. | Docs. | (docs) |
+
 ## v1.18 (2026-09-28)
 
 v1.17 went through an eighteenth adversarial review on a frozen snapshot
