@@ -1,0 +1,2764 @@
+"""LiveTickAdapter: tick -> bar synthesis, Kite payloads, the bar clock, and loop resilience."""
+import asyncio
+import sys
+import threading
+import time
+import types
+from datetime import datetime, timedelta
+
+import pandas as pd
+import pytest
+
+import engine
+from conftest import ist, make_bars
+
+PRE_OPEN = ist(2026, 9, 28, 9, 0)
+
+
+def adapter(history=None, started_at=PRE_OPEN, token_map=None, alpha=None):
+    state = {} if history is None else {"SWIGGY": history}
+    return engine.LiveTickAdapter(state, alpha or engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                                  token_map=token_map, started_at=started_at)
+
+
+def tick(price, volume, ts, symbol="SWIGGY"):
+    return engine.Tick(symbol, price, volume, ts)
+
+
+def test_ticks_build_one_ohlcv_bar_that_closes_on_the_next_bucket():
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)))
+    for p, v, s in [(100.0, 10, 10), (102.0, 5, 60), (99.0, 7, 180), (101.0, 3, 299)]:
+        a.on_tick(tick(p, v, ist(2026, 9, 28, 9, 15) + timedelta(seconds=s)))
+    assert len(a.market_state["SWIGGY"]) == 5                            # still forming
+    a.on_tick(tick(101.5, 1, ist(2026, 9, 28, 9, 20, 1)))
+    df = a.market_state["SWIGGY"]
+    assert len(df) == 6
+    assert df.index[-1] == pd.Timestamp(ist(2026, 9, 28, 9, 15))
+    assert df.iloc[-1].tolist() == [100.0, 102.0, 99.0, 101.0, 25.0]
+    assert df.index.is_monotonic_increasing and str(df.index.tz) == str(engine.IST)
+    assert (df.dtypes == "float64").all()
+
+
+def test_bar_clock_closes_a_bar_that_gets_no_further_ticks():
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 15, 25, 30)))            # the session's final bar
+    a.flush_due_bars(ist(2026, 9, 28, 15, 30, 1))                         # inside the 2 s grace
+    assert "SWIGGY" in a.current_bars
+    a.flush_due_bars(ist(2026, 9, 28, 15, 30, 2))
+    assert "SWIGGY" not in a.current_bars
+    assert a.market_state["SWIGGY"].index[-1] == pd.Timestamp(ist(2026, 9, 28, 15, 25))
+
+
+def test_first_bar_is_discarded_when_the_engine_started_mid_bar():
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)), started_at=ist(2026, 9, 28, 10, 2))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 10, 2, 30)))              # joins the 10:00 bar late
+    a.on_tick(tick(101.0, 10, ist(2026, 9, 28, 10, 5, 0)))
+    a.on_tick(tick(102.0, 10, ist(2026, 9, 28, 10, 10, 0)))
+    assert list(a.market_state["SWIGGY"].index[-2:]) == [pd.Timestamp(ist(2026, 9, 25, 15, 20)),
+                                                          pd.Timestamp(ist(2026, 9, 28, 10, 5))]
+
+
+def test_first_bar_is_kept_when_the_engine_started_before_it():
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 9, 15, 0)))
+    a.on_tick(tick(101.0, 10, ist(2026, 9, 28, 9, 20, 0)))
+    assert a.market_state["SWIGGY"].index[-1] == pd.Timestamp(ist(2026, 9, 28, 9, 15))
+
+
+def test_late_and_out_of_order_ticks_are_dropped_not_merged():
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 9, 15, 5)))
+    a.on_tick(tick(101.0, 10, ist(2026, 9, 28, 9, 20, 5)))              # closes 09:15
+    a.on_tick(tick(250.0, 999, ist(2026, 9, 28, 9, 19, 59)))            # late print for a closed bar
+    a.on_tick(tick(101.0, 10, ist(2026, 9, 28, 9, 25, 5)))              # closes 09:20
+    df = a.market_state["SWIGGY"]
+    assert a.dropped_ticks == 1
+    assert df.index[-2:].tolist() == [pd.Timestamp(ist(2026, 9, 28, 9, 15)), pd.Timestamp(ist(2026, 9, 28, 9, 20))]
+    assert df["High"].max() < 250.0 and not df.index.duplicated().any()
+
+
+def test_kite_full_mode_payload_uses_token_map_exchange_time_and_cumulative_volume():
+    a = adapter(history=make_bars([280.0] * 5, start=ist(2026, 9, 25, 15, 0)), token_map={1234: "SWIGGY"})
+    epoch = ist(2026, 9, 28, 9, 16, 5).timestamp()
+    kite_tick = {"tradable": True, "mode": "full", "instrument_token": 1234, "last_price": 280.5,
+                 "last_traded_quantity": 5, "volume_traded": 1000,
+                 # KiteTicker builds naive host-local datetimes with datetime.fromtimestamp(), so the test must too.
+                 "exchange_timestamp": datetime.fromtimestamp(epoch),  # noqa: DTZ006
+                 "last_trade_time": datetime.fromtimestamp(epoch)}  # noqa: DTZ006
+    t1 = a._normalize(kite_tick)
+    assert t1.symbol == "SWIGGY" and t1.timestamp == ist(2026, 9, 28, 9, 16, 5)
+    t2 = a._normalize({**kite_tick, "last_price": 281.0, "volume_traded": 1600,
+                       "exchange_timestamp": datetime.fromtimestamp(epoch + 60)})  # noqa: DTZ006
+    for t in (t1, t2):
+        a.on_tick(t)
+    a.flush_due_bars(ist(2026, 9, 28, 9, 21))
+    bar = a.market_state["SWIGGY"].iloc[-1]
+    assert bar["Volume"] == 1600                                          # 1000 + (1600 - 1000), not 5 + 5
+
+
+def test_zeroed_exchange_time_falls_back_to_receive_time():
+    a = adapter(token_map={1234: "SWIGGY"})
+    t = a._normalize({"instrument_token": 1234, "last_price": 280.5, "volume_traded": 10,
+                      "exchange_timestamp": datetime.fromtimestamp(0)})  # noqa: DTZ006 - what the SDK yields for 0
+    assert abs((t.timestamp - datetime.now(engine.IST)).total_seconds()) < 5
+
+
+def test_unknown_instrument_tokens_are_dropped_instead_of_crashing():
+    async def scenario():
+        a = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), asyncio.get_running_loop(),
+                                   token_map={1234: "SWIGGY"})
+        a.broker_on_ticks(None, [{"instrument_token": 999, "last_price": 10.0}])
+        await asyncio.sleep(0)
+        return a
+    a = asyncio.run(scenario())
+    assert a.dropped_ticks == 1 and a.tick_queue.empty()
+
+
+def test_ltp_mode_ticks_carry_no_volume():
+    a = adapter(token_map={1234: "SWIGGY"})
+    t = a._normalize({"tradable": True, "mode": "ltp", "instrument_token": 1234, "last_price": 280.5})
+    assert t.volume == 0 and t.cumulative_volume is None                  # v1.0 invented 100 shares
+
+
+def test_cumulative_volume_counter_restarts_each_session():
+    a = adapter(started_at=ist(2026, 9, 25, 8, 55))                        # running through both opens
+    t = engine.Tick("SWIGGY", 100.0, 0, ist(2026, 9, 25, 15, 25), cumulative_volume=9_000_000)
+    assert a._traded_quantity(t) == (9_000_000, False)
+    t = engine.Tick("SWIGGY", 100.0, 0, ist(2026, 9, 28, 9, 15, 1), cumulative_volume=40_000)
+    assert a._traded_quantity(t) == (40_000, False)                        # not negative, not ignored
+
+
+def test_joining_mid_session_does_not_dump_the_days_volume_into_one_bar():
+    """Started 10:04:59; the first print (10:05:01) carries 5M shares traded since 09:15."""
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)), token_map={1234: "SWIGGY"},
+                started_at=ist(2026, 9, 28, 10, 4, 59))
+    for secs, cum in [(1, 5_000_000), (90, 5_004_000), (200, 5_010_000), (330, 5_012_000), (420, 5_020_000)]:
+        a.on_tick(engine.Tick("SWIGGY", 280.0, 0, ist(2026, 9, 28, 10, 5) + timedelta(seconds=secs), cumulative_volume=cum))
+    a.flush_due_bars(ist(2026, 9, 28, 10, 16))
+    today = a.market_state["SWIGGY"][a.market_state["SWIGGY"].index >= pd.Timestamp(ist(2026, 9, 28))]
+    # The 10:05 bar's head (10:05:00-10:05:01) went into the baseline, so that bar is discarded (v1.4 kept it
+    # short); the next bar gets only what traded while we watched.
+    assert today.index.tolist() == [pd.Timestamp(ist(2026, 9, 28, 10, 10))] and today["Volume"].tolist() == [10_000]
+
+
+def test_ticks_for_a_symbol_without_history_are_ignored_not_fatal(caplog):
+    # v1.0 raised KeyError here and the shared aggregator died for every symbol. Accumulating bars
+    # instead would later trade a base anchored at engine start-up, so the symbol is ignored.
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)))
+    for m in (15, 20, 25):
+        a.on_tick(tick(50.0, 10, ist(2026, 9, 28, 9, m, 1), symbol="NEWIPO"))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 9, 15, 1)))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 9, 20, 1)))
+    assert "NEWIPO" not in a.market_state and a.dropped_ticks == 3
+    assert a.market_state["SWIGGY"].index[-1] == pd.Timestamp(ist(2026, 9, 28, 9, 15))   # healthy symbol unaffected
+    assert caplog.text.count("[NEWIPO] Ticks ignored: no established history") == 1
+
+
+def test_pre_open_and_post_close_prints_are_not_bars_and_auction_volume_lands_at_the_open():
+    a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)), started_at=ist(2026, 9, 28, 8, 55))
+    pre_open = engine.Tick("SWIGGY", 101.0, 0, ist(2026, 9, 28, 9, 7, 30), cumulative_volume=250_000)
+    first = engine.Tick("SWIGGY", 101.5, 0, ist(2026, 9, 28, 9, 15, 2), cumulative_volume=260_000)
+    for t in (pre_open, first):
+        a.on_tick(t)
+    a.on_tick(tick(101.0, 10, ist(2026, 9, 28, 15, 31, 0)))              # closing-session print
+    a.flush_due_bars(ist(2026, 9, 28, 9, 21))
+    df = a.market_state["SWIGGY"]
+    assert df.index[-1] == pd.Timestamp(ist(2026, 9, 28, 9, 15)) and a.dropped_ticks == 2
+    assert df.iloc[-1]["Volume"] == 260_000 and df.iloc[-1]["Open"] == 101.5   # auction volume, first in-session price
+
+
+def test_live_breakout_bar_close_emits_a_signal():
+    closes = [100 + (i % 5) for i in range(150)] + [102.0] * 20
+    a = adapter(history=make_bars(closes, start=ist(2026, 9, 1, 9, 15)), started_at=ist(2026, 9, 2, 8, 0))
+    t0 = engine.next_session_open(a.market_state["SWIGGY"].index[-1])
+    a.on_tick(tick(103.0, 200_000, t0))
+    a.on_tick(tick(106.0, 400_000, t0 + timedelta(minutes=4)))
+    a.on_tick(tick(106.0, 1_000, t0 + timedelta(minutes=5)))
+    sig = a.oms_queue.get_nowait()
+    assert sig.symbol == "SWIGGY" and sig.entry_price == 106.0 and sig.bar_time == t0
+
+
+def test_process_ticks_survives_an_exception_and_keeps_counting_tasks():
+    async def scenario():
+        alpha = engine.AlphaEngine()
+        calls = {"n": 0}
+
+        def flaky(symbol, df):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("boom")
+            return None
+
+        alpha.evaluate = flaky
+        history = {"X": make_bars([10.0] * 5, start=ist(2026, 9, 25, 15, 5))}      # through the 15:25 bar
+        a = engine.LiveTickAdapter(history, alpha, asyncio.Queue(), asyncio.get_running_loop(), started_at=PRE_OPEN)
+        worker = asyncio.create_task(a.process_ticks())
+        a.broker_on_ticks(None, [{"symbol": "X", "price": 10.0, "volume": 1, "timestamp": ist(2026, 9, 28, 9, 15 + 5 * i)}
+                                 for i in range(4)])
+        await asyncio.wait_for(a.tick_queue.join(), timeout=2)
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        return a, calls["n"]
+
+    a, evaluations = asyncio.run(scenario())
+    assert evaluations == 3                                               # bars 1-3 closed; the first raised
+    # The raising evaluation still kept its bar and did not swallow the tick that closed it.
+    assert a.market_state["X"].index[-3:].tolist() == [pd.Timestamp(ist(2026, 9, 28, 9, m)) for m in (15, 20, 25)]
+
+
+def test_broker_callback_from_a_foreign_thread_is_delivered_to_the_loop():
+    async def scenario():
+        a = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), asyncio.get_running_loop())
+        th = threading.Thread(target=a.broker_on_ticks,
+                              args=(None, [{"symbol": "X", "price": 10.0, "volume": 1, "timestamp": ist(2026, 9, 28, 9, 15)}]))
+        th.start()
+        th.join()
+        return await asyncio.wait_for(a.tick_queue.get(), timeout=2)
+
+    t = asyncio.run(scenario())
+    assert t.symbol == "X" and t.price == 10.0
+
+
+def test_bar_clock_task_flushes_on_its_own():
+    async def scenario():
+        a = adapter(history=make_bars([100.0] * 5, start=ist(2026, 9, 25, 15, 0)))
+        a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 9, 15, 1)))
+        clock = asyncio.create_task(a.bar_clock(interval=0.01, clock=lambda: ist(2026, 9, 28, 9, 21)))
+        await asyncio.sleep(0.1)
+        clock.cancel()
+        await asyncio.gather(clock, return_exceptions=True)
+        return a
+
+    a = asyncio.run(scenario())
+    assert a.market_state["SWIGGY"].index[-1] == pd.Timestamp(ist(2026, 9, 28, 9, 15))
+
+
+# ---------------------------------------------------------------- feed gaps, blind spots and back-fill
+def cum_tick(price, cum, ts, symbol="SWIGGY"):
+    return engine.Tick(symbol, price, 0, ts, cumulative_volume=cum)
+
+
+def session_history(day=24, closes=None):
+    """A full 09:15-15:25 session of 5m bars on 2026-09-<day> (75 bars) at 100k shares each."""
+    closes = closes or [100.0] * 75
+    df = make_bars(closes, start=ist(2026, 9, day, 9, 15))
+    return df
+
+
+def test_reconnect_rebaselines_volume_and_discards_the_blind_bar():
+    """v1.1 credited all volume traded during a feed outage to the first bar after it: a fake RVOL spike."""
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 10)))
+    a.on_tick(cum_tick(100.2, 1_100_000, ist(2026, 9, 25, 10, 2, 0)))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 12, 0))                     # outage 10:02 -> 10:12
+    a.on_tick(cum_tick(101.0, 2_500_000, ist(2026, 9, 25, 10, 12, 5)))     # 1.4M traded while blind
+    a.on_tick(cum_tick(101.5, 2_600_000, ist(2026, 9, 25, 10, 15, 3)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 21))
+    df = a.market_state["SWIGGY"]
+    today = df[df.index >= pd.Timestamp(ist(2026, 9, 25))]
+    assert today.index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 15))]   # 10:00 and 10:10 spanned the gap
+    assert today["Volume"].tolist() == [100_000.0]                              # not 1,500,000
+
+
+def test_a_late_feed_connect_does_not_dump_the_days_volume_into_one_bar():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 5))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 11, 0, 0))                       # the websocket only got through at 11:00
+    a.on_tick(cum_tick(100.0, 4_200_000, ist(2026, 9, 25, 11, 0, 5)))      # re-baselines: 11:00 is blind
+    a.on_tick(cum_tick(100.1, 4_212_000, ist(2026, 9, 25, 11, 3, 0)))
+    a.on_tick(cum_tick(100.2, 4_215_000, ist(2026, 9, 25, 11, 5, 10)))
+    a.on_tick(cum_tick(100.3, 4_220_000, ist(2026, 9, 25, 11, 7, 0)))
+    a.flush_due_bars(ist(2026, 9, 25, 11, 11))
+    today = a.market_state["SWIGGY"][a.market_state["SWIGGY"].index >= pd.Timestamp(ist(2026, 9, 25))]
+    assert today.index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 11, 5))] and today["Volume"].tolist() == [8_000]
+
+
+def test_a_counter_going_backwards_is_rebaselined_not_reset_to_zero():
+    a = adapter(started_at=ist(2026, 9, 25, 9, 0))
+    assert a._traded_quantity(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0))) == (1_000_000, False)
+    assert a._traded_quantity(cum_tick(100.0, 999_990, ist(2026, 9, 25, 10, 1))) == (0, True)   # v1.1: 999,990
+    # v1.2 adopted the glitch value as the baseline and re-counted the dip (510); v1.3 dropped the 500.
+    assert a._traded_quantity(cum_tick(100.0, 1_000_500, ist(2026, 9, 25, 10, 2))) == (500, False)
+    assert a._traded_quantity(cum_tick(100.0, 1_000_800, ist(2026, 9, 25, 10, 3))) == (300, False)
+
+
+def test_quote_updates_without_a_trade_do_not_create_bars():
+    """In full mode Kite also sends depth changes; v1.1 turned those into flat zero-volume bars."""
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 0, 5)))
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 6, 0)))        # depth update, nothing traded
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 12, 0)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 30))
+    df = a.market_state["SWIGGY"]
+    assert df[df.index >= pd.Timestamp(ist(2026, 9, 25))].index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 0))]
+
+
+def test_a_late_print_does_not_move_the_volume_baseline():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 10)))
+    a.on_tick(cum_tick(100.0, 1_100_000, ist(2026, 9, 25, 10, 4, 50)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 2))                           # closes 10:00
+    a.on_tick(cum_tick(100.0, 1_160_000, ist(2026, 9, 25, 10, 4, 59)))     # arrives late: dropped
+    a.on_tick(cum_tick(100.0, 1_161_000, ist(2026, 9, 25, 10, 5, 4)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 11))
+    assert a.market_state["SWIGGY"]["Volume"].iloc[-2:].tolist() == [1_100_000.0, 61_000.0]   # v1.1: 1,000
+
+
+def test_market_time_follows_accepted_ticks_only():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 10, 0, 10)))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 9, 7, 0)))                  # pre-open: ignored
+    assert a.market_time == ist(2026, 9, 25, 10, 0, 10)
+
+
+class RecordingAlpha(engine.AlphaEngine):
+    def __init__(self):
+        super().__init__()
+        self.evaluated = []
+
+    def evaluate(self, symbol, df):
+        self.evaluated.append((df.index[-2], df.index[-1]))
+        return None
+
+
+def test_a_hole_is_backfilled_from_the_broker_before_the_next_bar_is_evaluated():
+    history = session_history(24)
+    history = pd.concat([history, make_bars([100.0] * 9, start=ist(2026, 9, 25, 9, 15))])   # today 09:15-09:55
+    fetched_bar = make_bars([100.5], start=ist(2026, 9, 25, 10, 0))
+    calls, seen = [], []
+
+    async def backfill(sym, start, end):
+        calls.append((sym, start, end))
+        return fetched_bar
+
+    async def scenario():
+        alpha = RecordingAlpha()
+        a = engine.LiveTickAdapter({"SWIGGY": history}, alpha, asyncio.Queue(), asyncio.get_running_loop(),
+                                   started_at=ist(2026, 9, 25, 10, 2, 40), backfill=backfill,
+                                   bar_listeners=[lambda s, ts, b: seen.append(ts)])
+        a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 10, 2, 45)))            # joins the 10:00 bar late: discarded
+        a.on_tick(tick(100.6, 10, ist(2026, 9, 25, 10, 5, 1)))
+        a.on_tick(tick(100.7, 10, ist(2026, 9, 25, 10, 10, 1)))            # closes 10:05 -> hole at 10:00
+        await asyncio.sleep(0.05)
+        return a, alpha
+
+    a, alpha = asyncio.run(scenario())
+    assert calls == [("SWIGGY", ist(2026, 9, 25, 10, 0), ist(2026, 9, 25, 10, 5))]
+    idx = a.market_state["SWIGGY"].index
+    assert idx[-2:].tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 0)), pd.Timestamp(ist(2026, 9, 25, 10, 5))]
+    assert alpha.evaluated == [(pd.Timestamp(ist(2026, 9, 25, 10, 0)), pd.Timestamp(ist(2026, 9, 25, 10, 5)))]
+    assert seen == [pd.Timestamp(ist(2026, 9, 25, 10, 0)), ist(2026, 9, 25, 10, 5)]   # listeners in time order
+
+
+def test_without_a_backfill_source_a_bar_after_a_hole_is_not_evaluated(caplog):
+    """Evaluating across a hole would report a 'first crossing' one bar late at a worse price."""
+    history = pd.concat([session_history(24), make_bars([100.0] * 9, start=ist(2026, 9, 25, 9, 15))])
+    alpha = RecordingAlpha()
+    a = engine.LiveTickAdapter({"SWIGGY": history}, alpha, asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 10, 2, 40))
+    a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 10, 2, 45)))
+    a.on_tick(tick(100.6, 10, ist(2026, 9, 25, 10, 5, 1)))
+    a.on_tick(tick(100.7, 10, ist(2026, 9, 25, 10, 10, 1)))
+    assert alpha.evaluated == [] and "Bars 10:00-10:05 are missing" in caplog.text
+    a.on_tick(tick(100.8, 10, ist(2026, 9, 25, 10, 15, 1)))               # contiguous again: evaluated
+    assert alpha.evaluated == [(pd.Timestamp(ist(2026, 9, 25, 10, 5)), pd.Timestamp(ist(2026, 9, 25, 10, 10)))]
+
+
+def test_a_reconnect_marks_the_forming_bar_incomplete():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 10, 0, 10)))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 3))
+    assert a.current_bars["SWIGGY"]["partial"] is True
+
+
+def test_a_feed_drop_discards_the_bar_it_cut_short_and_every_bar_until_the_reconnect():
+    # v1.2 only learned of an outage at the reconnect, so a bar cut short that closed before then was kept.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 10, 0, 10)))
+    a.mark_feed_down()                                                    # the websocket closed at ~10:01
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 3))
+    a.on_tick(tick(100.2, 10, ist(2026, 9, 25, 10, 6, 0)))               # queued before the close was seen
+    a.flush_due_bars(ist(2026, 9, 25, 10, 10, 3))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 12))
+    a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 10, 15, 5)))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 20, 3))
+    df = a.market_state["SWIGGY"]
+    assert df[df.index >= pd.Timestamp(ist(2026, 9, 25))].index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 15))]
+
+
+def test_a_live_bar_closed_by_the_clock_needs_the_feed_alive_to_its_end():
+    """No tick in a bucket's tail is normal for an illiquid name; no message at all (heartbeats
+    included) means the feed may have missed trades, so that bar cannot be trusted."""
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), require_feed_liveness=True)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 59))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 25, 10, 0, 10)))
+    a.note_feed_alive(at=ist(2026, 9, 25, 10, 3))                         # then silence
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 3))
+    a.on_tick(tick(100.2, 10, ist(2026, 9, 25, 10, 5, 10)))
+    a.note_feed_alive(at=ist(2026, 9, 25, 10, 10, 1))                     # heartbeats past the bucket's end
+    a.flush_due_bars(ist(2026, 9, 25, 10, 10, 3))
+    df = a.market_state["SWIGGY"]
+    assert df[df.index >= pd.Timestamp(ist(2026, 9, 25))].index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 5))]
+
+
+def test_a_failed_kite_backfill_leaves_the_bar_unevaluated(fast_sleep, caplog):
+    class FailingKite:
+        def instruments(self, exchange=None):
+            return [{"tradingsymbol": "SWIGGY", "instrument_token": 1234, "tick_size": 0.05}]
+
+        def historical_data(self, **kwargs):
+            raise ConnectionError("gateway timeout")
+
+    kite = engine.ZerodhaKiteAdapter("k", "t", kite=FailingKite())
+    history = pd.concat([session_history(24), make_bars([100.0] * 9, start=ist(2026, 9, 25, 9, 15))])
+
+    async def scenario():
+        await kite.boot()
+        alpha = RecordingAlpha()
+        a = engine.LiveTickAdapter({"SWIGGY": history}, alpha, asyncio.Queue(), asyncio.get_running_loop(),
+                                   started_at=ist(2026, 9, 25, 10, 2, 40), backfill=kite.backfill)   # as main() wires it
+        a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 10, 2, 45)))
+        a.on_tick(tick(100.6, 10, ist(2026, 9, 25, 10, 5, 1)))
+        a.on_tick(tick(100.7, 10, ist(2026, 9, 25, 10, 10, 1)))            # closes 10:05 -> hole at 10:00
+        await asyncio.gather(*a._backfills)
+        return alpha
+
+    alpha = asyncio.run(scenario())
+    assert alpha.evaluated == [] and "Back-fill of 10:00-10:05 failed" in caplog.text   # v1.2 evaluated it
+
+
+def test_a_rebaselining_print_after_a_reconnect_opens_no_bar():
+    # v1.2 opened a flat zero-volume bar on it, and depth updates kept that bar alive.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 0))
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 0, 5)))        # re-baselines only
+    a.on_tick(cum_tick(100.0, 500_000, ist(2026, 9, 25, 10, 6, 0)))        # depth update
+    a.on_tick(cum_tick(100.3, 500_100, ist(2026, 9, 25, 10, 7, 0)))        # a trade
+    a.flush_due_bars(ist(2026, 9, 25, 10, 20))
+    df = a.market_state["SWIGGY"]
+    today = df[df.index >= pd.Timestamp(ist(2026, 9, 25))]
+    assert today.index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 10, 5))] and today["Volume"].tolist() == [100.0]
+
+
+class SessionClock(datetime):
+    """Wall clock inside Monday's session."""
+    FIXED = datetime(2026, 9, 28, 11, 0, tzinfo=engine.IST)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.FIXED.astimezone(tz) if tz else cls.FIXED.replace(tzinfo=None)
+
+
+class EveningClock(SessionClock):
+    FIXED = datetime(2026, 9, 28, 18, 0, tzinfo=engine.IST)
+
+
+def test_a_silent_websocket_during_the_session_stops_the_engine(monkeypatch):
+    # KiteTicker's ping loop never sends a ping, so a half-open socket stays "connected" forever.
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    a = adapter(history=session_history(24))
+    a.on_tick(tick(100.0, 10, ist(2026, 9, 28, 10, 59, 30)))
+    a.note_feed_alive(at=SessionClock.FIXED - timedelta(seconds=20))
+    with pytest.raises(RuntimeError, match="no market data"):
+        asyncio.run(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01))
+    assert a.current_bars["SWIGGY"]["partial"] is True
+
+
+def test_the_feed_watchdog_tolerates_quiet_evenings_and_fresh_heartbeats(monkeypatch):
+    async def watch_briefly(adapter_):
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(engine._watch_feed(asyncio.Event(), adapter_, stall_after=15, check_every=0.01), 0.1)
+
+    monkeypatch.setattr(engine, "datetime", EveningClock)
+    evening = adapter(history=session_history(24))
+    evening.note_feed_alive(at=EveningClock.FIXED - timedelta(hours=2))
+    asyncio.run(watch_briefly(evening))                                   # the exchange is closed: silence is fine
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    busy = adapter(history=session_history(24))
+    busy.note_feed_alive(at=SessionClock.FIXED - timedelta(seconds=1))
+    asyncio.run(watch_briefly(busy))
+
+
+def test_consecutive_zeroed_packets_never_become_the_baseline():
+    # v1.3 invalidated the baseline on a dip but adopted the next print unchecked: a second zeroed packet
+    # became the baseline and the next good print was credited with the whole day's volume.
+    a = adapter(started_at=ist(2026, 9, 25, 10, 58))
+    q = [a._traded_quantity(cum_tick(100.0, c, ist(2026, 9, 25, 11, 0, s)))
+         for s, c in [(1, 4_000_000), (2, 4_001_000), (3, 0), (4, 0), (5, 4_002_000), (6, 4_003_000)]]
+    assert q == [(0, True), (1_000, False), (0, True), (0, True), (1_000, False), (1_000, False)]
+
+
+def test_a_zeroed_first_packet_after_a_reconnect_is_not_the_baseline():
+    a = adapter(started_at=ist(2026, 9, 25, 9, 0))
+    a._traded_quantity(cum_tick(100.0, 4_000_000, ist(2026, 9, 25, 10, 0)))
+    a.mark_feed_down()
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 2))
+    assert a._traded_quantity(cum_tick(100.0, 0, ist(2026, 9, 25, 10, 2, 1))) == (0, True)
+    assert a._traded_quantity(cum_tick(100.0, 4_011_000, ist(2026, 9, 25, 10, 2, 2))) == (0, True)   # v1.3: 4,011,000
+    assert a._traded_quantity(cum_tick(100.0, 4_012_000, ist(2026, 9, 25, 10, 2, 3))) == (1_000, False)
+
+
+def test_the_print_after_a_glitch_keeps_its_trade_and_price():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 58))   # joined mid-session
+    a.on_tick(cum_tick(100.0, 990_000, ist(2026, 9, 25, 9, 59, 0)))            # re-baselines (09:55 is blind)
+    a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 5)))
+    a.on_tick(cum_tick(100.0, 1_010_000, ist(2026, 9, 25, 10, 1, 0)))
+    a.on_tick(cum_tick(100.0, 0, ist(2026, 9, 25, 10, 2, 0)))                  # a zeroed packet
+    a.on_tick(cum_tick(97.0, 1_060_000, ist(2026, 9, 25, 10, 3, 0)))           # a real 50k trade at 97
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 3))
+    bar = a.market_state["SWIGGY"].iloc[-1]
+    assert (bar["Low"], bar["Close"], bar["Volume"]) == (97.0, 97.0, 70_000.0)   # v1.3 lost the trade
+
+
+def test_a_stall_across_a_bucket_end_does_not_credit_its_tail_twice():
+    # The clock discards the stalled bar and the back-fill restores it; v1.3 also credited the stalled
+    # tail to the next live bar, so the tail was in history twice. v1.4 re-baselined the counter but
+    # kept the next bar with its head swallowed by the new baseline; that bar is now discarded and
+    # back-filled too.
+    history = pd.concat([session_history(24), make_bars([100.0] * 10, start=ist(2026, 9, 25, 9, 15))])
+    candles = make_bars([99.0, 100.9], start=ist(2026, 9, 25, 10, 5))
+    candles["Volume"] = [280_000.0, 20_000.0]                            # the exchange's 10:05 and 10:10 candles
+
+    async def backfill(sym, start, end):
+        return candles
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": history}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), started_at=ist(2026, 9, 25, 9, 0),
+                                   backfill=backfill, require_feed_liveness=True)
+        a.mark_feed_reset(at=ist(2026, 9, 25, 10, 4, 30))
+        a.on_tick(cum_tick(100.0, 1_000_000, ist(2026, 9, 25, 10, 4, 40)))  # re-baselines
+        a.on_tick(cum_tick(99.5, 1_010_000, ist(2026, 9, 25, 10, 5, 10)))
+        a.on_tick(cum_tick(99.0, 1_030_000, ist(2026, 9, 25, 10, 7, 0)))
+        a.note_feed_alive(at=ist(2026, 9, 25, 10, 9, 56))                   # then the feed stalls
+        a.flush_due_bars(ist(2026, 9, 25, 10, 10, 2))                        # 10:05 discarded
+        a.on_tick(cum_tick(99.2, 1_280_000, ist(2026, 9, 25, 10, 9, 58)))   # the stalled 250k burst: late
+        a.note_feed_alive(at=ist(2026, 9, 25, 10, 10, 3))
+        a.on_tick(cum_tick(100.8, 1_285_000, ist(2026, 9, 25, 10, 10, 5)))  # re-baselines: 10:10 is blind
+        a.on_tick(cum_tick(101.0, 1_300_000, ist(2026, 9, 25, 10, 11, 0)))
+        a.on_tick(cum_tick(101.0, 1_301_000, ist(2026, 9, 25, 10, 15, 1)))  # closes (discards) 10:10
+        a.on_tick(cum_tick(101.2, 1_321_000, ist(2026, 9, 25, 10, 17, 0)))
+        a.on_tick(cum_tick(101.3, 1_322_000, ist(2026, 9, 25, 10, 20, 1)))  # closes 10:15: hole 10:05-10:15
+        await asyncio.gather(*a._backfills)
+        return a.market_state["SWIGGY"]
+
+    df = asyncio.run(scenario())
+    today = df[df.index >= pd.Timestamp(ist(2026, 9, 25, 10, 5))]
+    assert today["Volume"].tolist() == [280_000.0, 20_000.0, 21_000.0]      # v1.3: 280,000 then 270,000
+
+
+def test_bars_close_in_feed_time_when_the_feed_lags():
+    # With the feed 3 s behind the host clock, a heartbeat received at 11:05:01 was sent at 11:04:58:
+    # v1.3 took it as proof that the 11:00 bar was complete and dropped its last print as late.
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), require_feed_liveness=True)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 59))
+    a.note_feed_lag(ist(2026, 9, 25, 11, 0, 3), 3.0)
+    a.on_tick(tick(101.0, 100, ist(2026, 9, 25, 11, 0, 0)))
+    a.note_feed_alive(at=ist(2026, 9, 25, 11, 5, 1))
+    a.flush_due_bars(ist(2026, 9, 25, 11, 5, 2, 500000))
+    assert "SWIGGY" in a.current_bars                                     # not yet due in feed time
+    a.on_tick(tick(100.3, 100, ist(2026, 9, 25, 11, 4, 59, 500000)))      # the tail, received 3 s late
+    a.note_feed_alive(at=ist(2026, 9, 25, 11, 5, 4))
+    a.flush_due_bars(ist(2026, 9, 25, 11, 5, 5, 500000))
+    assert a.market_state["SWIGGY"].iloc[-1]["Close"] == 100.3 and a.dropped_ticks == 0
+
+
+def test_the_feed_lag_is_measured_on_trades_not_on_snapshots(monkeypatch):
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    now = SessionClock.FIXED
+
+    def kite_tick(cum, sent):
+        naive_local = sent.astimezone().replace(tzinfo=None)             # KiteTicker's naive host-local time
+        return {"instrument_token": 1234, "last_price": 100.0, "volume_traded": cum, "exchange_timestamp": naive_local}
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"},
+                                   started_at=ist(2026, 9, 28, 10, 50))
+        a.broker_on_ticks(None, [kite_tick(1_000, now - timedelta(minutes=4))])   # subscribe snapshot: stale
+        a.broker_on_ticks(None, [kite_tick(1_000, now - timedelta(seconds=30))])  # no trade
+        a.broker_on_ticks(None, [kite_tick(1_200, now - timedelta(seconds=3))])   # a trade, sent 3 s ago
+        for _ in range(3):
+            a.on_tick(await a.tick_queue.get())
+        return a.feed_lag
+
+    assert asyncio.run(scenario()) == 3.0
+
+
+def test_the_bar_clock_waits_for_ticks_already_received():
+    # A tick still queued may be the tail of a due bar; closing first would drop it as late.
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), started_at=ist(2026, 9, 25, 9, 0))
+        a.on_tick(tick(101.0, 100, ist(2026, 9, 25, 11, 0, 0)))
+        a.tick_queue.put_nowait(tick(100.3, 100, ist(2026, 9, 25, 11, 4, 59)))
+        clock = asyncio.create_task(a.bar_clock(interval=0.01, clock=lambda: ist(2026, 9, 25, 11, 5, 3)))
+        await asyncio.sleep(0.05)
+        still_open = "SWIGGY" in a.current_bars                           # v1.3 closed it without the tail
+        a.on_tick(a.tick_queue.get_nowait())
+        await asyncio.sleep(0.05)
+        clock.cancel()
+        await asyncio.gather(clock, return_exceptions=True)
+        return still_open, a.market_state["SWIGGY"].iloc[-1]["Close"]
+
+    assert asyncio.run(scenario()) == (True, 100.3)
+
+
+# ---------------------------------------------------------------- round 5: feed time in both directions
+def kite_packet(cum, sent, price=100.0):
+    naive_local = sent.astimezone().replace(tzinfo=None)                   # KiteTicker's naive host-local time
+    return {"instrument_token": 1234, "last_price": price, "volume_traded": cum, "exchange_timestamp": naive_local}
+
+
+def test_a_lag_rise_seen_on_depth_updates_holds_the_bar_open(monkeypatch):
+    # v1.4 measured lag on trades only, so late depth updates kept proving liveness at the old lag and
+    # the bar closed before its tail arrived.
+    class SteppedClock(datetime):
+        FIXED = None
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.FIXED.astimezone(tz) if tz else cls.FIXED.replace(tzinfo=None)
+
+    monkeypatch.setattr(engine, "datetime", SteppedClock)
+
+    def receive(a, cum, sent, delay):
+        SteppedClock.FIXED = sent + timedelta(seconds=delay)
+        a.broker_on_ticks(None, [kite_packet(cum, sent)])
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"},
+                                   started_at=ist(2026, 9, 28, 10, 50))
+        receive(a, 1_000, ist(2026, 9, 28, 10, 59, 40), 0.3)              # re-baselines
+        receive(a, 1_200, ist(2026, 9, 28, 10, 59, 50), 0.3)              # a trade, 0.3 s late
+        receive(a, 1_200, ist(2026, 9, 28, 11, 0, 0), 4.0)                # a depth update, 4 s late
+        await asyncio.sleep(0)
+        while not a.tick_queue.empty():
+            a.on_tick(a.tick_queue.get_nowait())
+        return a.feed_lag
+
+    assert asyncio.run(scenario()) == 4.0                                 # v1.4: 0.3
+
+
+def test_a_tick_payload_proves_liveness_only_after_its_ticks_are_queued():
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"})
+        order = []
+        a.tick_queue.put_nowait = lambda t: order.append("tick")
+        a.note_feed_alive = lambda at=None: order.append("alive")
+        a.broker_on_ticks(None, [{"instrument_token": 1234, "last_price": 100.0, "volume_traded": 10}])
+        await asyncio.sleep(0)
+        return order
+
+    assert asyncio.run(scenario()) == ["tick", "alive"]                    # v1.4 stamped nothing here
+
+
+def test_only_heartbeats_and_text_stamp_liveness_from_on_message(monkeypatch):
+    # KiteTicker calls on_message before on_ticks for the same payload, so a tick payload stamped there
+    # could vouch for its own tail.
+    class FakeTicker:
+        MODE_FULL = "full"
+
+        def __init__(self, api_key, access_token):
+            pass
+
+        def connect(self, threaded=False):
+            pass
+
+    monkeypatch.setitem(sys.modules, "kiteconnect", types.SimpleNamespace(KiteTicker=FakeTicker))  # no extra needed
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop())
+        stamps = []
+        a.note_feed_alive = lambda at=None: stamps.append(at)
+        kws = engine.start_kite_feed("key", "token", [1234], a, asyncio.Event())
+        kws.on_message(kws, b"\x00" * 184, True)                         # a tick payload: stamped by on_ticks
+        kws.on_message(kws, b"\x00", True)                               # a heartbeat
+        kws.on_message(kws, '{"type": "order"}', False)                  # a text message
+        await asyncio.sleep(0)
+        return len(stamps)
+
+    assert asyncio.run(scenario()) == 2
+
+
+def test_a_host_clock_behind_the_exchange_is_corrected_not_ignored(caplog):
+    # v1.4 clamped negative lag to 0 without a word, and the router misjudged signal ages by S. Since v1.18 bars are
+    # again closed on the host clock (R18-FEED-2): a negative lag may be a forward stamp, which would cut a bar's tail.
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), require_feed_liveness=True)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 59))
+    a.note_feed_lag(ist(2026, 9, 25, 10, 0, 0), -19.7)                   # host clock 19.7 s slow
+    a.on_tick(tick(101.0, 100, ist(2026, 9, 25, 10, 0, 10)))
+    a.note_feed_alive(at=ist(2026, 9, 25, 10, 4, 44))                    # true 10:05:03.7
+    a.flush_due_bars(ist(2026, 9, 25, 10, 4, 45))                        # true 10:05:04.7: not closed before its end
+    assert "SWIGGY" in a.current_bars
+    a.note_feed_alive(at=ist(2026, 9, 25, 10, 5, 1))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 2))                         # the bar's end plus the grace on the host clock
+    assert "SWIGGY" not in a.current_bars and a.market_state["SWIGGY"].index[-1] == pd.Timestamp(ist(2026, 9, 25, 10, 0))
+    assert "Host clock runs 19.7s behind the exchange" in caplog.text
+    clock = engine.exchange_clock(lambda: a)
+    assert abs((clock() - datetime.now(engine.IST)).total_seconds() - 19.7) < 1.0
+    a._lag_samples.clear()
+    a.note_feed_lag(ist(2026, 9, 25, 10, 5), 3.0)                        # real latency is not removed
+    assert abs((clock() - datetime.now(engine.IST)).total_seconds()) < 1.0
+
+
+# ---------------------------------------------------------------- round 6: a host clock that is wrong, or fixed
+class WallClock(datetime):
+    """The host's wall clock, set by the test: it can step, as when NTP corrects it."""
+    FIXED = None
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.FIXED.astimezone(tz) if tz else cls.FIXED.replace(tzinfo=None)
+
+
+@pytest.mark.parametrize("skew", [20, -20])
+def test_a_host_clock_step_mid_session_does_not_cut_a_bar(monkeypatch, skew):
+    # The host runs 20 s behind (or ahead); at 10:04:00 NTP steps it right (the fix v1.5's warning asks for).
+    # v1.5 kept the stale lag in the stepped frame, closed the 10:00 bar early and dropped its tail. The
+    # production bar clock runs here, as main() starts it for a live feed.
+    monkeypatch.setattr(engine, "datetime", WallClock)
+    start, step, offset = ist(2026, 9, 25, 9, 59, 20), ist(2026, 9, 25, 10, 4, 0), timedelta(seconds=skew)
+    mono = [0.0]
+
+    def at(true):                                     # move both clocks to true exchange time `true`
+        mono[0] = (true - start).total_seconds()
+        WallClock.FIXED = true - offset if true < step else true
+
+    async def scenario():
+        at(start)
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"}, require_feed_liveness=True,
+                                   clock=engine.steady_clock(monotonic=lambda: mono[0]))
+        a.mark_feed_reset()
+        bar_clock = asyncio.create_task(a.bar_clock(interval=0))
+        trades = {ist(2026, 9, 25, 9, 59, 50): (1_000, 100.0), ist(2026, 9, 25, 10, 0, 10): (21_000, 100.0),
+                  ist(2026, 9, 25, 10, 1, 0): (21_000, 101.0), ist(2026, 9, 25, 10, 4, 50): (41_000, 97.0),
+                  ist(2026, 9, 25, 10, 4, 58): (41_500, 96.5), ist(2026, 9, 25, 10, 5, 20): (42_000, 97.5)}
+        true = start
+        while true < ist(2026, 9, 25, 10, 5, 30):
+            true += timedelta(seconds=0.1)
+            sent = true - timedelta(seconds=0.3)                      # 0.3 s of latency
+            at(true)
+            if sent in trades:
+                cum, price = trades[sent]
+                a.broker_on_ticks(None, [kite_packet(cum, sent, price)])
+                await asyncio.sleep(0)
+                while not a.tick_queue.empty():
+                    a.on_tick(a.tick_queue.get_nowait())
+            if true.microsecond == 0:
+                a.note_feed_alive(a.clock())                          # a heartbeat
+            await asyncio.sleep(0)                                    # the bar clock's turn
+            await asyncio.sleep(0)
+        bar_clock.cancel()
+        await asyncio.gather(bar_clock, return_exceptions=True)
+        return a.market_state["SWIGGY"], a.dropped_ticks
+
+    bars, dropped = asyncio.run(scenario())
+    bar = bars.loc[pd.Timestamp(ist(2026, 9, 25, 10, 0))]
+    assert (bar["Low"], bar["Close"], bar["Volume"], dropped) == (96.5, 96.5, 40_500.0, 0)
+
+
+def test_a_host_clock_step_does_not_trip_the_feed_watchdog(monkeypatch):
+    # v1.5's watchdog read the wall clock: NTP stepping a slow host 20 s forward looked like 20 s of silence.
+    monkeypatch.setattr(engine, "datetime", WallClock)
+    WallClock.FIXED = SessionClock.FIXED
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               require_feed_liveness=True, clock=engine.steady_clock())
+    a.note_feed_alive()
+    WallClock.FIXED = SessionClock.FIXED + timedelta(seconds=20)         # the step
+
+    async def watch_briefly():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 0.1)
+
+    asyncio.run(watch_briefly())
+
+
+def test_a_live_feed_runs_on_a_steady_clock(monkeypatch):
+    clocks = []
+
+    def feed(api_key, access_token, tokens, tick_adapter, feed_dead):
+        clocks.append(tick_adapter.clock.__qualname__)
+        tick_adapter.loop.call_later(0.2, feed_dead.set)
+        return types.SimpleNamespace(close=lambda: None)
+
+    from test_end_to_end import kite_env
+    kite_env(monkeypatch, feed)
+    asyncio.run(engine.main(["--source", "kite", "--listing-date", "2026-09-08", "--live-feed", "--run-seconds", "30"]))
+    assert clocks == ["steady_clock.<locals>.now"]
+
+
+def test_one_late_packet_does_not_move_the_router_clock():
+    # v1.5 used the largest lag sample as the skew estimate: one trade 8 s late cut the 19.7 s correction to
+    # 12 s, so a signal closed by the next bucket's first print was refused as "not closed yet".
+    a = adapter(history=session_history(24))
+    for second in range(10):
+        a.note_feed_lag(ist(2026, 9, 25, 10, 0, second), -19.7)
+    a.note_feed_lag(ist(2026, 9, 25, 10, 0, 10), -11.7)                  # 8 s of latency on one packet
+    assert a.feed_lag == -11.7                                            # bars still wait for it
+    clock = engine.exchange_clock(lambda: a)
+    assert abs((clock() - datetime.now(engine.IST)).total_seconds() - 19.7) < 1.0
+
+
+def test_a_zeroed_exchange_time_is_not_a_lag_sample():
+    # v1.5 checked the fallback (receive time) instead of the raw field, so a zeroed stamp became a 0 s
+    # sample and cancelled the host's -19.7 s correction for a minute.
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"})
+        a.broker_on_ticks(None, [{"instrument_token": 1234, "last_price": 100.0, "volume_traded": 10,
+                                  "exchange_timestamp": datetime.fromtimestamp(0)}])  # noqa: DTZ006 (as KiteTicker)
+        await asyncio.sleep(0)
+        return a.tick_queue.get_nowait()
+
+    assert asyncio.run(scenario()).received is None
+
+
+def test_a_tick_stamped_far_in_the_future_is_dropped_before_it_moves_anything(caplog):
+    # v1.5 took one forward-stamped packet as a -600 s lag: a future bar closed at once and the router's
+    # clock moved 600 s with it.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(tick(100.0, 100, ist(2026, 9, 25, 10, 1)))
+    ahead = tick(101.0, 100, ist(2026, 9, 25, 10, 12))
+    ahead.received = ist(2026, 9, 25, 10, 2)
+    a.on_tick(ahead)
+    assert a.dropped_ticks == 1 and a.feed_lag == 0.0 and a.market_time == ist(2026, 9, 25, 10, 1)
+    assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 0)
+    assert "stamped 600s ahead of the host clock dropped" in caplog.text
+    within = tick(101.0, 100, ist(2026, 9, 25, 10, 2, 20))              # a host 20 s behind is still believed
+    within.received = ist(2026, 9, 25, 10, 2)
+    a.on_tick(within)
+    assert a.dropped_ticks == 1 and a.feed_lag == -20.0
+
+
+def test_with_the_host_behind_a_connect_after_the_open_still_blinds_the_first_bar():
+    # The host runs 20 s behind and the feed connects at 09:15:10 (host 09:14:50). v1.5 judged "watching
+    # since before the open" in host time, counted the day's volume from zero and kept a 09:15 bar that
+    # missed the opening seconds.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 14, 50))
+    first = cum_tick(104.0, 420_000, ist(2026, 9, 25, 9, 15, 11))
+    first.received = ist(2026, 9, 25, 9, 14, 51, 300000)
+    a.on_tick(first)
+    later = cum_tick(103.0, 430_000, ist(2026, 9, 25, 9, 16))
+    later.received = ist(2026, 9, 25, 9, 15, 40, 300000)
+    a.on_tick(later)
+    assert a.current_bars["SWIGGY"]["partial"] is True
+    nxt = cum_tick(103.5, 431_000, ist(2026, 9, 25, 9, 20, 1))
+    nxt.received = ist(2026, 9, 25, 9, 19, 41, 300000)
+    a.on_tick(nxt)
+    assert pd.Timestamp(ist(2026, 9, 25, 9, 15)) not in a.market_state["SWIGGY"].index
+
+
+def test_with_a_synced_host_a_connect_before_the_open_counts_the_first_print():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 14, 50))
+    first = cum_tick(104.0, 420_000, ist(2026, 9, 25, 9, 15, 1))
+    first.received = ist(2026, 9, 25, 9, 15, 1, 300000)
+    a.on_tick(first)
+    assert a.current_bars["SWIGGY"]["partial"] is False and a.current_bars["SWIGGY"]["Volume"] == 420_000
+
+
+def test_an_update_that_is_not_newer_is_not_lag(monkeypatch):
+    # Only a newer exchange time dates the feed: the same stamp re-sent late says nothing about the feed.
+    monkeypatch.setattr(engine, "datetime", WallClock)
+
+    def receive(a, cum, sent, delay):
+        WallClock.FIXED = sent + timedelta(seconds=delay)
+        a.broker_on_ticks(None, [kite_packet(cum, sent)])
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"},
+                                   started_at=ist(2026, 9, 28, 10, 50))
+        receive(a, 1_000, ist(2026, 9, 28, 10, 59, 40), 0.3)              # re-baselines
+        receive(a, 1_200, ist(2026, 9, 28, 10, 59, 50), 0.3)              # a trade, 0.3 s late
+        receive(a, 1_200, ist(2026, 9, 28, 10, 59, 50), 9.0)              # the same update again, 9 s later
+        await asyncio.sleep(0)
+        while not a.tick_queue.empty():
+            a.on_tick(a.tick_queue.get_nowait())
+        return a.feed_lag
+
+    assert asyncio.run(scenario()) == 0.3
+
+
+def test_a_sessions_lost_last_bar_is_backfilled_before_the_next_session_trades():
+    # A reconnect at 15:26 blinds the 15:25 bar, which is discarded. v1.5 back-filled only holes inside a
+    # session, so it stayed missing and the next 09:15 bar was evaluated across it.
+    history = make_bars([100.0] * 74, start=ist(2026, 9, 24, 9, 15))    # 09:15-15:20: the 15:25 bar is lost
+    lost = make_bars([100.2], start=ist(2026, 9, 24, 15, 25))
+    calls, seen = [], []
+
+    async def backfill(sym, start, end):
+        calls.append((start, end))
+        return lost
+
+    async def scenario():
+        alpha = RecordingAlpha()
+        a = engine.LiveTickAdapter({"SWIGGY": history}, alpha, asyncio.Queue(), asyncio.get_running_loop(),
+                                   started_at=ist(2026, 9, 25, 9, 0), backfill=backfill,
+                                   bar_listeners=[lambda s, ts, b: seen.append(pd.Timestamp(ts))])
+        a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 9, 15, 5)))
+        a.on_tick(tick(100.6, 10, ist(2026, 9, 25, 9, 20, 1)))              # closes 09:15
+        await asyncio.sleep(0.05)
+        return a, alpha
+
+    a, alpha = asyncio.run(scenario())
+    assert calls == [(ist(2026, 9, 24, 15, 25), ist(2026, 9, 25, 9, 15))]
+    assert pd.Timestamp(ist(2026, 9, 24, 15, 25)) in a.market_state["SWIGGY"].index
+    assert alpha.evaluated == [(pd.Timestamp(ist(2026, 9, 24, 15, 25)), pd.Timestamp(ist(2026, 9, 25, 9, 15)))]
+    assert seen == [pd.Timestamp(ist(2026, 9, 24, 15, 25)), pd.Timestamp(ist(2026, 9, 25, 9, 15))]
+
+
+def test_a_breakout_in_a_lost_last_bar_does_not_fire_again_at_the_next_open():
+    # The base was crossed in the 15:25 bar the engine lost; evaluated across that hole, the 09:15 bar
+    # looked like a fresh crossing, a day late.
+    closes = [100.0] * 20 + [99.0] * 54                                   # base high ~100.5; 15:20 closes below
+    history = make_bars(closes, volumes=[100_000] * 74, start=ist(2026, 9, 24, 9, 15))
+    alpha = engine.AlphaEngine(base_bars=20)
+
+    async def run(backfill):
+        a = engine.LiveTickAdapter({"SWIGGY": history.copy()}, alpha, asyncio.Queue(), asyncio.get_running_loop(),
+                                   started_at=ist(2026, 9, 25, 9, 0), backfill=backfill)
+        a.on_tick(tick(103.0, 900_000, ist(2026, 9, 25, 9, 15, 5)))
+        a.on_tick(tick(103.1, 10, ist(2026, 9, 25, 9, 20, 1)))
+        await asyncio.sleep(0.05)
+        return a.oms_queue.qsize()
+
+    async def crossed_at_1525(sym, start, end):
+        return make_bars([103.0], volumes=[900_000], start=ist(2026, 9, 24, 15, 25))
+
+    assert asyncio.run(run(crossed_at_1525)) == 0
+
+
+# ---------------------------------------------------------------- round 7: the 30 s rule, suspends, zeroed stamps
+def stamped(price, cum, stamp, ahead):
+    """A Kite print whose exchange stamp leads its receive time by ``ahead`` seconds."""
+    t = cum_tick(price, cum, stamp)
+    t.received = stamp - timedelta(seconds=ahead)
+    return t
+
+
+def test_a_print_dropped_as_far_ahead_blinds_its_bar_and_the_counter():
+    # A host ~30.4 s behind: whole-second stamps put some prints just over the 30 s limit and the rest under
+    # it. v1.6 kept the 10:00 bar built from the prints that got through, and credited the dropped print's
+    # shares to the 10:05 bar.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 1_000_000, ist(2026, 9, 25, 10, 0, 5), 29.8))
+    a.on_tick(stamped(101.0, 1_100_000, ist(2026, 9, 25, 10, 2), 29.9))
+    a.on_tick(stamped(100.2, 1_400_000, ist(2026, 9, 25, 10, 4, 58), 30.2))  # just over the limit: dropped
+    assert a.dropped_ticks == 1 and a.current_bars["SWIGGY"]["partial"] is True
+    a.on_tick(stamped(100.3, 1_410_000, ist(2026, 9, 25, 10, 5, 1), 29.7))
+    a.on_tick(stamped(100.4, 1_420_000, ist(2026, 9, 25, 10, 6), 29.7))
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in a.market_state["SWIGGY"].index
+    assert a.current_bars["SWIGGY"]["Volume"] == 10_000 and a.current_bars["SWIGGY"]["partial"] is True
+
+
+def test_a_late_print_that_slips_past_the_rule_is_not_credited_with_the_day():
+    # Host 35 s behind: every print is dropped until one arrives 6 s late and gets through. Nothing had been
+    # accepted today, so v1.6 counted the whole day's counter into that one bar: a fake 70x RVOL.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    for second, cum in [(5, 7_000_000), (30, 7_020_000), (55, 7_040_000)]:
+        a.on_tick(stamped(100.5, cum, ist(2026, 9, 25, 10, 0, second), 35.0))
+    a.on_tick(stamped(100.9, 7_055_000, ist(2026, 9, 25, 10, 1), 29.0))
+    assert a.dropped_ticks == 3 and "SWIGGY" not in a.current_bars
+
+
+def test_the_steady_clock_keeps_counting_through_a_suspend(monkeypatch):
+    # CLOCK_MONOTONIC stops while the host is suspended: after a laptop sleep, v1.6's live clock stayed
+    # behind by the sleep, every tick was dropped as far ahead and the run went on trading nothing. A host
+    # that never slept cannot tell the clocks apart, so the suspend is simulated. Elsewhere the fallback is
+    # time.monotonic, whose missed time the router adds to signal ages (tested separately).
+    if not hasattr(time, "CLOCK_BOOTTIME"):
+        assert engine._uptime is time.monotonic
+        return
+    slept, real = [0.0], time.clock_gettime
+    monkeypatch.setattr(time, "clock_gettime",
+                        lambda which: real(which) + (slept[0] if which == time.CLOCK_BOOTTIME else 0.0))
+    clock = engine.steady_clock()
+    before = clock()
+    slept[0] = 3600.0                                                     # an hour asleep
+    assert (clock() - before).total_seconds() >= 3600
+
+
+def test_a_run_whose_every_tick_is_far_ahead_stops_instead_of_running_blind():
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    for second in range(0, 21, 2):                                        # 20 s of prints, all 40 s ahead
+        a.on_tick(stamped(100.0, 1_000_000 + second, ist(2026, 9, 25, 10, 1, second), 40.0))
+    assert a.blind_for == 20.0
+    with pytest.raises(RuntimeError, match="stamped more than 30s ahead of this run's clock"):
+        asyncio.run(asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 2))
+
+
+def test_one_corrupt_stamp_does_not_stop_the_run(monkeypatch):
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 28, 9, 0))
+    a.on_tick(stamped(100.0, 1_000, ist(2026, 9, 28, 10, 50), 600.0))     # corrupt: dropped
+    a.on_tick(stamped(100.0, 1_100, ist(2026, 9, 28, 10, 50, 30), 0.3))   # believable again
+    a.on_tick(stamped(100.0, 1_200, ist(2026, 9, 28, 11, 0, 50), 600.0))  # another corrupt one, 20 s later
+    a.note_feed_alive(at=SessionClock.FIXED)
+
+    async def watch_briefly():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 0.1)
+
+    asyncio.run(watch_briefly())
+
+
+def test_a_zeroed_stamp_is_bucketed_in_feed_time(monkeypatch):
+    # The host runs 20 s fast. v1.6 bucketed a zeroed-stamp print by the raw host clock, so a print sent at
+    # 10:04:40 closed the 10:00 bar 20 s early and its last prints were dropped as late.
+    monkeypatch.setattr(engine, "datetime", WallClock)
+    WallClock.FIXED = ist(2026, 9, 25, 10, 5, 0, 300000)                 # true 10:04:40
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               token_map={1234: "SWIGGY"})
+    a.note_feed_lag(WallClock.FIXED, 20.3)
+    t = a._normalize({"instrument_token": 1234, "last_price": 100.0, "volume_traded": 10,
+                      "exchange_timestamp": datetime.fromtimestamp(0)})  # noqa: DTZ006 (as KiteTicker)
+    assert engine.bar_floor(t.timestamp) == ist(2026, 9, 25, 10, 0)
+
+
+def test_with_the_host_behind_a_first_print_after_the_first_bucket_is_blind():
+    # Pins the first-print rule itself (in exchange time): a connect at exchange 09:15:10, stamped 09:14:50 by
+    # a host 20 s behind, did not watch the open, so the day's counter cannot all belong to the 09:20 bar.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 14, 50))
+    a.on_tick(stamped(104.0, 420_000, ist(2026, 9, 25, 9, 22), 19.7))
+    a.on_tick(stamped(104.5, 421_000, ist(2026, 9, 25, 9, 25, 1), 19.7))
+    assert pd.Timestamp(ist(2026, 9, 25, 9, 20)) not in a.market_state["SWIGGY"].index
+
+
+def test_a_tick_handled_after_the_feed_went_down_is_not_a_crash():
+    # on_close's mark_feed_down is queued behind ticks already received; judging such a tick's watch start
+    # from "down" (datetime.max) must not overflow.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 0))
+    a.mark_feed_down()
+    a.on_tick(stamped(101.0, 5_000, ist(2026, 9, 25, 10, 0, 30), 19.7))
+    assert "SWIGGY" not in a.current_bars or a.current_bars["SWIGGY"]["partial"] is True
+
+
+# ---------------------------------------------------------------- round 8: edges of the 30 s rule
+def test_a_host_straddling_the_30s_limit_stops_instead_of_discarding_every_bar():
+    # Whole-second stamps put a host ~30.3 s behind on both sides of the limit. v1.7 discarded every bar that
+    # held a dropped print while the prints that passed reset the blind run: a session of no bars, no stop.
+    now = ist(2026, 9, 25, 10, 4, 20)
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), clock=lambda: now)
+    for i, ahead in enumerate([29.8, 30.2, 29.9, 30.1, 29.7]):
+        a.on_tick(stamped(100.0, 1_000_000 + 1_000 * i, ist(2026, 9, 25, 10, 4, 5 * i), ahead))
+    assert a.blind_for == 0.0 and a.dropped_ticks == 2
+    with pytest.raises(RuntimeError, match="within 1.5s of the 30s limit"):
+        asyncio.run(asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 2))
+
+
+def test_a_host_just_inside_the_limit_is_not_stopped_by_one_corrupt_stamp(monkeypatch):
+    # Only drops just over the limit mean the stamps straddle it; a far-off corrupt stamp does not.
+    monkeypatch.setattr(engine, "datetime", SessionClock)
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 28, 9, 0))
+    for second in (0, 10, 20):
+        a.on_tick(stamped(100.0, 1_000 + second, ist(2026, 9, 28, 10, 59, second), 29.5))   # 29.5 s behind: fine
+    a.on_tick(stamped(100.0, 2_000, ist(2026, 9, 28, 11, 9, 30), 600.0))                    # one corrupt stamp
+    a.note_feed_alive(at=SessionClock.FIXED)
+
+    async def watch_briefly():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 0.1)
+
+    asyncio.run(watch_briefly())
+
+
+def test_on_a_clock_that_misses_a_suspend_a_signal_is_aged_by_the_time_it_missed():
+    # Where the monotonic clock stops during a suspend (not Linux), v1.7's router judged a 20-minute-old signal
+    # on the frozen clock as 1 s old and traded it before the watchdog stopped the run.
+    wall, mono = [ist(2026, 9, 28, 9, 25, 1)], [0.0]
+    clock = engine.steady_clock(wall=lambda: wall[0], monotonic=lambda: mono[0], counts_suspend=False)
+    ticker = types.SimpleNamespace(clock=clock, clock_skew=0.0)
+    r = engine.ExecutionRouter(asyncio.Queue(), risk_per_trade=15_000.0, gateway=engine.PaperGateway(latency=0),
+                               clock=engine.exchange_clock(lambda: ticker))
+    signal = engine.Signal("SWIGGY", 289.83, 286.2, 300.72, "IPO_BASE_BREAKOUT", ist(2026, 9, 28, 9, 20))
+    assert r.signal_problem(signal) is None                              # 1 s after its bar closed
+    wall[0] += timedelta(seconds=1200)                                    # asleep: only the wall clock moved
+    assert "it is stale" in r.signal_problem(signal)
+
+
+def test_on_a_clock_that_counts_a_suspend_the_wall_clock_is_never_consulted():
+    wall, mono = [ist(2026, 9, 28, 9, 25, 1)], [0.0]
+    clock = engine.steady_clock(wall=lambda: wall[0], monotonic=lambda: mono[0])
+    wall[0] += timedelta(seconds=1200)                                    # an NTP step, not a suspend
+    assert getattr(clock, "wall_gain", lambda: 0.0)() == 0.0              # only a clock that misses suspends asks
+    if hasattr(time, "CLOCK_BOOTTIME"):
+        assert getattr(engine.steady_clock(), "wall_gain", lambda: 0.0)() == 0.0
+
+
+def test_a_corrupt_stamp_before_the_open_does_not_cost_the_opening_bar():
+    # Off-session prints never move the counter, yet v1.7 re-baselined it for a pre-open drop, so the day's
+    # first print took the blind path and the 09:15 bar (auction volume included) was discarded.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 8, 50))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 8, 50))
+    a.on_tick(stamped(100.0, 900_000, ist(2026, 9, 25, 9, 10), 600.0))   # received 09:00: dropped
+    a.on_tick(stamped(100.5, 950_000, ist(2026, 9, 25, 9, 15, 5), 0.3))
+    a.on_tick(stamped(100.6, 951_000, ist(2026, 9, 25, 9, 20, 1), 0.3))
+    assert a.market_state["SWIGGY"].loc[pd.Timestamp(ist(2026, 9, 25, 9, 15)), "Volume"] == 950_000
+
+
+@pytest.mark.parametrize("corrupt_first", [True, False])
+def test_a_zeroed_packet_is_never_adopted_as_a_blind_baseline(corrupt_first):
+    # A zero high-water mark let a zeroed packet become the baseline after a late join (or a far-ahead drop),
+    # and the next print was credited with the whole day: a fake 42x RVOL.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 11, 0))                       # a late join
+    if corrupt_first:
+        a.on_tick(stamped(100.0, 4_200_000, ist(2026, 9, 25, 11, 1), 600.0))
+    a.on_tick(stamped(100.0, 0, ist(2026, 9, 25, 11, 4, 59), 0.3))       # a zeroed packet
+    a.on_tick(stamped(100.2, 4_203_000, ist(2026, 9, 25, 11, 5, 1), 0.3))
+    a.on_tick(stamped(100.3, 4_204_000, ist(2026, 9, 25, 11, 10, 1), 0.3))
+    assert pd.Timestamp(ist(2026, 9, 25, 11, 5)) not in a.market_state["SWIGGY"].index
+
+
+def test_a_host_just_past_the_limit_still_loses_the_opening_bar_whose_first_print_was_dropped():
+    # A host 30.4 s behind receives the 09:15:00 print at 09:14:29.6 by its own clock: dropped. The bar it began
+    # must not be kept from the prints that got through.
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 8, 50))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 8, 50))
+    a.on_tick(stamped(99.0, 900_000, ist(2026, 9, 25, 9, 15), 30.4))      # the opening print: dropped
+    a.on_tick(stamped(101.0, 950_000, ist(2026, 9, 25, 9, 15, 5), 29.8))
+    a.on_tick(stamped(101.2, 951_000, ist(2026, 9, 25, 9, 20, 1), 29.8))
+    assert pd.Timestamp(ist(2026, 9, 25, 9, 15)) not in a.market_state["SWIGGY"].index
+
+
+def test_a_corrupt_stamp_dated_another_day_does_not_credit_the_day_to_one_bar():
+    # A corrupt stamp can carry any date, so the counter is re-baselined under the day the print was received.
+    # Keyed to the stamp's date, the next genuine print looked like the day's first while the feed had watched
+    # since the open, and one bar was credited with the whole day's counter (a fake 70x RVOL).
+    a = adapter(history=session_history(24), started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 7_000_000, ist(2026, 9, 25, 10, 0, 5), 0.3))
+    a.on_tick(stamped(100.1, 7_000_500, ist(2026, 9, 25, 10, 2), 0.3))
+    corrupt = stamped(100.0, 7_001_000, ist(2026, 9, 26, 10, 0, 30), 0.0)
+    corrupt.received = ist(2026, 9, 25, 10, 0, 30)                        # stamped tomorrow, received today
+    a.on_tick(corrupt)
+    for minute, cum in [(6, 7_005_000), (7, 7_010_000), (11, 7_011_000)]:
+        a.on_tick(stamped(100.2, cum, ist(2026, 9, 25, 10, minute), 0.3))
+    today = a.market_state["SWIGGY"][a.market_state["SWIGGY"].index >= pd.Timestamp(ist(2026, 9, 25, 9, 15))]
+    assert (today["Volume"].max() if len(today) else 0) <= 100_000
+    assert all(bar["partial"] or bar["Volume"] <= 100_000 for bar in a.current_bars.values())
+
+
+def test_a_zeroed_stamp_cannot_close_a_bar_when_latency_has_just_risen(monkeypatch):
+    # Latency 0.3 s, then 1.5 s at the bucket boundary: a zeroed print stamped only by the lag of the last
+    # minute landed in the new bucket, closed the 10:00 bar at once and its last genuine print was dropped.
+    monkeypatch.setattr(engine, "datetime", WallClock)
+
+    def receive(a, packet, at):
+        WallClock.FIXED = at
+        a.broker_on_ticks(None, [packet])
+
+    async def scenario():
+        a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(),
+                                   asyncio.get_running_loop(), token_map={1234: "SWIGGY"},
+                                   started_at=ist(2026, 9, 25, 9, 0))
+        receive(a, kite_packet(1_000, ist(2026, 9, 25, 9, 59, 50)), ist(2026, 9, 25, 9, 59, 50, 300000))
+        receive(a, kite_packet(21_000, ist(2026, 9, 25, 10, 1), 100.0), ist(2026, 9, 25, 10, 1, 0, 300000))
+        zeroed = {"instrument_token": 1234, "last_price": 100.0, "volume_traded": 21_100,
+                  "exchange_timestamp": datetime.fromtimestamp(0)}  # noqa: DTZ006 (as KiteTicker)
+        receive(a, zeroed, ist(2026, 9, 25, 10, 5, 1))                    # sent 10:04:59.5, 1.5 s late
+        receive(a, kite_packet(31_100, ist(2026, 9, 25, 10, 4, 59), 95.0), ist(2026, 9, 25, 10, 5, 1, 100000))
+        await asyncio.sleep(0)
+        while not a.tick_queue.empty():
+            a.on_tick(a.tick_queue.get_nowait())
+        return a
+
+    a = asyncio.run(scenario())
+    bar = a.current_bars["SWIGGY"]
+    assert bar["timestamp"] == ist(2026, 9, 25, 10, 0) and bar["Low"] == 95.0 and a.dropped_ticks == 0
+
+
+def test_prints_every_two_seconds_a_third_of_them_just_over_the_limit_stop_the_run():
+    # R8-TD-1's scenario: v1.7 reset the run of drops at every print that passed, so it never reached 15 s.
+    now = [ist(2026, 9, 25, 10, 0)]
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 25, 9, 0), clock=lambda: now[0])
+    for i in range(30):
+        ahead = 30.2 if i % 3 == 2 else 29.8
+        stamp = ist(2026, 9, 25, 10, 0) + timedelta(seconds=2 * i)
+        a.on_tick(stamped(100.0, 1_000_000 + 100 * i, stamp, ahead))
+        now[0] = stamp - timedelta(seconds=ahead)
+    with pytest.raises(RuntimeError, match="within 1.5s of the 30s limit"):
+        asyncio.run(asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 2))
+
+
+# ---------------------------------------------------------------- round 9: zeroed stamps and untraded names
+def zeroed(cum, price=100.0, last_trade=None):
+    """A Kite full-mode packet whose exchange time is zeroed (KiteTicker parses it as 1970, host-local)."""
+    packet = {"instrument_token": 1234, "last_price": price, "volume_traded": cum,
+              "exchange_timestamp": datetime.fromtimestamp(0)}  # noqa: DTZ006 (as KiteTicker)
+    if last_trade is not None:
+        packet["last_trade_time"] = last_trade.astimezone().replace(tzinfo=None)
+    return packet
+
+
+def blinded(a, bucket, sym="SWIGGY"):
+    """Whether ``bucket`` is blind (v1.11 blinds a span of buckets; earlier versions a single one)."""
+    return a._blinded(sym, bucket) if hasattr(a, "_blinded") else a._blind_bucket.get(sym) == bucket
+
+
+def clocked(now, history=None, started_at=None, loop=None, **kwargs):
+    """An adapter whose feed clock reads ``now[0]``."""
+    return engine.LiveTickAdapter({"SWIGGY": session_history(24) if history is None else history},
+                                  engine.AlphaEngine(), asyncio.Queue(), loop, token_map={1234: "SWIGGY"},
+                                  started_at=started_at or ist(2026, 9, 25, 9, 0), clock=lambda: now[0], **kwargs)
+
+
+def test_a_zeroed_first_print_after_a_join_blinds_its_own_bucket_not_the_previous_one():
+    # v1.8 filed every zeroed print 2 s back: received at 10:05:01, this re-baselining print marked 10:00 blind,
+    # so the 10:05 bar, whose head (a 200k block at 10:05:00) went into the baseline, was kept short.
+    now = [ist(2026, 9, 25, 10, 4, 57)]
+    a = clocked(now)
+    a.mark_feed_reset(at=now[0])                                          # a late join (or a reconnect)
+    now[0] = ist(2026, 9, 25, 10, 5, 1)
+    a.on_tick(a._normalize(zeroed(1_200_000, 104.0)))
+    assert blinded(a, ist(2026, 9, 25, 10, 5)) and not blinded(a, ist(2026, 9, 25, 10, 0))
+    for price, cum, stamp in [(103.0, 1_230_000, ist(2026, 9, 25, 10, 6)), (102.8, 1_260_000, ist(2026, 9, 25, 10, 9)),
+                              (102.9, 1_270_000, ist(2026, 9, 25, 10, 10, 1))]:
+        a.on_tick(stamped(price, cum, stamp, 0.3))
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 5)) not in a.market_state["SWIGGY"].index
+
+
+def test_a_zeroed_trade_with_no_bar_open_makes_no_bar_for_the_bucket_before_it():
+    # An illiquid name: nothing traded 10:00-10:05. v1.8 filed a zeroed trade received at 10:05:01 at 10:04:59
+    # and built, kept and evaluated a 10:00 bar the broker does not have.
+    now = [ist(2026, 9, 25, 9, 55, 10)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 10_000, ist(2026, 9, 25, 9, 55, 10), 0.3))
+    a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 9, 57), 0.3))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 0, 3))                          # closes 09:55
+    now[0] = ist(2026, 9, 25, 10, 5, 1)
+    a.on_tick(a._normalize(zeroed(16_000, 101.0)))
+    today = a.market_state["SWIGGY"][a.market_state["SWIGGY"].index >= pd.Timestamp(ist(2026, 9, 25))]
+    assert today.index.tolist() == [pd.Timestamp(ist(2026, 9, 25, 9, 55))]
+    bar = a.current_bars["SWIGGY"]
+    assert bar["timestamp"] == ist(2026, 9, 25, 10, 5) and bar["Volume"] == 3_000
+
+
+def test_a_zeroed_opening_print_is_not_dropped_as_pre_open():
+    # v1.8 filed a zeroed print received at 09:15:01 at 09:14:59 and dropped it: the 09:15 bar lost its Open
+    # and High, which feed the ATR (and so the stop and the size).
+    now = [ist(2026, 9, 25, 9, 15, 1)]
+    a = clocked(now, started_at=ist(2026, 9, 25, 9, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(a._normalize(zeroed(500_000, 108.0)))
+    a.on_tick(stamped(106.0, 520_000, ist(2026, 9, 25, 9, 16), 0.3))
+    bar = a.current_bars["SWIGGY"]
+    assert (bar["Open"], bar["High"], bar["Volume"], a.dropped_ticks) == (108.0, 108.0, 520_000, 0)
+
+
+def test_a_zeroed_print_just_after_a_bar_opened_joins_it():
+    # v1.8 filed it 2 s back, in the bar just closed, and dropped it as out of order: its price was lost.
+    now = [ist(2026, 9, 25, 10, 5, 1, 300000)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 10_000, ist(2026, 9, 25, 10, 4), -0.3))      # 0.3 s of latency
+    a.on_tick(stamped(100.5, 11_000, ist(2026, 9, 25, 10, 5, 1), -0.3))   # opens 10:05
+    now[0] = ist(2026, 9, 25, 10, 5, 1, 500000)
+    a.on_tick(a._normalize(zeroed(12_000, 107.0)))
+    bar = a.current_bars["SWIGGY"]
+    assert (bar["timestamp"], bar["High"], bar["Volume"], a.dropped_ticks) == (ist(2026, 9, 25, 10, 5), 107.0, 2_000, 0)
+
+
+def full(cum, stamp, price, last_trade):
+    """A Kite full-mode packet, received 0.3 s after its exchange stamp."""
+    packet = dict(kite_packet(cum, stamp, price), last_trade_time=last_trade.astimezone().replace(tzinfo=None))
+    return packet, stamp + timedelta(milliseconds=300)
+
+
+def test_a_name_not_traded_today_keeps_its_first_traded_bar_after_a_join():
+    # v1.8 never adopted a zero counter after a join (or a reconnect or a far-ahead drop), so an illiquid name's
+    # first trade of the day re-baselined its bucket: the bar was discarded, and its breakout missed. Its packets
+    # carry the proof: a zero day volume whose last trade is yesterday's.
+    history = pd.concat([make_bars([100.0] * 75, start=ist(2026, 9, d, 9, 15)) for d in (21, 22, 23, 24)])
+    broker = make_bars([101.6], volumes=[340_000], start=ist(2026, 9, 25, 10, 5))
+    yesterday = ist(2026, 9, 24, 15, 29, 58)
+
+    async def backfill(sym, start, end):
+        return broker[(broker.index >= pd.Timestamp(start)) & (broker.index < pd.Timestamp(end))]
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 10, 0)]
+        a = clocked(now, history=history, started_at=now[0], loop=asyncio.get_running_loop(), backfill=backfill)
+        a.mark_feed_reset(at=now[0])
+        for price, cum, stamp, last in [(100.0, 0, ist(2026, 9, 25, 10, 0, 5), yesterday),
+                                        (100.0, 0, ist(2026, 9, 25, 10, 3), yesterday),
+                                        (101.5, 300_000, ist(2026, 9, 25, 10, 6), ist(2026, 9, 25, 10, 6)),
+                                        (101.8, 320_000, ist(2026, 9, 25, 10, 7), ist(2026, 9, 25, 10, 7)),
+                                        (101.6, 340_000, ist(2026, 9, 25, 10, 9, 30), ist(2026, 9, 25, 10, 9, 30)),
+                                        (101.6, 341_000, ist(2026, 9, 25, 10, 10, 1), ist(2026, 9, 25, 10, 10, 1))]:
+            packet, now[0] = full(cum, stamp, price, last)
+            t = a._normalize(packet)
+            t.received = now[0]
+            a.on_tick(t)
+            await asyncio.sleep(0)
+            await asyncio.gather(*a._backfills)
+        return a
+
+    a = asyncio.run(scenario())
+    bar = a.market_state["SWIGGY"].loc[pd.Timestamp(ist(2026, 9, 25, 10, 5))]
+    assert (bar["Open"], bar["High"], bar["Volume"]) == (101.5, 101.8, 340_000)   # v1.8: the broker's candle
+    signal = a.oms_queue.get_nowait()
+    assert signal.bar_time == ist(2026, 9, 25, 10, 5) and signal.entry_price == 101.6
+
+
+@pytest.mark.parametrize("last_trade", [ist(2026, 9, 24, 15, 29, 58), ist(2026, 9, 25, 10, 58), None])
+def test_a_zero_counter_is_adopted_only_when_nothing_says_the_name_traded_today(last_trade):
+    # R8's late join, on a name whose history (synced up to now) holds today's bars: however its zeroed packet
+    # dates its last trade (yesterday: a stale snapshot; today; or not at all), the zero is no baseline, and the
+    # next print is not credited with the whole day (a fake 42x RVOL).
+    history = pd.concat([session_history(24), make_bars([100.0] * 20, start=ist(2026, 9, 25, 9, 15))])
+    now = [ist(2026, 9, 25, 11, 0)]
+    a = clocked(now, history=history)
+    a.mark_feed_reset(at=now[0])
+    packet, _ = full(0, ist(2026, 9, 25, 11, 4, 59), 100.0, last_trade or ist(2026, 9, 25, 11, 4, 59))
+    if last_trade is None:
+        del packet["last_trade_time"]
+    for pkt in [packet, kite_packet(4_203_000, ist(2026, 9, 25, 11, 5, 1), 100.2),
+                kite_packet(4_204_000, ist(2026, 9, 25, 11, 10, 1), 100.3)]:
+        a.on_tick(a._normalize(pkt))
+    assert pd.Timestamp(ist(2026, 9, 25, 11, 5)) not in a.market_state["SWIGGY"].index
+
+
+def test_only_a_zero_counter_with_an_earlier_days_last_trade_marks_a_name_untraded():
+    a = clocked([ist(2026, 9, 25, 10, 0)])
+    stamp, yesterday = ist(2026, 9, 25, 10, 0, 5), ist(2026, 9, 24, 15, 29, 58)
+    assert a._normalize(full(0, stamp, 100.0, yesterday)[0]).untraded_today is True
+    assert a._normalize(full(10, stamp, 100.0, yesterday)[0]).untraded_today is False
+    assert a._normalize(full(0, stamp, 100.0, ist(2026, 9, 25, 9, 7))[0]).untraded_today is False   # the auction
+    assert a._normalize(dict(full(0, stamp, 100.0, yesterday)[0],
+                             last_trade_time=datetime.fromtimestamp(0))).untraded_today is False  # noqa: DTZ006
+    assert a._normalize(kite_packet(0, stamp)).untraded_today is False
+
+
+# ---------------------------------------------------------------- round 9: the straddle stop's guards, suspend detection
+def watch_briefly(a):
+    """The feed watchdog must still be running after 0.1 s."""
+    async def watch():
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(engine._watch_feed(asyncio.Event(), a, stall_after=15, check_every=0.01), 0.1)
+
+    asyncio.run(watch())
+
+
+def test_one_stamp_just_over_the_limit_does_not_stop_a_synced_host():
+    # The straddle stop needs the host itself near the limit: on a synced host a lone corrupt stamp 31 s ahead
+    # costs its bar, not the run.
+    now = ist(2026, 9, 28, 10, 0, 30)
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 28, 9, 0), clock=lambda: now)
+    for second in (0, 10, 20):
+        a.on_tick(stamped(100.0, 1_000_000 + 1_000 * second, ist(2026, 9, 28, 10, 0, second), -0.3))
+    a.on_tick(stamped(100.0, 1_100_000, ist(2026, 9, 28, 10, 0, 56), 31.0))   # just over the limit
+    assert a.dropped_ticks == 1 and a._ahead_last is not None and a.clock_skew == 0.0
+    a.note_feed_alive(at=now)
+    watch_briefly(a)
+
+
+def test_a_just_over_drop_an_hour_ago_does_not_stop_a_host_that_drifted_close_to_the_limit():
+    # The straddle stop needs a recent drop: a host now 29 s behind that drops nothing is not stopped by one
+    # just-over drop an hour earlier.
+    now = [ist(2026, 9, 28, 10, 0)]
+    a = engine.LiveTickAdapter({"SWIGGY": session_history(24)}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               started_at=ist(2026, 9, 28, 9, 0), clock=lambda: now[0])
+    a.on_tick(stamped(100.0, 1_000_000, now[0] + timedelta(seconds=30.5), 30.5))
+    assert a._ahead_last == now[0]
+    now[0] = ist(2026, 9, 28, 11, 0)
+    for i in range(6):
+        received = now[0] - timedelta(seconds=50 - 10 * i)
+        a.on_tick(stamped(100.0, 1_000_100 + 100 * i, received + timedelta(seconds=29.0), 29.0))
+    assert a.dropped_ticks == 1 and a.clock_skew == -29.0
+    a.note_feed_alive(at=now[0])
+    watch_briefly(a)
+
+
+def test_the_default_steady_clock_consults_the_wall_clock_where_the_monotonic_clock_misses_a_suspend():
+    # main() builds steady_clock() with its defaults: off Linux (no CLOCK_BOOTTIME) that is time.monotonic, which
+    # stops during a suspend, and only the wall clock can say how long the host slept.
+    wall = [ist(2026, 9, 28, 9, 25, 1)]
+    clock = engine.steady_clock(wall=lambda: wall[0], monotonic=time.monotonic)
+    wall[0] += timedelta(seconds=1200)
+    assert clock.wall_gain() >= 1199
+    assert engine.steady_clock.__defaults__[1] is engine._uptime        # the platform's clock, as main() gets it
+
+
+# ---------------------------------------------------------------- round 10: feed time errs early; bars it opens late
+def illiquid_after_0955(now, **kwargs):
+    """An illiquid name watched since 09:00: a 09:55 bar (closed by the bar clock), then nothing until 10:05."""
+    history = pd.concat([session_history(24), make_bars([100.0] * 8, start=ist(2026, 9, 25, 9, 15))])  # to 09:50
+    a = clocked(now, history=history, **kwargs)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 10_000, ist(2026, 9, 25, 9, 55, 10), -0.3))
+    a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 9, 57), -0.3))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 0, 3))                          # closes 09:55
+    a.note_feed_lag(ist(2026, 9, 25, 10, 4, 40), 0.8)                     # a late quote: the lag is 0.8
+    return a
+
+
+def test_a_bar_an_unstamped_print_opened_is_given_back_to_the_bucket_its_late_neighbour_proves():
+    # Latency rose at 10:05: B (no exchange time, traded 10:04:59.6) is filed at feed time 10:05:00.3 and, with no
+    # bar open, opened a 10:05 bar. v1.9 then dropped A (stamped 10:04:59, received after B) as out of order and
+    # credited 10:00's shares to 10:05, which the back-fill of 10:00 counted again: a fake RVOL breakout.
+    now = [ist(2026, 9, 25, 10, 5, 1, 100000)]
+    a = illiquid_after_0955(now)
+    a.on_tick(a._normalize(zeroed(15_000, 100.3)))                        # B: 2,000 shares
+    a.on_tick(stamped(100.4, 16_000, ist(2026, 9, 25, 10, 4, 59), -2.3))  # A: 1,000 shares, 2.3 s late
+    a.on_tick(stamped(100.9, 17_500, ist(2026, 9, 25, 10, 6, 35), -0.3))  # C: 1,500 shares, the 10:05 bucket
+    assert a.dropped_ticks == 0
+    bars = a.market_state["SWIGGY"]
+    assert bars.loc[pd.Timestamp(ist(2026, 9, 25, 10, 0)), "Volume"] == 3_000
+    assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 5) and a.current_bars["SWIGGY"]["Volume"] == 1_500
+
+
+@pytest.mark.parametrize("broker_traded_before", [True, False])
+def test_a_bar_an_unstamped_print_opened_just_past_a_boundary_is_not_evaluated_if_the_bucket_before_traded(
+        broker_traded_before):
+    # With no stamped print to settle it, the bar such a print opened may hold the bucket before's shares, which the
+    # back-fill counts again: it is not evaluated if the broker says that bucket traded (control: it did not).
+    alpha = RecordingAlpha()
+    broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0)) if broker_traded_before \
+        else engine.empty_bars()
+
+    async def backfill(sym, start, end):
+        return broker[(broker.index >= pd.Timestamp(start)) & (broker.index < pd.Timestamp(end))]
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 10, 5, 1, 100000)]
+        a = illiquid_after_0955(now, loop=asyncio.get_running_loop(), backfill=backfill)
+        a.alpha = alpha
+        a.on_tick(a._normalize(zeroed(15_000, 100.3)))                    # opens 10:05, provisionally
+        a.on_tick(stamped(100.9, 16_500, ist(2026, 9, 25, 10, 6, 35), -0.3))
+        a.on_tick(stamped(100.9, 16_600, ist(2026, 9, 25, 10, 10, 1), -0.3))   # closes 10:05 across the 10:00 hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    asyncio.run(scenario())
+    evaluated = [idx for _, idx in alpha.evaluated]
+    assert (pd.Timestamp(ist(2026, 9, 25, 10, 5)) in evaluated) is not broker_traded_before
+
+
+def test_a_rebaselining_unstamped_print_blinds_the_latest_bucket_it_can_belong_to():
+    # Feed time errs early (the lag includes the stamps' truncation): received at 10:05:00.9 with a lag of 1.2 s, this
+    # print is filed at 10:04:59.7, but may have traded at 10:05:00.x. v1.9 blinded 10:00 and kept 10:05 short.
+    now = [ist(2026, 9, 25, 10, 4, 31, 200000)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(103.0, 1_000_000, ist(2026, 9, 25, 10, 4, 30), -1.2))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 4, 58))                   # a reconnect
+    now[0] = ist(2026, 9, 25, 10, 5, 0, 900000)
+    a.on_tick(a._normalize(zeroed(1_200_000, 104.0)))
+    assert blinded(a, ist(2026, 9, 25, 10, 5))
+
+
+def test_an_unstamped_print_received_after_a_bar_opened_joins_it_even_when_feed_time_says_earlier():
+    # A stamped 10:05:00 print opened the bar 0.3 s late; a zeroed trade received 0.5 s after it has feed time
+    # 10:04:59.6 (the minute's lag is 1.2 s). v1.9 dropped it as out of order, losing its price.
+    now = [ist(2026, 9, 25, 10, 5, 0, 300000)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 10_000, ist(2026, 9, 25, 10, 4, 30), -1.2))
+    a.on_tick(stamped(100.5, 11_000, ist(2026, 9, 25, 10, 5), -0.3))       # opens 10:05
+    now[0] = ist(2026, 9, 25, 10, 5, 0, 800000)
+    a.on_tick(a._normalize(zeroed(12_000, 104.0)))
+    bar = a.current_bars["SWIGGY"]
+    assert (bar["timestamp"], bar["High"], bar["Volume"], a.dropped_ticks) == (ist(2026, 9, 25, 10, 5), 104.0, 2_000, 0)
+
+
+def test_an_unstamped_opening_print_is_not_dropped_on_a_lag_left_over_from_the_last_session():
+    # The lag is recomputed only when a sample arrives, and pre-open prints add none: a run spanning sessions kept
+    # yesterday's 1.2 s, filed the 09:15:00.8 opening print at 09:14:59.6 and dropped it as pre-open.
+    now = [ist(2026, 9, 25, 9, 15, 0, 800000)]
+    a = clocked(now, started_at=ist(2026, 9, 24, 15, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 24, 15, 0))
+    a.note_feed_lag(ist(2026, 9, 24, 15, 29, 31), 1.2)
+    a.on_tick(a._normalize(zeroed(500_000, 108.0)))
+    a.on_tick(stamped(106.0, 520_000, ist(2026, 9, 25, 9, 16), -0.3))
+    bar = a.current_bars["SWIGGY"]
+    assert (bar["timestamp"], bar["Open"], bar["High"], a.dropped_ticks) == (ist(2026, 9, 25, 9, 15), 108.0, 108.0, 0)
+
+
+def test_an_unstamped_print_is_judged_on_the_lag_of_every_print_received_before_it():
+    # The broker thread read the lag (0.3 s) before the loop processed a queued print that raised it to 4.5 s: v1.9's
+    # zeroed print missed the clamp, closed the 10:00 bar before the bar clock would, and the bar's tail was dropped.
+    now = [ist(2026, 9, 25, 10, 4, 50, 300000)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 10_000, ist(2026, 9, 25, 10, 4, 50), -0.3))    # opens 10:00; lag 0.3
+    late = stamped(99.0, 11_000, ist(2026, 9, 25, 10, 4, 59), -4.5)          # received 10:05:03.5, still queued
+    now[0] = ist(2026, 9, 25, 10, 5, 3, 550000)
+    unstamped = a._normalize(zeroed(12_000, 99.5))                           # normalized before `late` is handled
+    tail = stamped(95.0, 13_000, ist(2026, 9, 25, 10, 4, 59), -4.6)
+    for t in (late, unstamped, tail):
+        a.on_tick(t)
+    bar = a.current_bars["SWIGGY"]
+    assert (bar["timestamp"], bar["Low"], bar["Volume"], a.dropped_ticks) == (ist(2026, 9, 25, 10, 0), 95.0, 13_000, 0)
+
+
+def test_a_zeroed_rebaselining_print_joined_to_the_open_bar_blinds_the_bucket_of_its_feed_time():
+    # R9-LT-1's blind bucket, pinned: joined to the still-open 10:00 bar, the print's re-baseline swallowed the 10:05
+    # bucket's head, so 10:05 is blind (v1.8 blinded 10:00 and kept 10:05 short).
+    now = [ist(2026, 9, 25, 10, 1)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 1_000_000, ist(2026, 9, 25, 10, 1), -0.3))
+    a.on_tick(stamped(100.5, 1_000_500, ist(2026, 9, 25, 10, 4), -0.3))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 4, 58))                   # a reconnect
+    now[0] = ist(2026, 9, 25, 10, 5, 1)                                  # feed time 10:05:00.7: joins 10:00
+    a.on_tick(a._normalize(zeroed(1_200_000, 101.0)))
+    assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 0)
+    for price, cum, stamp in [(101.2, 1_210_000, ist(2026, 9, 25, 10, 6)), (101.3, 1_220_000, ist(2026, 9, 25, 10, 9)),
+                              (101.4, 1_221_000, ist(2026, 9, 25, 10, 10, 1))]:
+        a.on_tick(stamped(price, cum, stamp, -0.3))
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 5)) not in a.market_state["SWIGGY"].index
+
+
+def test_a_zeroed_print_past_the_grace_does_not_join_a_bar_the_bar_clock_has_not_closed_yet():
+    # R9-LT-1's 2 s bound, pinned: the bar clock can be late (it skips while ticks are queued), but a print 2.5 s past
+    # the bar's end belongs to the next bucket.
+    now = [ist(2026, 9, 25, 10, 1)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 1_000_000, ist(2026, 9, 25, 10, 1), -0.3))
+    a.on_tick(stamped(100.5, 1_010_000, ist(2026, 9, 25, 10, 4), -0.3))
+    now[0] = ist(2026, 9, 25, 10, 5, 2, 800000)                          # feed time 10:05:02.5
+    a.on_tick(a._normalize(zeroed(1_060_000, 104.0)))
+    bar = a.current_bars["SWIGGY"]
+    assert (bar["timestamp"], bar["High"], bar["Volume"]) == (ist(2026, 9, 25, 10, 5), 104.0, 50_000)
+    assert a.market_state["SWIGGY"].loc[pd.Timestamp(ist(2026, 9, 25, 10, 0)), "High"] == 100.5
+
+
+# ---------------------------------------------------------------- round 11: late drops, big latency rises, hosts behind
+def test_an_unstamped_trade_received_after_a_stamped_quote_closed_the_bar_is_not_dropped_as_late():
+    # A stamped quote of 10:05 closed the 10:00 bar; a zeroed trade received 0.3 s later has feed time 10:04:59.8.
+    # v1.10 dropped it as late: its shares rode into the 10:10 bar while the back-fill of 10:05 counted them again.
+    now = [ist(2026, 9, 25, 10, 1, 0, 300000)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 20_000, ist(2026, 9, 25, 10, 1), -0.3))       # opens 10:00
+    a.note_feed_lag(ist(2026, 9, 25, 10, 4, 40), 0.8)                     # the minute's lag: 0.8
+    a.on_tick(stamped(100.0, 20_000, ist(2026, 9, 25, 10, 5), -0.3))       # a quote of 10:05: closes 10:00
+    now[0] = ist(2026, 9, 25, 10, 5, 0, 600000)
+    a.on_tick(a._normalize(zeroed(120_000, 100.4)))                        # 100k traded in 10:05
+    a.on_tick(stamped(100.9, 121_000, ist(2026, 9, 25, 10, 11), -0.3))
+    assert a.dropped_ticks == 0
+    assert a.market_state["SWIGGY"].loc[pd.Timestamp(ist(2026, 9, 25, 10, 5)), "Volume"] == 100_000
+    assert a.current_bars["SWIGGY"]["Volume"] == 1_000
+
+
+def test_a_bar_an_unstamped_print_opened_long_after_a_boundary_is_still_not_evaluated_if_the_bucket_before_traded():
+    # A latency rise the feed never measured puts a trade from 10:04:59.6 at feed time 10:05:02.0, past the 2 s the
+    # reclaim waits for. v1.10 evaluated its bar, whose shares the back-fill of 10:00 counted again.
+    alpha = RecordingAlpha()
+    broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0))
+
+    async def backfill(sym, start, end):
+        return broker[(broker.index >= pd.Timestamp(start)) & (broker.index < pd.Timestamp(end))]
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 10, 5, 2, 800000)]                         # 3.2 s late; the lag says 0.8
+        a = illiquid_after_0955(now, loop=asyncio.get_running_loop(), backfill=backfill)
+        a.alpha = alpha
+        a.on_tick(a._normalize(zeroed(15_000, 100.3)))
+        assert a.current_bars["SWIGGY"]["provisional"] is False
+        a.on_tick(stamped(100.9, 16_500, ist(2026, 9, 25, 10, 6, 35), -0.3))
+        a.on_tick(stamped(100.9, 16_600, ist(2026, 9, 25, 10, 10, 1), -0.3))
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 5)) not in [idx for _, idx in alpha.evaluated]
+
+
+def test_a_stamp_of_its_own_bucket_received_first_proves_an_unstamped_prints_bar():
+    # A stamped quote of 11:05:00 (no trade) closed the 11:00 bar, which a reconnect had made partial; the unstamped
+    # trade received after it can only be 11:05's. v1.10 still skipped evaluating the 11:05 bar: a breakout missed.
+    alpha = RecordingAlpha()
+    history = pd.concat([session_history(24), make_bars([100.0] * 21, start=ist(2026, 9, 25, 9, 15))])  # to 10:55
+    broker = make_bars([100.2], volumes=[90_000], start=ist(2026, 9, 25, 11, 0))
+
+    async def backfill(sym, start, end):
+        return broker[(broker.index >= pd.Timestamp(start)) & (broker.index < pd.Timestamp(end))]
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 11, 0, 30, 300000)]
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=backfill)
+        a.alpha = alpha
+        a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+        a.on_tick(stamped(100.1, 50_000, ist(2026, 9, 25, 11, 0, 30), -0.3))
+        a.mark_feed_reset(at=ist(2026, 9, 25, 11, 2))                     # a reconnect: 11:00 is partial
+        for price, cum, stamp in [(100.2, 80_000, ist(2026, 9, 25, 11, 3)), (100.2, 90_000, ist(2026, 9, 25, 11, 4)),
+                                  (100.2, 90_000, ist(2026, 9, 25, 11, 5))]:  # the last one a quote: closes 11:00
+            a.on_tick(stamped(price, cum, stamp, -0.3))
+        now[0] = ist(2026, 9, 25, 11, 5, 1)
+        a.on_tick(a._normalize(zeroed(190_000, 100.9)))
+        assert a.current_bars["SWIGGY"]["ambiguous"] is False
+        a.on_tick(stamped(101.0, 380_000, ist(2026, 9, 25, 11, 8), -0.3))
+        a.on_tick(stamped(101.0, 381_000, ist(2026, 9, 25, 11, 10, 1), -0.3))   # closes 11:05 across the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 11, 5)) in [idx for _, idx in alpha.evaluated]
+
+
+def test_a_stamp_ahead_of_an_unstamped_prints_latest_time_proves_nothing():
+    # Control for the proof: a quote stamped 15 s ahead (the 30 s rule accepts it) must not settle the bucket of a
+    # print received before that time, or the late print of the bucket before is dropped and counted twice again.
+    now = [ist(2026, 9, 25, 10, 4, 50)]
+    a = illiquid_after_0955(now)
+    a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5, 5), 15.0))      # a quote, 15 s ahead
+    now[0] = ist(2026, 9, 25, 10, 5, 1, 100000)
+    a.on_tick(a._normalize(zeroed(15_000, 100.3)))                          # B
+    a.on_tick(stamped(100.4, 16_000, ist(2026, 9, 25, 10, 4, 59), -2.3))    # A: reclaims the bar for 10:00
+    a.on_tick(stamped(100.9, 17_500, ist(2026, 9, 25, 10, 6, 35), -0.3))
+    assert a.dropped_ticks == 0
+    assert a.market_state["SWIGGY"].loc[pd.Timestamp(ist(2026, 9, 25, 10, 0)), "Volume"] == 3_000
+
+
+def test_on_a_host_behind_the_exchange_a_rebaselining_print_still_blinds_the_bucket_it_can_belong_to():
+    # A host 1 s behind: lag samples are latency + truncation - 1 s, and one late packet has 0.9. v1.10 took the
+    # print's latest time from their median, which the latency hides the offset in: a print that traded at
+    # 10:05:00.3 blinded 10:00. The lowest sample bounds the offset.
+    now = [ist(2026, 9, 25, 10, 4, 20)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    for i, sample in enumerate([-0.7, -0.5, -0.2, 0.9]):
+        a.note_feed_lag(ist(2026, 9, 25, 10, 4, 20 + 5 * i), sample)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 4, 58))                     # a reconnect
+    now[0] = ist(2026, 9, 25, 10, 4, 59, 600000)                            # host clock; exchange 10:05:00.6
+    a.on_tick(a._normalize(zeroed(1_200_000, 104.0)))
+    assert blinded(a, ist(2026, 9, 25, 10, 5))
+
+
+def test_after_a_forward_stamp_a_rebaselining_print_still_blinds_the_bucket_it_traded_in():
+    # A print stamped 20 s ahead leaves a -20 s sample, which could also be a host 20 s behind: from v1.13 the print's
+    # latest time moves up to 21 s late and the next bucket is blinded too (back-filled). The bucket the print traded
+    # in must still be blinded, never kept short.
+    now = [ist(2026, 9, 25, 10, 4, 20)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    for i, sample in enumerate([-20.0, 0.5, 0.5]):
+        a.note_feed_lag(ist(2026, 9, 25, 10, 4, 20 + 5 * i), sample)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 4, 40))
+    now[0] = ist(2026, 9, 25, 10, 4, 45)
+    a.on_tick(a._normalize(zeroed(1_200_000, 104.0)))
+    assert blinded(a, ist(2026, 9, 25, 10, 0))
+
+
+# ---------------------------------------------------------------- round 11: every bucket a print can belong to; pins
+def test_a_rebaselining_unstamped_print_that_traded_before_the_boundary_blinds_that_bucket_too():
+    # A 300k block traded at 10:04:59.7 and reached us at 10:05:00.2 with a zeroed stamp, re-baselining the counter
+    # after a reconnect. v1.10 blinded only 10:05, so a late stamped 10:04:59 print opened a 10:00 bar that was kept
+    # with 500 shares of the ~300,500 traded in it.
+    now = [ist(2026, 9, 25, 9, 58, 0, 300000)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 1_000_000, ist(2026, 9, 25, 9, 58), -0.3))
+    a.note_feed_lag(ist(2026, 9, 25, 9, 59, 50), 0.9)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 59, 55))                    # a reconnect
+    now[0] = ist(2026, 9, 25, 10, 5, 0, 200000)
+    a.on_tick(a._normalize(zeroed(1_300_000, 101.0)))                     # feed time 10:04:59.3
+    assert blinded(a, ist(2026, 9, 25, 10, 0)) and blinded(a, ist(2026, 9, 25, 10, 5))
+    a.on_tick(stamped(101.1, 1_300_500, ist(2026, 9, 25, 10, 4, 59), -1.4))
+    a.on_tick(stamped(101.2, 1_301_000, ist(2026, 9, 25, 10, 6), -0.3))
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in a.market_state["SWIGGY"].index
+
+
+@pytest.mark.parametrize("behind", [2.0, 5.0])
+def test_on_a_host_well_behind_a_rebaselining_unstamped_print_still_blinds_the_bucket_it_can_belong_to(behind):
+    # R10's pin with the host behind: every lag sample then includes the offset, and v1.10's latest time was no
+    # later than feed time, so 10:00 was blinded and 10:05 (whose head went into the baseline) kept short.
+    now = [ist(2026, 9, 25, 10, 4, 31, 200000) - timedelta(seconds=behind)]
+    a = clocked(now)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(103.0, 1_000_000, ist(2026, 9, 25, 10, 4, 30), behind - 1.2))
+    a.mark_feed_reset(at=ist(2026, 9, 25, 10, 4, 58) - timedelta(seconds=behind))
+    now[0] = ist(2026, 9, 25, 10, 5, 0, 900000) - timedelta(seconds=behind)
+    a.on_tick(a._normalize(zeroed(1_200_000, 104.0)))
+    assert blinded(a, ist(2026, 9, 25, 10, 5))
+
+
+@pytest.mark.parametrize("behind", [2.0, 5.0])
+def test_on_a_host_well_behind_an_unstamped_opening_print_is_not_dropped_as_pre_open(behind):
+    now = [ist(2026, 9, 25, 9, 15, 0, 800000) - timedelta(seconds=behind)]
+    a = clocked(now, started_at=ist(2026, 9, 24, 15, 0))
+    a.mark_feed_reset(at=ist(2026, 9, 24, 15, 0))
+    a.note_feed_lag(ist(2026, 9, 24, 15, 29, 31) - timedelta(seconds=behind), 1.2 - behind)
+    a.on_tick(a._normalize(zeroed(500_000, 108.0)))
+    a.on_tick(stamped(106.0, 520_000, ist(2026, 9, 25, 9, 16), behind - 0.3))
+    bar = a.current_bars["SWIGGY"]
+    assert (bar["timestamp"], bar["Open"], a.dropped_ticks) == (ist(2026, 9, 25, 9, 15), 108.0, 0)
+
+
+def test_a_provisional_bar_a_stamped_print_of_its_own_bucket_joined_is_not_moved():
+    # Pin: once a stamped 10:05:00 print joined the bar, it is 10:05's; a late 10:04:59 print is dropped, not given the
+    # bar (which would move the 10:05 print into 10:00).
+    now = [ist(2026, 9, 25, 10, 5, 1, 100000)]
+    a = illiquid_after_0955(now)
+    a.on_tick(a._normalize(zeroed(15_000, 100.3)))                         # B: opens 10:05, provisionally
+    a.on_tick(stamped(100.6, 15_400, ist(2026, 9, 25, 10, 5), -1.0))       # D: settles it
+    a.on_tick(stamped(100.4, 16_000, ist(2026, 9, 25, 10, 4, 59), -2.3))   # A: late
+    a.on_tick(stamped(100.9, 17_000, ist(2026, 9, 25, 10, 6, 35), -0.3))
+    a.on_tick(stamped(101.0, 17_100, ist(2026, 9, 25, 10, 10, 5), -0.3))
+    bars = a.market_state["SWIGGY"]
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in bars.index and a.dropped_ticks == 1
+    assert bars.loc[pd.Timestamp(ist(2026, 9, 25, 10, 5)), "Volume"] == 4_000
+
+
+def test_a_provisional_bar_moved_into_a_bucket_the_feed_did_not_watch_whole_is_discarded():
+    # Pin: after a late join at 10:04:50, a bar moved into 10:00 cannot be whole.
+    history = pd.concat([session_history(24), make_bars([100.0] * 8, start=ist(2026, 9, 25, 9, 15))])
+    now = [ist(2026, 9, 25, 10, 4, 50)]
+    a = clocked(now, history=history)
+    a.mark_feed_reset(at=now[0])
+    a.on_tick(stamped(100.1, 1_000_000, ist(2026, 9, 25, 10, 4, 52), -0.8))
+    now[0] = ist(2026, 9, 25, 10, 5, 1, 100000)
+    a.on_tick(a._normalize(zeroed(1_002_000, 100.3)))
+    a.on_tick(stamped(100.4, 1_003_000, ist(2026, 9, 25, 10, 4, 59), -2.3))  # moves the bar to 10:00
+    assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 0) and a.current_bars["SWIGGY"]["partial"]
+    a.on_tick(stamped(100.9, 1_004_000, ist(2026, 9, 25, 10, 6, 35), -0.3))
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in a.market_state["SWIGGY"].index
+
+
+def test_a_provisional_bar_is_not_moved_into_a_bucket_that_already_closed():
+    # Pin: the bar clock closed 10:00, so a late 10:04:59 print cannot take the 10:05 bar there: at close it would
+    # overlap history and its shares be lost.
+    history = pd.concat([session_history(24), make_bars([100.0] * 9, start=ist(2026, 9, 25, 9, 15))])   # to 09:55
+    now = [ist(2026, 9, 25, 10, 1)]
+    a = clocked(now, history=history)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 1_000_000, ist(2026, 9, 25, 10, 1), -0.3))
+    a.on_tick(stamped(100.1, 1_010_000, ist(2026, 9, 25, 10, 4), -0.3))
+    a.note_feed_alive(ist(2026, 9, 25, 10, 5, 2, 500000))
+    a.flush_due_bars(ist(2026, 9, 25, 10, 5, 2, 500000))                   # closes 10:00
+    a.note_feed_lag(ist(2026, 9, 25, 10, 5, 2, 600000), 2.0)
+    now[0] = ist(2026, 9, 25, 10, 5, 3)
+    a.on_tick(a._normalize(zeroed(1_015_000, 100.3)))                       # B: 5,000, provisional 10:05
+    a.on_tick(stamped(100.4, 1_016_000, ist(2026, 9, 25, 10, 4, 59), -2.3))  # A: late
+    assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 5)
+    a.on_tick(stamped(100.9, 1_017_000, ist(2026, 9, 25, 10, 6, 35), -0.3))
+    a.on_tick(stamped(101.0, 1_017_100, ist(2026, 9, 25, 10, 10, 5), -0.3))
+    assert a.market_state["SWIGGY"].loc[pd.Timestamp(ist(2026, 9, 25, 10, 5)), "Volume"] == 7_000
+
+
+# ---------------------------------------------------------------- round 12: with no bar open, a print is filed late
+def broker_of(bars):
+    async def backfill(sym, start, end):
+        return bars[(bars.index >= pd.Timestamp(start)) & (bars.index < pd.Timestamp(end))]
+    return backfill
+
+
+def test_an_unstamped_trade_received_after_a_stamp_of_the_next_bucket_is_filed_in_that_bucket():
+    # Q, a stamped quote of 10:05:00, is received just before B, an unstamped 400k trade: B traded after 10:05:00. The
+    # name did not trade in 10:00 and no bar of it opened, so v1.11 filed B at feed time (10:04:59.65) in 10:00, took
+    # Q as proof of that bucket, and evaluated it: a fake breakout on the shares of the bar after.
+    alpha = RecordingAlpha()
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 10, 5, 0, 450000)]
+        a = illiquid_after_0955(now, loop=asyncio.get_running_loop(), backfill=broker_of(engine.empty_bars()))
+        a.alpha = alpha
+        a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5), -0.25))    # Q: no trade
+        a.on_tick(a._normalize(zeroed(413_000, 102.0)))                         # B
+        bar = a.current_bars["SWIGGY"]
+        # Since v1.16 Q no longer proves the bucket (B's feed time is before Q's stamp), so the bar is ambiguous; it is
+        # still evaluated, because the back-filled 10:00 is empty.
+        assert (bar["timestamp"], bar["Volume"], bar["ambiguous"]) == (ist(2026, 9, 25, 10, 5), 400_000, True)
+        a.on_tick(stamped(100.2, 414_000, ist(2026, 9, 25, 10, 6), -0.3))
+        a.on_tick(stamped(100.2, 414_100, ist(2026, 9, 25, 10, 10, 1), -0.3))   # closes 10:05 across the 10:00 hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    a = asyncio.run(scenario())
+    assert [idx for _, idx in alpha.evaluated] == [pd.Timestamp(ist(2026, 9, 25, 10, 5))]
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in a.market_state["SWIGGY"].index
+
+
+@pytest.mark.parametrize("late,traded_after", [(2.6, 2.0), (4.0, 3.5), (1.3, 0.9)])
+def test_with_no_bar_open_an_unstamped_trade_is_filed_in_the_latest_bucket_it_can_belong_to(late, traded_after):
+    # One quote `late` seconds late holds the lag at `late` for a minute: a trade `traded_after` seconds past 10:05
+    # (received 0.3 s later) has feed time in 10:00. v1.11 opened, kept and evaluated a 10:00 bar for it; filed in
+    # 10:05 instead, the bar is provisional (a stamped print of 10:00 received later still moves it back).
+    now = [ist(2026, 9, 25, 10, 4, 10, 300000)]
+    a = illiquid_after_0955(now)
+    for second, ahead in [(10, -0.3), (20, -late), (40, -0.3)]:
+        a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 4, second), ahead))    # quotes
+    now[0] = ist(2026, 9, 25, 10, 5) + timedelta(seconds=traded_after + 0.3)
+    a.on_tick(a._normalize(zeroed(15_000, 100.5)))
+    bar = a.current_bars["SWIGGY"]
+    assert (bar["timestamp"], bar["provisional"], bar["ambiguous"]) == (ist(2026, 9, 25, 10, 5), True, True)
+
+
+def test_an_unstamped_trade_filed_late_is_not_counted_twice_when_the_bucket_it_can_belong_to_is_back_filled():
+    # Nothing else trades in 10:05, whose broker bar holds B. v1.11 built B's bar in 10:00 and back-filled 10:05 with
+    # B's shares again (800k over the two buckets, a fake RVOL spike); v1.12 has one 10:05 bar of 400k.
+    broker = make_bars([102.0], volumes=[400_000], start=ist(2026, 9, 25, 10, 5))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 10, 5, 0, 450000)]
+        a = illiquid_after_0955(now, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.on_tick(a._normalize(zeroed(413_000, 102.0)))                         # B
+        now[0] = ist(2026, 9, 25, 10, 5, 3, 450000)
+        a.note_feed_alive(now[0])
+        a.flush_due_bars(now[0])
+        a.on_tick(stamped(101.0, 414_000, ist(2026, 9, 25, 10, 11), -0.3))
+        a.on_tick(stamped(101.0, 414_500, ist(2026, 9, 25, 10, 15, 1), -0.3))
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    bars = asyncio.run(scenario()).market_state["SWIGGY"]
+    span = bars[(bars.index >= pd.Timestamp(ist(2026, 9, 25, 10, 0))) & (bars.index < pd.Timestamp(ist(2026, 9, 25, 10, 10)))]
+    assert span["Volume"].to_dict() == {pd.Timestamp(ist(2026, 9, 25, 10, 5)): 400_000}
+
+
+def test_an_unstamped_print_received_just_after_the_close_stays_in_the_sessions_last_bar():
+    # Control for filing late: the latest bucket such a print can belong to is the close's, which is not a session
+    # bucket; it traded in the session, so it keeps its feed time (15:29:59.5) and opens the 15:25 bar.
+    history = pd.concat([session_history(24), make_bars([100.0] * 73, start=ist(2026, 9, 25, 9, 15))])   # to 15:15
+    now = [ist(2026, 9, 25, 15, 20, 10, 300000)]
+    a = clocked(now, history=history)
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(stamped(100.0, 10_000, ist(2026, 9, 25, 15, 20, 10), -0.3))
+    a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 15, 22), -0.3))
+    a.flush_due_bars(ist(2026, 9, 25, 15, 25, 3))                          # closes 15:20
+    a.note_feed_lag(ist(2026, 9, 25, 15, 29, 40), 0.8)
+    now[0] = ist(2026, 9, 25, 15, 30, 0, 300000)
+    a.on_tick(a._normalize(zeroed(15_000, 100.5)))
+    assert a.dropped_ticks == 0
+    assert (a.current_bars["SWIGGY"]["timestamp"], a.current_bars["SWIGGY"]["Volume"]) == (ist(2026, 9, 25, 15, 25), 2_000)
+
+
+def test_a_bar_an_unstamped_print_opened_while_closing_a_partial_bar_is_not_evaluated_if_the_bucket_before_traded():
+    # Pin for R11-FEED-2 on the close-and-open path: a trade from about 11:04:59.5, 4 s late, has feed time past the
+    # grace while the bar clock has not closed the (partial) 11:00 bar yet. It closes that bar and opens 11:05, whose
+    # shares the back-fill of 11:00 counts again: not evaluated when the broker says 11:00 traded.
+    alpha = RecordingAlpha()
+    broker = make_bars([100.4], volumes=[70_000], start=ist(2026, 9, 25, 11, 0))
+
+    async def scenario():
+        history = pd.concat([session_history(24), make_bars([100.0] * 21, start=ist(2026, 9, 25, 9, 15))])  # to 10:55
+        now = [ist(2026, 9, 25, 11, 0, 20)]
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+        a.on_tick(stamped(100.0, 500_000, ist(2026, 9, 25, 11, 0, 20), -0.4))
+        a.mark_feed_reset(at=ist(2026, 9, 25, 11, 2))                          # a reconnect: 11:00 is partial
+        a.on_tick(stamped(100.1, 520_000, ist(2026, 9, 25, 11, 2, 30), -0.4))
+        a.on_tick(stamped(100.2, 530_000, ist(2026, 9, 25, 11, 4, 10), -0.5))
+        a.flush_due_bars(ist(2026, 9, 25, 11, 5, 2, 400000))                   # too early to close 11:00
+        now[0] = ist(2026, 9, 25, 11, 5, 3, 500000)
+        a.on_tick(a._normalize(zeroed(580_000, 100.4)))                        # 50k
+        assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 11, 5)
+        a.on_tick(stamped(101.5, 600_000, ist(2026, 9, 25, 11, 7), -0.4))
+        a.on_tick(stamped(101.6, 601_000, ist(2026, 9, 25, 11, 10, 1), -0.4))   # closes 11:05 across the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 11, 5)) not in [idx for _, idx in alpha.evaluated]
+
+
+# ---------------------------------------------------------------- round 13: a true upper bound; bars a print may spill
+def at_host(price, cum, stamp, delay, behind=0.0):
+    """A stamped print received ``delay`` s after its stamp (exchange time) by a host ``behind`` s behind the exchange."""
+    return stamped(price, cum, stamp, behind - delay)
+
+
+def quiet_until_1000(now, behind=0.0, **kwargs):
+    """History to 09:50 and a 09:55 bar the bar clock closed, on a host ``behind`` s behind the exchange."""
+    host = lambda t: t - timedelta(seconds=behind)                      # noqa: E731
+    history = pd.concat([session_history(24), make_bars([100.0] * 8, start=ist(2026, 9, 25, 9, 15))])  # to 09:50
+    a = clocked(now, history=history, **kwargs)
+    a.mark_feed_reset(at=host(ist(2026, 9, 25, 9, 0)))
+    a.on_tick(at_host(100.0, 10_000, ist(2026, 9, 25, 9, 55, 10), 0.3, behind))
+    a.on_tick(at_host(100.2, 13_000, ist(2026, 9, 25, 9, 57), 0.3, behind))
+    a.note_feed_alive(host(ist(2026, 9, 25, 10, 0, 3)))
+    a.flush_due_bars(host(ist(2026, 9, 25, 10, 0, 3)))                  # closes 09:55
+    return a, host
+
+
+@pytest.mark.parametrize("quotes", [[(10, 0.6), (20, 0.8), (40, 5.0)], [(20, 0.8), (40, 5.0)]])
+def test_on_a_host_behind_the_exchange_an_unstamped_trade_is_not_filed_in_a_bucket_before_it_traded(quotes):
+    # A host 3 s behind: each lag sample is latency + truncation - 3 s, and one quote came 5 s late. v1.12's latest time
+    # subtracted the lowest sample, latency and all, or dropped the offset when the late sample was the guard's upper
+    # median: B, traded at 10:05:00.15, was filed in 10:00, where the name never traded, and that bar was evaluated.
+    alpha = RecordingAlpha()
+    truth = make_bars([100.2], volumes=[401_000], start=ist(2026, 9, 25, 10, 5))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 7, 300000)]
+        a, host = quiet_until_1000(now, behind=3.0, loop=asyncio.get_running_loop(), backfill=broker_of(truth))
+        a.alpha = alpha
+        for second, delay in quotes:
+            a.on_tick(at_host(100.2, 13_000, ist(2026, 9, 25, 10, 4, second), delay, 3.0))
+        now[0] = host(ist(2026, 9, 25, 10, 5, 0, 450000))                 # B: traded 10:05:00.15, latency 0.3
+        a.on_tick(a._normalize(zeroed(413_000, 102.0)))
+        assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 5)
+        a.on_tick(at_host(100.2, 414_000, ist(2026, 9, 25, 10, 6), 0.3, 3.0))
+        a.on_tick(at_host(100.2, 414_100, ist(2026, 9, 25, 10, 10, 1), 0.3, 3.0))
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in [idx for _, idx in alpha.evaluated]
+
+
+def test_on_a_host_behind_the_exchange_an_unstamped_opening_print_with_samples_is_not_dropped_as_pre_open():
+    # Samples left from the last close, on a host 3 s behind: one normal, one late. v1.12 dropped the offset and the
+    # opening print, received at 09:15:00.3 on the exchange's clock (09:14:57.3 on the host's), as pre-open.
+    host = lambda t: t - timedelta(seconds=3.0)                          # noqa: E731
+    now = [host(ist(2026, 9, 25, 9, 0))]
+    a = clocked(now, history=session_history(24), started_at=host(ist(2026, 9, 24, 15, 0)))
+    a.mark_feed_reset(at=host(ist(2026, 9, 24, 15, 0)))
+    for second, lag in [(10, 0.8), (40, 5.0)]:
+        a.note_feed_lag(host(ist(2026, 9, 24, 15, 29, second)), lag - 3.0)
+    now[0] = host(ist(2026, 9, 25, 9, 15, 0, 300000))
+    a.on_tick(a._normalize(zeroed(500_000, 108.0)))
+    a.on_tick(at_host(106.0, 520_000, ist(2026, 9, 25, 9, 16), 0.3, 3.0))
+    bar = a.current_bars["SWIGGY"]
+    assert (a.dropped_ticks, bar["timestamp"], bar["Open"], bar["High"]) == (0, ist(2026, 9, 25, 9, 15), 108.0, 108.0)
+
+
+def test_on_a_host_behind_the_exchange_a_rebaselining_print_blinds_the_bucket_it_traded_in():
+    # v1.12 blinded only 10:00 for a print that traded at 10:05:00.1, so the 10:05 bar was kept short.
+    host = lambda t: t - timedelta(seconds=3.0)                          # noqa: E731
+    now = [host(ist(2026, 9, 25, 10, 4, 10))]
+    a = clocked(now)
+    a.mark_feed_reset(at=host(ist(2026, 9, 25, 9, 0)))
+    a.on_tick(at_host(100.0, 1_000_000, ist(2026, 9, 25, 10, 3, 50), 0.7, 3.0))
+    for second, delay in [(20, 0.8), (40, 5.0)]:
+        a.on_tick(at_host(100.0, 1_000_000, ist(2026, 9, 25, 10, 4, second), delay, 3.0))
+    a.mark_feed_reset(at=host(ist(2026, 9, 25, 10, 4, 58)))                # a reconnect
+    now[0] = host(ist(2026, 9, 25, 10, 5, 0, 400000))                     # traded 10:05:00.1, latency 0.3
+    a.on_tick(a._normalize(zeroed(1_300_000, 101.0)))
+    assert blinded(a, ist(2026, 9, 25, 10, 5))
+
+
+@pytest.mark.parametrize("quotes,traded,latency,spills", [
+    ([(10, 0.8), (20, 0.8), (40, 0.8)], 1.7, 0.8, True),                 # within the grace: joins the open bar
+    ([(10, 0.3), (20, 5.0), (40, 0.3)], 0.15, 0.3, True),                # one late packet: feed time inside the bar
+    ([(10, 0.3), (20, 0.3), (40, 0.3)], -2.0, 0.3, False),               # control: traded 2 s before the boundary
+])
+def test_an_open_bar_joined_by_a_print_that_may_be_the_next_buckets_is_not_evaluated(quotes, traded, latency, spills):
+    # A 10:02 trade opened the 10:00 bar; B, an unstamped 400k @102 that traded `traded` s after 10:05, joins it. v1.12
+    # evaluated that bar with B as its Close and 400k in its volume: a fake breakout the exchange bars never show.
+    alpha = RecordingAlpha()
+    truth = pd.concat([make_bars([100.1], volumes=[1_000], start=ist(2026, 9, 25, 10, 0)),
+                       make_bars([100.2], volumes=[401_000], start=ist(2026, 9, 25, 10, 5))])
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(truth))
+        a.alpha = alpha
+        a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 2), 0.3))     # opens 10:00
+        for second, delay in quotes:
+            a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 4, second), delay))
+        now[0] = ist(2026, 9, 25, 10, 5) + timedelta(seconds=traded + latency)
+        a.on_tick(a._normalize(zeroed(414_000, 102.0)))
+        assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 0)
+        a.on_tick(at_host(100.2, 414_500, ist(2026, 9, 25, 10, 6), 0.3))
+        a.on_tick(at_host(100.2, 415_000, ist(2026, 9, 25, 10, 10, 1), 0.3))
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert (pd.Timestamp(ist(2026, 9, 25, 10, 0)) in [idx for _, idx in alpha.evaluated]) is not spills
+
+
+def test_the_bar_after_one_whose_close_may_be_the_next_buckets_print_is_not_evaluated():
+    # The exchange's 10:00 bar closes at 101 on 250k (a genuine first crossing). B, 1,000 @99 traded at 10:05:01.7, joins
+    # it within the grace and becomes its Close, so 10:05 (closing at 101) looked like a first crossing one bar late.
+    alpha = RecordingAlpha()
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(engine.empty_bars()))
+        a.alpha = alpha
+        a.on_tick(at_host(101.0, 263_000, ist(2026, 9, 25, 10, 2), 0.8))    # 250k @101
+        for second in (10, 20, 40):
+            a.on_tick(at_host(101.0, 263_000, ist(2026, 9, 25, 10, 4, second), 0.8))
+        now[0] = ist(2026, 9, 25, 10, 5, 2, 500000)
+        a.on_tick(a._normalize(zeroed(264_000, 99.0)))                       # B
+        a.on_tick(at_host(101.0, 514_000, ist(2026, 9, 25, 10, 7), 0.8))    # 250k @101
+        a.on_tick(at_host(101.0, 514_100, ist(2026, 9, 25, 10, 10, 1), 0.8))
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    evaluated = [idx for _, idx in alpha.evaluated]
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) not in evaluated and pd.Timestamp(ist(2026, 9, 25, 10, 5)) not in evaluated
+
+
+def test_a_stamped_print_of_the_bar_received_after_a_print_that_may_spill_clears_it():
+    # Control for the spill flag: in-order delivery puts B before a stamped print of 10:00 received after it.
+    alpha = RecordingAlpha()
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(engine.empty_bars()))
+        a.alpha = alpha
+        a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 2), 0.3))
+        a.note_feed_lag(ist(2026, 9, 25, 10, 4, 40), 0.3)
+        now[0] = ist(2026, 9, 25, 10, 4, 59, 900000)
+        a.on_tick(a._normalize(zeroed(20_000, 100.5)))                       # may be 10:05's
+        assert a.current_bars["SWIGGY"].get("spill", True) is True           # (v1.12 had no flag)
+        a.on_tick(at_host(100.6, 21_000, ist(2026, 9, 25, 10, 4, 59), 1.0))  # stamped 10:04:59, received after it
+        assert a.current_bars["SWIGGY"].get("spill", False) is False
+        a.on_tick(at_host(100.7, 22_000, ist(2026, 9, 25, 10, 5, 30), 0.3))  # closes 10:00
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 0)) in [idx for _, idx in alpha.evaluated]
+
+
+def test_the_sessions_last_bar_joined_by_a_print_received_after_the_close_is_still_evaluated():
+    # Control for the spill flag: with no bucket after 15:25, such a print can only be the session's.
+    alpha = RecordingAlpha()
+    history = pd.concat([session_history(24), make_bars([100.0] * 73, start=ist(2026, 9, 25, 9, 15))])   # to 15:15
+    now = [ist(2026, 9, 25, 15, 20, 10, 300000)]
+    a = clocked(now, history=history)
+    a.alpha = alpha
+    a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+    a.on_tick(at_host(100.0, 10_000, ist(2026, 9, 25, 15, 20, 10), 0.3))
+    a.on_tick(at_host(100.1, 12_000, ist(2026, 9, 25, 15, 26), 0.3))        # closes 15:20, opens 15:25
+    a.note_feed_lag(ist(2026, 9, 25, 15, 29, 40), 0.8)
+    now[0] = ist(2026, 9, 25, 15, 30, 0, 300000)
+    a.on_tick(a._normalize(zeroed(15_000, 100.5)))                        # joins 15:25
+    a.note_feed_alive(ist(2026, 9, 25, 15, 30, 3))
+    a.flush_due_bars(ist(2026, 9, 25, 15, 30, 3))
+    assert "SWIGGY" not in a.current_bars
+    assert pd.Timestamp(ist(2026, 9, 25, 15, 25)) in [idx for _, idx in alpha.evaluated]
+
+
+@pytest.mark.parametrize("other_sample", [False, True])
+def test_a_forward_stamp_alone_in_the_lag_window_does_not_prove_an_unstamped_prints_bucket(other_sample):
+    # A quote stamped 20 s ahead (the 30 s rule accepts it) is the minute's only lag sample. v1.13 read it as the host's
+    # offset: the print B, traded at 10:04:59.9 and received at 10:05:00.4, was "proven" 10:05's by that very stamp, so its
+    # bar was evaluated while the back-fill of 10:00 counted B's 2,000 shares again (3,500 against a true 1,500).
+    alpha = RecordingAlpha()
+    broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        if other_sample:
+            a.note_feed_lag(ist(2026, 9, 25, 10, 4, 30), 0.4)
+        a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5, 12), 20.0))    # a quote, 20 s ahead
+        now[0] = ist(2026, 9, 25, 10, 5, 0, 400000)
+        a.on_tick(a._normalize(zeroed(15_000, 100.3)))                          # B
+        assert a.current_bars["SWIGGY"]["ambiguous"] is True
+        a.on_tick(stamped(100.9, 16_500, ist(2026, 9, 25, 10, 7), -0.3))
+        a.on_tick(stamped(100.9, 16_600, ist(2026, 9, 25, 10, 10, 1), -0.3))   # closes 10:05 across the 10:00 hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 5)) not in [idx for _, idx in alpha.evaluated]
+
+
+@pytest.mark.parametrize("traded,spills", [(1.7, True), (-3.0, False)])
+def test_an_open_bar_after_a_hole_joined_by_a_print_that_may_be_the_next_buckets_is_not_evaluated(traded, spills):
+    # The spill rule on the back-fill path: 09:55 never traded, so the 10:00 bar closes across a hole. B, 400k @102 with no
+    # exchange time, traded `traded` s after 10:05 and joined 10:00 (within the grace): that bar must not be evaluated
+    # (control: B traded 3 s before the boundary).
+    alpha = RecordingAlpha()
+    truth = pd.concat([make_bars([100.1], volumes=[1_000], start=ist(2026, 9, 25, 10, 0)),
+                       make_bars([100.2], volumes=[401_000], start=ist(2026, 9, 25, 10, 5))])
+
+    async def scenario():
+        history = pd.concat([session_history(24), make_bars([100.0] * 7, start=ist(2026, 9, 25, 9, 15))])  # to 09:45
+        now = [ist(2026, 9, 25, 9, 52)]
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=broker_of(truth))
+        a.alpha = alpha
+        a.mark_feed_reset(at=ist(2026, 9, 25, 9, 0))
+        a.on_tick(at_host(100.0, 10_000, ist(2026, 9, 25, 9, 52), 0.8))
+        a.on_tick(at_host(100.0, 13_000, ist(2026, 9, 25, 9, 53), 0.8))
+        a.note_feed_alive(ist(2026, 9, 25, 9, 55, 3))
+        a.flush_due_bars(ist(2026, 9, 25, 9, 55, 3))                          # closes 09:50
+        a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 2), 0.8))     # opens 10:00
+        for second in (10, 20, 40):
+            a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 4, second), 0.8))
+        now[0] = ist(2026, 9, 25, 10, 5) + timedelta(seconds=traded + 0.8)
+        a.on_tick(a._normalize(zeroed(414_000, 102.0)))                      # B
+        assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 0)
+        a.on_tick(at_host(100.2, 414_500, ist(2026, 9, 25, 10, 6), 0.3))     # closes 10:00 across the 09:55 hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert (pd.Timestamp(ist(2026, 9, 25, 10, 0)) in [idx for _, idx in alpha.evaluated]) is not spills
+
+
+# ---------------------------------------------------------------- round 14: a spill bar and the next are back-filled
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_a_spill_bar_and_the_next_are_replaced_by_the_brokers_so_no_short_bar_stays_in_history(reconnect):
+    # B (unstamped 400k @102, traded 10:05:01.7) joins the open 10:00 bar within the grace. v1.13 skipped evaluating
+    # 10:00 and 10:05 but kept both, 10:00 long by B and 10:05 short by B: the short bar lowered later RVOL baselines
+    # (a fake breakout later on). With a reconnect that made 10:00 partial, 10:05 was even evaluated.
+    alpha = RecordingAlpha()
+    truth = pd.concat([make_bars([100.1], volumes=[1_000], start=ist(2026, 9, 25, 10, 0)),
+                       make_bars([102.0], volumes=[401_000], start=ist(2026, 9, 25, 10, 5))])
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(truth))
+        a.alpha = alpha
+        a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 2), 0.8))     # opens 10:00
+        if reconnect:
+            a.mark_feed_reset(at=ist(2026, 9, 25, 10, 2, 30))
+            a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 3), 0.8))  # re-baselines
+        for second in (10, 20, 40):
+            a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 4, second), 0.8))
+        now[0] = ist(2026, 9, 25, 10, 5, 2, 500000)
+        a.on_tick(a._normalize(zeroed(414_000, 102.0)))                       # B: joins 10:00
+        a.on_tick(at_host(102.0, 415_000, ist(2026, 9, 25, 10, 7), 0.8))     # the rest of 10:05
+        a.on_tick(at_host(102.0, 415_500, ist(2026, 9, 25, 10, 11), 0.8))    # closes 10:05
+        a.on_tick(at_host(102.0, 415_600, ist(2026, 9, 25, 10, 15, 1), 0.8))  # closes 10:10 across the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    bars = asyncio.run(scenario()).market_state["SWIGGY"]
+    assert bars.loc[pd.Timestamp(ist(2026, 9, 25, 10, 0)), "Volume"] == 1_000
+    assert bars.loc[pd.Timestamp(ist(2026, 9, 25, 10, 5)), "Volume"] == 401_000
+    assert [idx for _, idx in alpha.evaluated] == [pd.Timestamp(ist(2026, 9, 25, 10, 10))]
+
+
+def test_a_bar_after_an_empty_bucket_that_follows_a_spill_bar_is_evaluated():
+    # The broker says nothing traded in 10:05, so the spill print was 10:00's after all and 10:10 is a genuine bar.
+    # v1.13 compared only the bar before in history and skipped 10:10 (with a log blaming the 10:00 bar's close).
+    alpha = RecordingAlpha()
+    truth = make_bars([102.0], volumes=[401_000], start=ist(2026, 9, 25, 10, 0))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(truth))
+        a.alpha = alpha
+        a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 2), 0.8))
+        for second in (10, 20, 40):
+            a.on_tick(at_host(100.1, 14_000, ist(2026, 9, 25, 10, 4, second), 0.8))
+        now[0] = ist(2026, 9, 25, 10, 5, 2, 500000)
+        a.on_tick(a._normalize(zeroed(414_000, 102.0)))                       # B: joins 10:00, spill
+        a.on_tick(at_host(102.5, 415_000, ist(2026, 9, 25, 10, 11), 0.8))    # nothing in 10:05; opens 10:10
+        a.on_tick(at_host(102.5, 415_100, ist(2026, 9, 25, 10, 15, 1), 0.8))  # closes 10:10
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 10)) in [idx for _, idx in alpha.evaluated]
+
+
+# ---------------------------------------------------------------- round 15: a session with no kept bar; the paper OCO
+class TradingAlpha(engine.AlphaEngine):
+    """The real strategy, recording (bar before, bar) for each evaluation."""
+    def __init__(self):
+        super().__init__()
+        self.evaluated = []
+
+    def evaluate(self, symbol, df):
+        self.evaluated.append((df.index[-2], df.index[-1]))
+        return super().evaluate(symbol, df)
+
+
+@pytest.mark.parametrize("friday_traded", [True, False])
+def test_a_session_whose_every_bar_was_discarded_is_back_filled_before_the_next_sessions_first_bar(friday_traded):
+    # On Friday the name traded only in 10:00, crossing the base high (100.5) on 700k, and a print with no exchange time
+    # received 1.2 s after 10:05 joined that bar: a spill bar, discarded. v1.14 looked for missing bars only in Thursday's
+    # tail and in Monday's own session, so Monday's 09:15 bar (102 on 500k) was evaluated against Thursday's 15:25 close:
+    # a first crossing the exchange's bars never show (it crossed on Friday). Control: the name did not trade on Friday,
+    # and Monday's genuine crossing fires.
+    alpha = TradingAlpha()
+    friday = make_bars([101.5], volumes=[700_000], start=ist(2026, 9, 25, 10, 0)) if friday_traded else engine.empty_bars()
+    calls = []
+
+    async def backfill(sym, start, end):
+        calls.append((start, end))
+        return await broker_of(friday)(sym, start, end)
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 0)]
+        history = pd.concat([session_history(day) for day in (22, 23, 24)])
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=backfill, require_feed_liveness=True)
+        a.alpha = alpha
+        a.mark_feed_reset(at=now[0])
+        if friday_traded:
+            a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 25, 10, 1), 0.5))
+            for second in (10, 30, 50):
+                a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 25, 10, 4, second), 0.5))
+            now[0] = ist(2026, 9, 25, 10, 5, 1, 200000)
+            a.on_tick(a._normalize(zeroed(700_000, 101.5)))                    # joins 10:00: a spill bar
+            a.note_feed_alive(ist(2026, 9, 25, 10, 5, 3))
+            a.flush_due_bars(ist(2026, 9, 25, 10, 5, 3))                       # 10:00 discarded
+            assert "SWIGGY" not in a.current_bars and a.market_state["SWIGGY"].index[-1] == ist(2026, 9, 24, 15, 25)
+        a.on_tick(at_host(102.0, 500_000, ist(2026, 9, 28, 9, 15, 20), 0.5))
+        a.on_tick(at_host(102.0, 500_100, ist(2026, 9, 28, 9, 20, 1), 0.5))    # closes Monday 09:15
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    a = asyncio.run(scenario())
+    if friday_traded:
+        assert calls == [(ist(2026, 9, 25, 9, 15), ist(2026, 9, 28, 9, 15))]
+    before = ist(2026, 9, 25, 10, 0) if friday_traded else ist(2026, 9, 24, 15, 25)
+    assert alpha.evaluated == [(pd.Timestamp(before), pd.Timestamp(ist(2026, 9, 28, 9, 15)))]
+    assert a.oms_queue.qsize() == (0 if friday_traded else 1)
+
+
+@pytest.mark.parametrize("prev,idx,start", [
+    ((24, 15, 25), (25, 9, 15), None),                 # consecutive sessions: nothing is missing
+    ((24, 15, 20), (25, 9, 15), (24, 15, 25)),         # the previous session's tail
+    ((24, 15, 25), (25, 9, 30), (25, 9, 15)),          # the session's own head
+    ((25, 15, 25), (28, 9, 15), None),                 # a weekend is not a hole
+    ((24, 15, 25), (28, 9, 15), (25, 9, 15)),          # a weekday with no kept bar is (v1.14: None)
+    ((24, 15, 25), (28, 9, 20), (25, 9, 15)),
+    ((25, 15, 25), (26, 9, 20), (26, 9, 15)),          # a special Saturday session still checks its own head
+])
+def test_the_hole_before_a_bar_spans_every_session_since_historys_last_bar(prev, idx, start):
+    a = adapter()
+    at = lambda day, h, m: ist(2026, 9, day, h, m)       # noqa: E731
+    assert a._hole_before(at(*prev), at(*idx)) == (None if start is None else at(*start))
+
+
+@pytest.mark.parametrize("how", ["spill", "partial", "untraded"])
+def test_a_weekend_session_whose_every_bar_was_discarded_is_back_filled_before_mondays_first_bar(how):
+    # A special Saturday session (the exchange holds some, e.g. on a Budget day): the name traded only in 10:00, crossing
+    # the base high (100.5) on 700k, and that bar was discarded (a spill bar, or partial after a reconnect). The weekday
+    # rule skips weekends, so Monday's 09:15 bar (102 on 500k) was evaluated against Friday's 15:25 close: a first
+    # crossing the exchange's bars never show (it crossed on Saturday). Control: no Saturday session, so no weekend
+    # fetch, and Monday's genuine crossing fires.
+    alpha = TradingAlpha()
+    saturday = make_bars([101.5], volumes=[700_000], start=ist(2026, 9, 26, 10, 0)) if how != "untraded" \
+        else engine.empty_bars()
+    calls = []
+
+    async def backfill(sym, start, end):
+        calls.append((start, end))
+        return await broker_of(saturday)(sym, start, end)
+
+    async def scenario():
+        now = [ist(2026, 9, 26, 9, 0)]
+        history = pd.concat([session_history(day) for day in (23, 24, 25)])
+        a = clocked(now, history=history, started_at=now[0], loop=asyncio.get_running_loop(), backfill=backfill,
+                    require_feed_liveness=True)
+        a.alpha = alpha
+        a.mark_feed_reset(at=now[0])
+        if how != "untraded":
+            a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 26, 10, 1), 0.5))
+            if how == "partial":
+                a.mark_feed_reset(at=ist(2026, 9, 26, 10, 2))                  # a reconnect: 10:00 is partial
+            for second in (10, 30, 50):
+                a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 26, 10, 4, second), 0.5))
+            if how == "spill":
+                now[0] = ist(2026, 9, 26, 10, 5, 1, 200000)
+                a.on_tick(a._normalize(zeroed(700_000, 101.5)))                # joins 10:00: a spill bar
+            a.note_feed_alive(ist(2026, 9, 26, 10, 5, 3))
+            a.flush_due_bars(ist(2026, 9, 26, 10, 5, 3))                       # 10:00 discarded
+            assert "SWIGGY" not in a.current_bars and a.market_state["SWIGGY"].index[-1] == ist(2026, 9, 25, 15, 25)
+        a.on_tick(at_host(102.0, 500_000, ist(2026, 9, 28, 9, 15, 20), 0.5))
+        a.on_tick(at_host(102.0, 500_100, ist(2026, 9, 28, 9, 20, 1), 0.5))    # closes Monday 09:15
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    a = asyncio.run(scenario())
+    assert calls == ([] if how == "untraded" else [(ist(2026, 9, 26, 9, 15), ist(2026, 9, 28, 9, 15))])
+    before = ist(2026, 9, 25, 15, 25) if how == "untraded" else ist(2026, 9, 26, 10, 0)
+    assert alpha.evaluated == [(pd.Timestamp(before), pd.Timestamp(ist(2026, 9, 28, 9, 15)))]
+    assert a.oms_queue.qsize() == (1 if how == "untraded" else 0)
+
+
+@pytest.mark.parametrize("prev,idx,discarded,start", [
+    ((25, 15, 25), (28, 9, 15), (26, 10, 0), (26, 9, 15)),    # a discarded Saturday bar: its whole session
+    ((25, 15, 25), (28, 9, 15), (27, 11, 0), (27, 9, 15)),    # a Sunday one
+    ((25, 15, 25), (28, 9, 15), None, None),                  # no bar seen: a weekend is not a hole
+    ((25, 15, 25), (28, 9, 15), (25, 15, 0), None),           # one before history's last bar is not a hole
+    ((24, 15, 25), (28, 9, 15), (26, 10, 0), (25, 9, 15)),    # a weekday before it is missing too
+    ((25, 15, 20), (28, 9, 15), (26, 10, 0), (25, 15, 25)),   # so is Friday's tail
+    ((25, 10, 0), (25, 10, 15), (25, 10, 5), (25, 10, 5)),    # within a session, the bars after history's last
+])
+def test_a_discarded_bar_marks_its_weekend_session_as_part_of_the_hole(prev, idx, discarded, start):
+    a = adapter()
+    at = lambda day, h, m: ist(2026, 9, day, h, m)       # noqa: E731
+    assert a._hole_before(at(*prev), at(*idx), discarded and at(*discarded)) == (None if start is None else at(*start))
+
+
+@pytest.mark.parametrize("play", [True, False])
+def test_releasing_one_holes_held_bars_keeps_a_later_holes(play):
+    # Two back-fills of one symbol can finish out of order: releasing 10:00-10:10 must leave 11:00's held bar for its
+    # own back-fill, and play only the bars of its window (in time order), or none when the broker's bars replace them.
+    played = []
+    a = engine.LiveTickAdapter({}, engine.AlphaEngine(), asyncio.Queue(), loop=None,
+                               bar_listeners=[lambda sym, ts, bar: played.append((ts, bar["Close"]))])
+    bar = lambda close: pd.Series({c: close for c in engine.OHLCV})     # noqa: E731
+    a._held["SWIGGY"] = [(ist(2026, 9, 25, 10, 0), bar(101.0)), (ist(2026, 9, 25, 10, 5), bar(100.5)),
+                         (ist(2026, 9, 25, 11, 0), bar(102.0))]
+    a._release_held("SWIGGY", ist(2026, 9, 25, 10, 0), ist(2026, 9, 25, 10, 10), play=play)
+    assert played == ([(ist(2026, 9, 25, 10, 0), 101.0), (ist(2026, 9, 25, 10, 5), 100.5)] if play else [])
+    assert [ts for ts, _ in a._held["SWIGGY"]] == [ist(2026, 9, 25, 11, 0)]
+    a._release_held("SWIGGY", ist(2026, 9, 25, 10, 55), ist(2026, 9, 25, 11, 5), play=play)
+    assert "SWIGGY" not in a._held
+
+
+@pytest.mark.parametrize("how", ["fetch_fails", "no_source", "replaced"])
+def test_a_discarded_spill_pair_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_replace_it(how):
+    # A paper position (stop 99, stop limit 97.02) is open, and the name dipped to 98.8 only in the 10:05 bucket. B, a
+    # print with no exchange time received 1.3 s after 10:05, joined 10:00, so 10:00 and 10:05 were discarded. When the
+    # back-fill before the 10:10 bar failed, v1.14 played only the 10:10 bar: the stop was never hit and the symbol stayed
+    # blocked (v1.13 played both bars as they closed). The same without a history source. Control: with the broker's
+    # bars, those are played, once each.
+    fetch_fails = how != "replaced"
+    broker = pd.DataFrame([[101.0, 101.2, 100.9, 101.0, 5_000.0], [101.0, 101.0, 98.8, 100.5, 6_000.0]],
+                          columns=engine.OHLCV, index=pd.DatetimeIndex([ist(2026, 9, 25, 10, 0), ist(2026, 9, 25, 10, 5)],
+                                                                        name="datetime"))
+    played = []
+
+    async def backfill(sym, start, end):
+        if how == "fetch_fails":
+            raise ConnectionError("history API unreachable")
+        return await broker_of(broker)(sym, start, end)
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 0)]
+        router = engine.ExecutionRouter(asyncio.Queue(), risk_per_trade=1_000.0)
+        router.positions["SWIGGY"] = engine.Position("SWIGGY", 100, 101.0, 99.0, 107.0, ist(2026, 9, 25, 9, 55),
+                                                      stop_limit=97.02)
+        router.active_inventory.add("SWIGGY")
+        history = pd.concat([session_history(24), make_bars([101.0] * 9, start=ist(2026, 9, 25, 9, 15))])   # to 09:55
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=None if how == "no_source" else backfill,
+                    bar_listeners=[router.on_bar, lambda sym, ts, bar: played.append((ts, bar["Low"]))])
+        a.mark_feed_reset(at=now[0])
+        a.on_tick(at_host(101.0, 1_000, ist(2026, 9, 25, 10, 1), 0.5))          # opens 10:00
+        for second in (10, 30, 50):
+            a.on_tick(at_host(101.0, 5_000, ist(2026, 9, 25, 10, 4, second), 0.5))
+        now[0] = ist(2026, 9, 25, 10, 5, 1, 300000)
+        a.on_tick(a._normalize(zeroed(6_000, 101.0)))                            # B: joins 10:00, spill
+        a.on_tick(at_host(98.8, 9_000, ist(2026, 9, 25, 10, 6), 0.5))           # the dip opens 10:05
+        a.on_tick(at_host(100.5, 11_000, ist(2026, 9, 25, 10, 8), 0.5))
+        a.on_tick(at_host(100.6, 12_000, ist(2026, 9, 25, 10, 11), 0.5))        # 10:05 discarded, opens 10:10
+        a.on_tick(at_host(100.7, 13_000, ist(2026, 9, 25, 10, 15, 1), 0.5))     # closes 10:10 after the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return router
+
+    router = asyncio.run(scenario())
+    assert played == [(pd.Timestamp(ist(2026, 9, 25, 10, 0)), 101.0 if fetch_fails else 100.9),
+                      (pd.Timestamp(ist(2026, 9, 25, 10, 5)), 98.8), (pd.Timestamp(ist(2026, 9, 25, 10, 10)), 100.6)]
+    assert [(p.exit_reason, p.exit_price, p.closed_at) for p in router.closed_positions] == \
+        [("STOP", 98.8 if fetch_fails else 99.0, pd.Timestamp(ist(2026, 9, 25, 10, 5)))]
+    assert not router.positions and not router.active_inventory
+
+
+# ---------------------------------------------------------------- round 15: a stamp ahead of a print's receipt
+@pytest.mark.parametrize("forward,honest", [(2, 0), (2, 1), (3, 2)])
+def test_forward_stamps_that_are_most_of_the_lag_window_do_not_prove_an_unstamped_prints_bucket(forward, honest):
+    # On a synced host, quotes stamped 15 s ahead (the 30 s rule accepts them) are most of the minute's lag samples. v1.14
+    # read their upper median as a host 15 s behind: the print B, traded at 10:04:59.9 and received at 10:05:00.4, was
+    # "proven" 10:05's by those very stamps, so its bar was evaluated while the back-fill of 10:00 counted B's 2,000
+    # shares again (3,500 against a true 1,500). No number of samples tells such stamps from a host behind.
+    alpha = RecordingAlpha()
+    broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        for k in range(honest):
+            a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 4, 10 + k), -0.4))        # quotes, 0.4 s late
+        for k in range(forward):
+            a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5, 3 + 2 * k), 15.0))     # quotes, 15 s ahead
+        now[0] = ist(2026, 9, 25, 10, 5, 0, 400000)
+        a.on_tick(a._normalize(zeroed(15_000, 100.3)))                                     # B
+        assert a.current_bars["SWIGGY"]["ambiguous"] is True
+        a.on_tick(stamped(100.9, 16_500, ist(2026, 9, 25, 10, 7), -0.3))
+        a.on_tick(stamped(100.9, 16_600, ist(2026, 9, 25, 10, 10, 1), -0.3))   # closes 10:05 across the 10:00 hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 5)) not in [idx for _, idx in alpha.evaluated]
+
+
+# ---------------------------------------------------------------- round 16: a stamp ahead of its own receipt; partial bars
+@pytest.mark.parametrize("lead", [3.0, 29.0, -0.1])
+def test_a_forward_stamp_no_later_than_an_unstamped_prints_receipt_does_not_prove_its_bucket(lead):
+    # On a synced host, a quote stamped 10:05:00 is received `lead` s before that time (the 30 s rule accepts it), so its
+    # update happened in 10:00. B, traded at 10:04:59.9 and received at 10:05:00.4, came after the update, not after its
+    # stamp. v1.15 checked the stamp only against B's receipt and took it as proof of B's bucket: B's bar was evaluated
+    # while the back-fill of 10:00 counted B's 2,000 shares again (3,500 against a true 1,500). Control: a stamp received
+    # 0.1 s after it still proves the bucket.
+    alpha = RecordingAlpha()
+    broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 4, 10), -0.4))      # a quote, 0.4 s late
+        a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5), lead))           # the quote stamped 10:05:00
+        now[0] = ist(2026, 9, 25, 10, 5, 0, 400000)
+        a.on_tick(a._normalize(zeroed(15_000, 100.3)))                             # B
+        assert a.current_bars["SWIGGY"]["ambiguous"] is (lead > 0)
+        a.on_tick(stamped(100.9, 16_500, ist(2026, 9, 25, 10, 7), -0.3))
+        a.on_tick(stamped(100.9, 16_600, ist(2026, 9, 25, 10, 10, 1), -0.3))   # closes 10:05 across the 10:00 hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert (pd.Timestamp(ist(2026, 9, 25, 10, 5)) in [idx for _, idx in alpha.evaluated]) is (lead < 0)
+
+
+@pytest.mark.parametrize("how", ["fetch_fails", "no_source", "replaced"])
+def test_a_partial_bar_is_played_to_the_paper_oco_when_the_brokers_bars_do_not_replace_it(how):
+    # A paper position (target 103) is open, and the name traded through the target only in the 10:05 bucket, whose bar
+    # a websocket close at 10:08 cut short: it was discarded as partial. When the back-fill before the 10:10 bar failed,
+    # v1.15 played only 10:10 (it held spill-pair bars, not partial ones): the target was never hit and the symbol stayed
+    # blocked. The same without a history source. Control: with the broker's bars, those are played, once each.
+    broker = pd.DataFrame([[101.0, 103.6, 100.9, 101.2, 9_000.0]], columns=engine.OHLCV,
+                          index=pd.DatetimeIndex([ist(2026, 9, 25, 10, 5)], name="datetime"))
+    played = []
+
+    async def backfill(sym, start, end):
+        if how == "fetch_fails":
+            raise ConnectionError("history API unreachable")
+        return await broker_of(broker)(sym, start, end)
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 0)]
+        router = engine.ExecutionRouter(asyncio.Queue(), risk_per_trade=1_000.0)
+        router.positions["SWIGGY"] = engine.Position("SWIGGY", 100, 101.0, 99.0, 103.0, ist(2026, 9, 25, 9, 55),
+                                                      stop_limit=97.02)
+        router.active_inventory.add("SWIGGY")
+        history = pd.concat([session_history(24), make_bars([101.0] * 9, start=ist(2026, 9, 25, 9, 15))])   # to 09:55
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=None if how == "no_source" else backfill,
+                    bar_listeners=[router.on_bar, lambda sym, ts, bar: played.append((ts, bar["High"]))])
+        a.mark_feed_reset(at=now[0])
+        a.on_tick(at_host(101.0, 1_000, ist(2026, 9, 25, 10, 1), 0.4))           # opens 10:00
+        a.on_tick(at_host(101.0, 3_000, ist(2026, 9, 25, 10, 5, 10), 0.4))       # closes 10:00, opens 10:05
+        a.on_tick(at_host(103.5, 6_000, ist(2026, 9, 25, 10, 6), 0.4))           # through the target
+        a.on_tick(at_host(101.3, 8_000, ist(2026, 9, 25, 10, 7), 0.4))
+        a.mark_feed_down()                                                         # a websocket close: 10:05 is partial
+        a.mark_feed_reset(at=ist(2026, 9, 25, 10, 9))
+        a.on_tick(at_host(101.2, 9_500, ist(2026, 9, 25, 10, 9, 30), 0.4))       # re-baselines
+        a.on_tick(at_host(101.1, 10_000, ist(2026, 9, 25, 10, 11), 0.4))         # 10:05 discarded, opens 10:10
+        a.on_tick(at_host(101.0, 11_000, ist(2026, 9, 25, 10, 15, 1), 0.4))      # closes 10:10 after the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return router
+
+    router = asyncio.run(scenario())
+    assert played == [(pd.Timestamp(ist(2026, 9, 25, 10, 0)), 101.0),
+                      (pd.Timestamp(ist(2026, 9, 25, 10, 5)), 103.6 if how == "replaced" else 103.5),
+                      (pd.Timestamp(ist(2026, 9, 25, 10, 10)), 101.1)]
+    assert [(p.exit_reason, p.exit_price, p.closed_at) for p in router.closed_positions] == \
+        [("TARGET", 103.0, pd.Timestamp(ist(2026, 9, 25, 10, 5)))]
+    assert not router.positions and not router.active_inventory
+
+
+# ---------------------------------------------------------------- round 16: a stamp ahead of a print's feed time
+@pytest.mark.parametrize("lead,forward,honest", [
+    (3.0, [(57.1, 0), (58.1, 1)], 1),                    # a host 3 s ahead: 2 of 3 samples ~2.9 s forward
+    (3.0, [(57.1, 0), (58.1, 1), (59.1, 2)], 2),         # 3 of 5
+    (0.0, [(59.55, 0)], 1),                              # a synced host: one stamp 0.45 s forward, ahead of its receipt
+    (0.0, [(59.65, 0)], 1),                              # 0.35 s forward, received after it: only feed time catches it
+])
+def test_a_stamp_later_than_an_unstamped_prints_feed_time_does_not_prove_its_bucket(lead, forward, honest):
+    # v1.15 let a stamp prove an unstamped print's bucket if it was no later than the print's receipt. A host `lead` s
+    # ahead of the exchange reads that receipt `lead` s late, so quotes stamped with whole seconds 10:05:00, :01 and :02
+    # for trades at 10:04:57.1, 58.1 and 59.1 (on a synced host, one stamped 10:05:00 at 10:04:59.55 or 59.65, less
+    # than the print's latency ahead) still "proved" 10:05 for B, 10:00's only trade at 10:04:59.9: its bar was
+    # evaluated while the back-fill of 10:00 counted B's 2,000 shares again (3,500 against a true 1,500). The honest
+    # sample, the largest, holds the host's lead: the stamp must be no later than B's feed time. The 59.55 stamp is
+    # also ahead of its own receipt, which rejects it alone; the 59.65 one, received 0.05 s after its stamp, is not.
+    alpha = RecordingAlpha()
+    broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0))
+    host = lambda t: t + timedelta(seconds=lead)        # noqa: E731
+
+    async def scenario():
+        now = [host(ist(2026, 9, 25, 9, 55, 10, 300000))]
+        a, _ = quiet_until_1000(now, behind=-lead, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        for k in range(honest):
+            a.on_tick(at_host(100.2, 13_000, ist(2026, 9, 25, 10, 4, 10 + k), 0.4, -lead))      # quotes
+        for traded, second in forward:                                                     # quotes stamped ahead
+            q = stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5, second), 0)
+            q.received = host(ist(2026, 9, 25, 10, 4) + timedelta(seconds=traded + 0.4))
+            a.on_tick(q)
+        now[0] = host(ist(2026, 9, 25, 10, 5, 0, 200000))                                  # B, 0.3 s after its trade
+        a.on_tick(a._normalize(zeroed(15_000, 100.3)))
+        assert (a.current_bars["SWIGGY"]["timestamp"], a.current_bars["SWIGGY"]["ambiguous"]) == \
+            (ist(2026, 9, 25, 10, 5), True)
+        a.on_tick(at_host(100.9, 16_500, ist(2026, 9, 25, 10, 7), 0.3, -lead))
+        a.on_tick(at_host(100.9, 16_600, ist(2026, 9, 25, 10, 10, 1), 0.3, -lead))   # closes 10:05 across the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 10, 5)) not in [idx for _, idx in alpha.evaluated]
+
+
+def test_on_a_host_running_ahead_a_stamp_of_its_own_bucket_received_first_still_proves_an_unstamped_prints_bar():
+    # Control for the above, on a host 3 s ahead: a stamped quote of 11:05:00 closed the 11:00 bar, which a reconnect had
+    # made partial. The unstamped trade received after it, whose feed time is 11:05:00.7, can only be 11:05's: the bar is
+    # evaluated although the back-fill says 11:00 traded.
+    alpha = RecordingAlpha()
+    history = pd.concat([session_history(24), make_bars([100.0] * 21, start=ist(2026, 9, 25, 9, 15))])  # to 10:55
+    broker = make_bars([100.2], volumes=[90_000], start=ist(2026, 9, 25, 11, 0))
+    host = lambda t: t + timedelta(seconds=3)           # noqa: E731
+
+    async def scenario():
+        now = [host(ist(2026, 9, 25, 11, 0, 30, 300000))]
+        a = clocked(now, history=history, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        a.mark_feed_reset(at=host(ist(2026, 9, 25, 9, 0)))
+        a.on_tick(at_host(100.1, 50_000, ist(2026, 9, 25, 11, 0, 30), 0.3, -3.0))
+        a.mark_feed_reset(at=host(ist(2026, 9, 25, 11, 2)))                   # a reconnect: 11:00 is partial
+        for price, cum, stamp in [(100.2, 80_000, ist(2026, 9, 25, 11, 3)), (100.2, 90_000, ist(2026, 9, 25, 11, 4)),
+                                  (100.2, 90_000, ist(2026, 9, 25, 11, 5))]:  # the last one a quote: closes 11:00
+            a.on_tick(at_host(price, cum, stamp, 0.3, -3.0))
+        now[0] = host(ist(2026, 9, 25, 11, 5, 1))
+        a.on_tick(a._normalize(zeroed(190_000, 100.9)))
+        assert (a.current_bars["SWIGGY"]["timestamp"], a.current_bars["SWIGGY"]["ambiguous"]) == \
+            (ist(2026, 9, 25, 11, 5), False)
+        a.on_tick(at_host(101.0, 380_000, ist(2026, 9, 25, 11, 8), 0.3, -3.0))
+        a.on_tick(at_host(101.0, 381_000, ist(2026, 9, 25, 11, 10, 1), 0.3, -3.0))   # closes 11:05 across the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert pd.Timestamp(ist(2026, 9, 25, 11, 5)) in [idx for _, idx in alpha.evaluated]
+
+
+# ---------------------------------------------------------------- round 17: only the newest stamp is tried
+@pytest.mark.parametrize("later", [None, "after_feed_time", "ahead_of_receipt"])
+def test_a_later_update_of_the_bucket_voids_an_earlier_stamps_proof(later):
+    # A synced host whose largest lag sample is 0.4 s. Q1, a quote stamped 10:05:00, is received at 10:05:00.1; B, an
+    # unstamped trade, at 10:05:03.3 (feed time 10:05:02.9). Q1 passes both checks and, with no later update, proves
+    # 10:05 (the control). A later update of 10:05 received before B, stamped 10:05:03 (after B's feed time), voids it:
+    # only the newest stamp no later than its own receipt is tried. Q1 and it may both be forward (updates at 10:04:59.5
+    # and 10:04:59.7), with B, 10:00's only trade, at 10:04:59.9 and 3.4 s late (slower than every sample): trying Q1 too
+    # would evaluate B's bar while the back-fill of 10:00 counts B's 2,000 shares again. A genuine twin is missed (the
+    # README says so). An update stamped ahead of its own receipt proves nothing and voids nothing: Q1 still proves.
+    alpha = RecordingAlpha()
+    broker = make_bars([100.3], volumes=[2_000], start=ist(2026, 9, 25, 10, 0))
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), backfill=broker_of(broker))
+        a.alpha = alpha
+        for second in (10, 30, 50):
+            a.on_tick(at_host(100.2, 13_000, ist(2026, 9, 25, 10, 4, second), 0.4))    # quotes, 0.4 s late
+        a.on_tick(stamped(100.2, 13_000, ist(2026, 9, 25, 10, 5), -0.1))                # Q1
+        if later is not None:
+            stamp = ist(2026, 9, 25, 10, 5, 3 if later == "after_feed_time" else 4)
+            q = stamped(100.2, 13_000, stamp, 0)
+            q.received = ist(2026, 9, 25, 10, 5, 3, 100000)
+            a.on_tick(q)
+        now[0] = ist(2026, 9, 25, 10, 5, 3, 300000)
+        a.on_tick(a._normalize(zeroed(15_000, 100.3)))                                  # B
+        assert (a.current_bars["SWIGGY"]["timestamp"], a.current_bars["SWIGGY"]["ambiguous"]) == \
+            (ist(2026, 9, 25, 10, 5), later == "after_feed_time")
+        a.on_tick(at_host(100.9, 16_500, ist(2026, 9, 25, 10, 7), 0.3))
+        a.on_tick(at_host(100.9, 16_600, ist(2026, 9, 25, 10, 10, 1), 0.3))           # closes 10:05 across the hole
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+
+    asyncio.run(scenario())
+    assert (pd.Timestamp(ist(2026, 9, 25, 10, 5)) in [idx for _, idx in alpha.evaluated]) is (later != "after_feed_time")
+
+
+# ---------------------------------------------------------------- round 16: each kept bar clears the discarded-bar mark
+@pytest.mark.parametrize("how", ["spill", "partial"])
+def test_a_bar_kept_after_a_discarded_one_clears_its_mark_so_a_later_weekend_session_is_back_filled(how):
+    # The feed joined on Friday at 15:17: the partial 15:15 bar was discarded, then 15:20 (whose back-fill restored 15:15)
+    # and 15:25 were kept. The special Saturday session's only bar, 10:00 (101.5 on 700k, crossing the base high 100.5),
+    # was discarded too. Only the first bar discarded since the last kept one marks its session, so each kept bar must
+    # clear the mark: had Friday's stayed, Saturday's would have been refused, and Monday's 09:15 bar (102 on 500k),
+    # evaluated against Friday's 15:25 close, would have fired a first crossing the exchange's bars never show.
+    alpha = TradingAlpha()
+    broker = pd.concat([make_bars([100.0], start=ist(2026, 9, 25, 15, 15)),
+                        make_bars([101.5], volumes=[700_000], start=ist(2026, 9, 26, 10, 0))])
+    calls = []
+
+    async def backfill(sym, start, end):
+        calls.append((start, end))
+        return await broker_of(broker)(sym, start, end)
+
+    async def scenario():
+        now = [ist(2026, 9, 25, 15, 17)]
+        history = pd.concat([session_history(day) for day in (23, 24)]
+                            + [make_bars([100.0] * 72, start=ist(2026, 9, 25, 9, 15))])        # to Friday 15:10
+        a = clocked(now, history=history, started_at=now[0], loop=asyncio.get_running_loop(), backfill=backfill,
+                    require_feed_liveness=True)
+        a.alpha = alpha
+        a.mark_feed_reset(at=now[0])                                           # a late join: 15:15 is partial
+
+        async def flush(at):
+            a.note_feed_alive(at)
+            a.flush_due_bars(at)
+            await asyncio.sleep(0)
+            await asyncio.gather(*a._backfills)
+
+        a.on_tick(at_host(100.0, 5_000_000, ist(2026, 9, 25, 15, 17, 10), 0.5))   # the baseline
+        a.on_tick(at_host(100.0, 5_010_000, ist(2026, 9, 25, 15, 18), 0.5))
+        a.on_tick(at_host(100.1, 5_050_000, ist(2026, 9, 25, 15, 21), 0.5))   # 15:15 discarded
+        a.on_tick(at_host(100.2, 5_100_000, ist(2026, 9, 25, 15, 26), 0.5))   # 15:20 kept
+        await flush(ist(2026, 9, 25, 15, 30, 3))                               # 15:25 kept
+        assert a.market_state["SWIGGY"].index[-3:].tolist() == \
+            [pd.Timestamp(ist(2026, 9, 25, 15, m)) for m in (15, 20, 25)]
+        a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 26, 10, 1), 0.5))
+        if how == "partial":
+            a.mark_feed_reset(at=ist(2026, 9, 26, 10, 2))                      # a reconnect: 10:00 is partial
+        for second in (10, 30, 50):
+            a.on_tick(at_host(101.5, 300_000, ist(2026, 9, 26, 10, 4, second), 0.5))
+        if how == "spill":
+            now[0] = ist(2026, 9, 26, 10, 5, 1, 200000)
+            a.on_tick(a._normalize(zeroed(700_000, 101.5)))                    # joins 10:00: a spill bar
+        await flush(ist(2026, 9, 26, 10, 5, 3))                                # 10:00 discarded
+        assert "SWIGGY" not in a.current_bars and a.market_state["SWIGGY"].index[-1] == ist(2026, 9, 25, 15, 25)
+        a.on_tick(at_host(102.0, 500_000, ist(2026, 9, 28, 9, 15, 20), 0.5))
+        a.on_tick(at_host(102.0, 500_100, ist(2026, 9, 28, 9, 20, 1), 0.5))    # closes Monday 09:15
+        await asyncio.sleep(0)
+        await asyncio.gather(*a._backfills)
+        return a
+
+    a = asyncio.run(scenario())
+    assert calls == [(ist(2026, 9, 25, 15, 15), ist(2026, 9, 25, 15, 20)), (ist(2026, 9, 26, 9, 15), ist(2026, 9, 28, 9, 15))]
+    assert alpha.evaluated[-1] == (pd.Timestamp(ist(2026, 9, 26, 10, 0)), pd.Timestamp(ist(2026, 9, 28, 9, 15)))
+    assert a.oms_queue.qsize() == 0
+
+
+# ---------------------------------------------------------------- round 18: a failed back-fill's hole; a negative lag
+def test_a_failed_backfills_hole_is_retried_and_no_later_bar_is_evaluated_across_it():
+    # A late join cost 10:00 and the back-fill before 10:05 failed. v1.17 recorded 10:05 unevaluated, then evaluated
+    # 10:10 and every later bar across the hole: the 20-bar RVOL baseline lacked 10:00 (a surge the feed never saw), and
+    # a breakout the exchange's bars do not show could fire. Every later bar now retries the hole first (the second
+    # retry succeeds), and each bar reaches the listeners once: the feed's 10:00 when the first fetch failed, the live
+    # 10:05 and 10:10 bars as they closed (history keeps them), and none of the broker's again.
+    history = pd.concat([session_history(24), make_bars([100.0] * 9, start=ist(2026, 9, 25, 9, 15))])   # to 09:55
+    broker = make_bars([100.3, 100.4, 100.5], volumes=[2_000_000, 50, 50], start=ist(2026, 9, 25, 10, 0))
+    calls, seen = [], []
+
+    async def backfill(sym, start, end):
+        calls.append((start, end))
+        if len(calls) < 3:
+            raise ConnectionError("history API unreachable")
+        return await broker_of(broker)(sym, start, end)
+
+    async def scenario():
+        alpha = RecordingAlpha()
+        a = engine.LiveTickAdapter({"SWIGGY": history}, alpha, asyncio.Queue(), asyncio.get_running_loop(),
+                                   started_at=ist(2026, 9, 25, 10, 2, 40), backfill=backfill,
+                                   bar_listeners=[lambda s, ts, b: seen.append(pd.Timestamp(ts))])
+        a.on_tick(tick(100.4, 10, ist(2026, 9, 25, 10, 2, 45)))            # joins 10:00 late: discarded
+        for minute in (5, 10, 15, 20, 25):
+            a.on_tick(tick(100.6, 10, ist(2026, 9, 25, 10, minute, 1)))    # closes the bar before
+            await asyncio.sleep(0)
+            await asyncio.gather(*a._backfills)
+        return a, alpha
+
+    a, alpha = asyncio.run(scenario())
+    at = lambda minute: pd.Timestamp(ist(2026, 9, 25, 10, minute))       # noqa: E731
+    assert calls == [(ist(2026, 9, 25, 10, 0), ist(2026, 9, 25, 10, m)) for m in (5, 10, 15)]
+    assert alpha.evaluated == [(at(10), at(15)), (at(15), at(20))]         # v1.17: 10:10 and 10:15 across the hole too
+    df = a.market_state["SWIGGY"]
+    volume = df["Volume"]                                 # masks, not labels: the clock-shifted runs replace datetime
+    assert volume[df.index == at(0)].tolist() == [2_000_000] and volume[(df.index >= at(5)) & (df.index <= at(20))].tolist() == [10.0] * 4
+    assert seen == [at(0), at(5), at(10), at(15), at(20)] and "SWIGGY" not in a._unfilled
+
+
+def test_a_retried_hole_does_not_make_the_live_bar_before_an_unstamped_prints_bar_look_double_counted():
+    # Control for the retry above: 10:10 opened on an unstamped print, and the bar before it is 10:05, a live bar history
+    # keeps. The retried fetch of 10:00-10:10 returns the broker's 10:05 too, which traded, but the print cannot be
+    # counted twice there (history keeps the live 10:05, without it): 10:10 is evaluated, as it is without a retry.
+    history = pd.concat([session_history(24), make_bars([100.0] * 9, start=ist(2026, 9, 25, 9, 15))])   # to 09:55
+    broker = make_bars([100.3, 100.4], volumes=[2_000_000, 60_000], start=ist(2026, 9, 25, 10, 0))
+    calls = []
+
+    async def backfill(sym, start, end):
+        calls.append((start, end))
+        if len(calls) == 1:
+            raise ConnectionError("history API unreachable")
+        return await broker_of(broker)(sym, start, end)
+
+    async def scenario():
+        alpha = RecordingAlpha()
+        now = [ist(2026, 9, 25, 10, 2, 40)]
+        a = clocked(now, history=history, started_at=now[0], loop=asyncio.get_running_loop(), backfill=backfill,
+                    require_feed_liveness=True)
+        a.alpha = alpha
+        a.mark_feed_reset(at=now[0])                                               # a late join: 10:00 is partial
+
+        async def flush(at):
+            now[0] = at
+            a.note_feed_alive(at)
+            a.flush_due_bars(at)
+            await asyncio.sleep(0)
+            await asyncio.gather(*a._backfills)
+
+        a.on_tick(at_host(100.3, 5_000_000, ist(2026, 9, 25, 10, 2, 45), 0.3))    # the baseline
+        a.on_tick(at_host(100.3, 5_010_000, ist(2026, 9, 25, 10, 3), 0.3))
+        a.on_tick(at_host(100.4, 5_070_000, ist(2026, 9, 25, 10, 6), 0.3))        # 10:00 discarded, opens 10:05
+        await flush(ist(2026, 9, 25, 10, 10, 3))                                    # 10:05 kept; its back-fill fails
+        now[0] = ist(2026, 9, 25, 10, 10, 30)
+        a.on_tick(a._normalize(zeroed(5_100_000, 100.5)))                          # opens 10:10
+        assert a.current_bars["SWIGGY"]["ambiguous"] is True
+        await flush(ist(2026, 9, 25, 10, 15, 3))                                    # closes 10:10
+        return alpha
+
+    alpha = asyncio.run(scenario())
+    assert alpha.evaluated == [(pd.Timestamp(ist(2026, 9, 25, 10, 5)), pd.Timestamp(ist(2026, 9, 25, 10, 10)))]
+
+
+@pytest.mark.parametrize("path,received", [("bar_clock", None), ("unstamped", (10, 4, 45)), ("unstamped", (10, 5, 1))])
+def test_a_lone_forward_stamped_update_does_not_close_a_bar_before_its_end(path, received):
+    # On a synced host, a quote stamped 20 s ahead of its receipt (the 30 s rule accepts it) was the minute's only lag
+    # sample: v1.17 read it as a host 20 s behind. The bar clock then closed 10:00 at 10:04:42, and an unstamped print
+    # received at 10:04:45 was filed in 10:05. Either way 10:00 lost its 400k tail to 10:05, so a 10:05 that crossed
+    # the base on 50k of its own fired a breakout the exchange's bars do not show. A bar is now held open until its end
+    # plus the grace on the host clock, and an unstamped print received before then joins it (a spill: both bars are
+    # back-filled), as it does within the grace with a lag of zero or more.
+    async def scenario():
+        now = [ist(2026, 9, 25, 9, 55, 10, 300000)]
+        a, _ = quiet_until_1000(now, loop=asyncio.get_running_loop(), require_feed_liveness=True)
+        a.on_tick(stamped(100.2, 63_000, ist(2026, 9, 25, 10, 1), -0.3))          # opens 10:00
+        a.on_tick(stamped(100.2, 63_000, ist(2026, 9, 25, 10, 3), 20.0))          # a quote stamped 20 s ahead
+        assert a.feed_lag == -20.0
+        t = ist(2026, 9, 25, 10, 2, 40)
+        while t < ist(2026, 9, 25, *(received or (10, 4, 45))) - timedelta(seconds=1):   # heartbeats (and the bar clock)
+            t += timedelta(seconds=1)
+            now[0] = t
+            a.note_feed_alive(t)
+            if path == "bar_clock":
+                a.flush_due_bars(t)
+        assert a.current_bars["SWIGGY"]["timestamp"] == ist(2026, 9, 25, 10, 0)
+        if path == "bar_clock":
+            a.on_tick(stamped(100.3, 463_000, ist(2026, 9, 25, 10, 4, 50), -0.3))  # the tail, stamped
+            assert a.dropped_ticks == 0 and a.current_bars["SWIGGY"]["Volume"] == 450_000
+        else:
+            now[0] = ist(2026, 9, 25, *received)
+            a.on_tick(a._normalize(zeroed(463_000, 100.3)))                         # the tail, unstamped
+            bar = a.current_bars["SWIGGY"]
+            assert (bar["timestamp"], bar["Volume"], bar.get("spill")) == (ist(2026, 9, 25, 10, 0), 450_000, True)
+        assert a.last_closed["SWIGGY"] == ist(2026, 9, 25, 9, 55)
+
+    asyncio.run(scenario())

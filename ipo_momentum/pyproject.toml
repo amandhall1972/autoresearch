@@ -1,0 +1,32 @@
+[project]
+name = "ipo-momentum-engine"
+version = "1.19.0"
+description = "IPO base-breakout momentum engine: historical sync, live tick bar synthesis, AVWAP/RVOL alpha, risk-capped execution"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    # zoneinfo needs the IANA database; Windows ships without one.
+    "tzdata>=2024.1; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+kite = ["kiteconnect>=5.0"]
+# uvloop: the signal tests also run on the event loop most production hosts use.
+dev = ["pytest>=8", "kiteconnect>=5.0", "uvloop>=0.19; sys_platform != 'win32'"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+# Pandas deprecations raised from engine code must fail the suite, so the engine
+# stays working on both the pandas 2.x and 3.x lines.
+filterwarnings = [
+    "error::FutureWarning",
+    "error::pandas.errors.ChainedAssignmentError",
+    "error::DeprecationWarning:engine",
+]
