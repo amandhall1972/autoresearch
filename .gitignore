@@ -21,3 +21,9 @@ dev/
 
 # Results file
 results.tsv
+
+# nse autoresearch run artifacts
+nse/runs/
+nse/run.log
+nse/__pycache__/
+nse/.pytest_cache/
