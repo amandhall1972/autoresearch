@@ -19,8 +19,8 @@ metric improves, and repeats.
 
 ## Experimentation
 
-Each experiment: `python run.py > run.log 2>&1` (takes ~5-20 s). Read the result with
-`grep -E "^(sharpe_is|sharpe_oos|sharpe_full|maxdd_is|turnover_yr_full|lookahead_ok):" run.log`.
+Each experiment: `python run.py > run.log 2>&1` (takes ~10 s). Read the result with
+`grep -E "^(sharpe_is|sharpe_oos|sharpe_full|maxdd_is|turnover_yr_is|exposure_is|n_names_avg_is|pct_days_invested_is|lookahead_ok|n_harness_fixes):" run.log`.
 
 **What you CAN do:** modify `strategy.py` only. Any causal transformation of the data provided in
 `MarketData` is fair game: indicator periods and thresholds, how RSI/EMA/VWAP are combined, anchored vs
@@ -28,10 +28,13 @@ rolling VWAP, ranking/scoring, number of names, volatility targeting, regime fil
 hysteresis, holding periods, position sizing, partial cash. Keep RSI, EMA and VWAP as the core of the
 signal (that is the brief); you may add supporting filters.
 
-**What you CANNOT do:** modify `prepare.py`, `indicators.py`, `run.py` or the data; use future
-information (the lookahead detector will flag it and the run is a crash); short sell; exceed 100%
-gross exposure; trade non-members or the two indices (the harness zeroes such weights); use
-`sharpe_oos`/`*_oos` numbers to make decisions.
+**What you CANNOT do:** modify `prepare.py`, `indicators.py`, `run.py`, the tests or the data; read
+files, the network or the data loader from `strategy.py` (run.py refuses such a file); use future
+information (the dense lookahead detector fails the run); treat a NaN indicator as a signal (3.5
+years of warm-up are provided, so any lookback up to ~800 bars is valid from 2020-01-01); short
+sell; exceed 100% gross exposure; trade non-members or the two indices (the harness zeroes such
+weights); use `sharpe_oos`/`*_oos` numbers to make decisions. The NIFTYBEES ETF is a tradable
+instrument for parking index exposure; do not let it compete as "one of the stocks".
 
 **The goal: the highest `sharpe_is`** (annualized Sharpe of net daily excess returns over the RBI repo
 rate, 2020-01-01 to 2023-12-31, at 15 bps one-way cost, next-open execution). `sharpe_oos`
@@ -42,9 +45,9 @@ keep/discard criterion - that is the only thing keeping it an honest out-of-samp
 special cases is not worth it; equal Sharpe with less code is a win. Parameters that are suspiciously
 specific (e.g. RSI 53.7) are a smell - prefer round, structurally motivated choices.
 
-**Sanity gates for a keep**: `lookahead_ok` is True, `pct_days_invested` is not trivially small,
-turnover is not absurd (> 50x/yr is a smell at these costs), and the improvement is not driven by a
-single day. If a change improves `sharpe_is` only by cutting exposure to near zero, discard it.
+**Sanity gates for a keep**: `lookahead_ok` is True, `pct_days_invested_is` >= 0.30,
+`n_names_avg_is` >= 5, `turnover_yr_is` <= 60, `maxdd_is` > -0.45, and the improvement is not driven
+by a single day. If a change improves `sharpe_is` only by cutting exposure to near zero, discard it.
 
 **The first run** establishes the baseline: run `strategy.py` as is.
 
@@ -72,7 +75,7 @@ commit	sharpe_is	sharpe_oos	sharpe_full	maxdd_is	turnover_yr	status	description
 3. sharpe_oos (4 dp) - record only
 4. sharpe_full (4 dp) - record only
 5. maxdd_is (4 dp)
-6. turnover_yr_full (2 dp)
+6. turnover_yr_is (2 dp)
 7. status: `keep`, `discard`, or `crash`
 8. short description of what the experiment tried
 

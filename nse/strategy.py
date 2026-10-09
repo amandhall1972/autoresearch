@@ -10,10 +10,12 @@ Baseline rules (textbook confluence):
   regime   : NIFTY 50 above its EMA(regime_ema); otherwise fully in cash
   sizing   : equal weight across the top `max_names` qualifying members (ranked by RSI),
              hold while a looser exit condition is not triggered (hysteresis).
+Names with no fresh bar on a day stay held (they cannot be traded that day anyway).
 """
 import numpy as np
 import pandas as pd
 from indicators import ema, rsi, rolling_vwap
+from prepare import ETF_TICKER
 
 PARAMS = dict(
     rsi_n=14, rsi_lo=50.0, rsi_hi=70.0, rsi_exit=40.0,
@@ -34,9 +36,10 @@ def compute_target_weights(md) -> pd.DataFrame:
     nifty = md.index_close["NIFTY50"]
     regime = (nifty > nifty.ewm(span=p["regime_ema"], adjust=False, min_periods=p["regime_ema"]).mean())
 
-    eligible = md.member & md.tradable
+    stock = md.member.copy(); stock[ETF_TICKER] = False          # the ETF is not part of the stock pool
+    eligible = stock & md.tradable
     entry = eligible & (ef > es) & (c > ef) & (c > vw) & (r > p["rsi_lo"]) & (r < p["rsi_hi"])
-    hold = eligible & (c > es) & (c > vw * 0.98) & (r > p["rsi_exit"])
+    hold = (stock & ~md.tradable) | (eligible & (c > es) & (c > vw * 0.98) & (r > p["rsi_exit"]))
     score = r.where(entry)
 
     dates = md.calendar

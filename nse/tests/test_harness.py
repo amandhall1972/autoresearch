@@ -90,8 +90,9 @@ def _synthetic_md(T=6, tickers=("A", "B", P.ETF_TICKER), opens=None, closes=None
     tradable = pd.DataFrame(True, index=cal, columns=tickers)
     member = pd.DataFrame(True, index=cal, columns=tickers)
     ic = pd.DataFrame({"NIFTY50": 10000.0, "BANKNIFTY": 30000.0}, index=cal)
+    iohlc = {k: ic.copy() for k in ["open", "high", "low", "close"]}
     rfs = pd.Series(rf, index=cal)
-    return P.MarketData(o, h, l, c, v, tradable, member, ic, rfs, cal)
+    return P.MarketData(o, h, l, c, v, tradable, member, ic, iohlc, rfs, cal)
 
 
 def test_engine_next_open_execution_hand_computed():
@@ -120,7 +121,8 @@ def test_cash_earns_risk_free():
     md = _synthetic_md(T=3, tickers=("A",), rf=0.0004)
     w = pd.DataFrame(0.0, index=md.calendar, columns=["A"])
     res = P.run_backtest(w, md, cost_bps=15)
-    assert abs(res["ret"].iloc[1] - 0.0004) < 1e-9 or abs(res["ret"].iloc[1] - (1.0002 * 1.0002 - 1)) < 1e-9
+    assert abs(res["ret"].iloc[1] - 0.0004) < 1e-12
+    assert abs(P.sharpe(res["ret"].iloc[1:], md.rf.iloc[1:])) < 1e-9   # all-cash: exactly zero excess return
 
 
 def test_long_only_and_gross_cap_enforced():
@@ -131,32 +133,81 @@ def test_long_only_and_gross_cap_enforced():
         P.run_backtest(pd.DataFrame(0.6, index=md.calendar, columns=["A", "B"]), md)
 
 
+def test_stale_held_name_is_carried_and_fresh_names_scaled_not_raised():
+    md = _synthetic_md(T=5, tickers=("A", "B"))
+    md.tradable.loc[md.calendar[2], "A"] = False
+    # the strategy drops the stale name and re-spreads: (0.5,0.5) -> (0,1.0) on day 2 -> would exceed 1 with the carry
+    w = pd.DataFrame(0.5, index=md.calendar, columns=["A", "B"])
+    w.loc[md.calendar[2], "A"] = 0.0; w.loc[md.calendar[2], "B"] = 1.0
+    res = P.run_backtest(w, md, cost_bps=0)
+    W = res["weights"]
+    assert abs(W.loc[md.calendar[2], "A"] - 0.5) < 1e-12 and abs(W.loc[md.calendar[2], "B"] - 0.5) < 1e-12
+    assert res["n_harness_fixes"] == 1
+    assert (W.sum(axis=1) <= P.MAX_GROSS + 1e-12).all()
+
+
+def test_strategy_gross_violation_still_raises():
+    md = _synthetic_md(T=3, tickers=("A", "B"))
+    with pytest.raises(ValueError):
+        P.run_backtest(pd.DataFrame(0.6, index=md.calendar, columns=["A", "B"]), md)
+
+
+def test_engine_carries_drifted_state_overnight():
+    # two assets, equal target every day; A rallies intraday on day1 so holdings drift to 0.55/0.45;
+    # day2 flat -> the rebalance back to 0.5/0.5 at the open trades 0.10 and (at 0 bps) returns exactly 0
+    closes = np.array([[100.0, 100.0], [110.0, 90.0], [110.0, 90.0]])
+    opens = np.array([[100.0, 100.0], [100.0, 100.0], [110.0, 90.0]])
+    md = _synthetic_md(T=3, tickers=("A", "B"), opens=opens, closes=closes)
+    w = pd.DataFrame(0.5, index=md.calendar, columns=["A", "B"])
+    res = P.run_backtest(w, md, cost_bps=0)
+    assert abs(res["ret"].iloc[1]) < 1e-12 and abs(res["ret"].iloc[2]) < 1e-12
+    assert abs(res["turnover"].iloc[2] - 0.10) < 1e-12
+    res15 = P.run_backtest(w, md, cost_bps=15)
+    assert abs(res15["ret"].iloc[2] - (-0.10 * 0.0015)) < 1e-12
+    # overnight gap after the drift: A +10% overnight on day2 with drifted weight 0.55 -> +5.5% not +5%
+    opens2 = np.array([[100.0, 100.0], [100.0, 100.0], [121.0, 90.0]]); closes2 = np.array([[100.0, 100.0], [110.0, 90.0], [121.0, 90.0]])
+    md2 = _synthetic_md(T=3, tickers=("A", "B"), opens=opens2, closes=closes2)
+    res2 = P.run_backtest(w, md2, cost_bps=0)
+    assert abs(res2["ret"].iloc[2] - 0.055) < 1e-12
+
+
 def test_nonmember_weights_are_zeroed_and_delisted_names_liquidated():
     md = _synthetic_md(T=5, tickers=("A", "B"))
     md.member["B"] = False
     md.tradable.loc[md.calendar[3]:, "A"] = False
-    md.close.loc[md.calendar[3]:, "A"] = np.nan; md.open.loc[md.calendar[3]:, "A"] = np.nan
-    md.close["A"] = md.close["A"].ffill(); md.open["A"] = md.open["A"].ffill()
     w = pd.DataFrame(0.5, index=md.calendar, columns=["A", "B"])
     res = P.run_backtest(w, md, cost_bps=0)
     W = res["weights"]
     assert (W["B"] == 0).all()
-    assert (W["A"].iloc[:3] == 0.5).all() and (W["A"].iloc[4:] == 0).all()
+    assert (W["A"].iloc[:3] == 0.5).all() and (W["A"].iloc[3:] == 0).all()   # liquidated at its last fresh close
 
 
-def test_lookahead_detector_catches_a_leak():
-    md = _synthetic_md(T=40, tickers=("A", "B"), closes=100 + np.cumsum(np.random.default_rng(3).normal(0, 1, (40, 2)), axis=0))
+@pytest.fixture(scope="module")
+def md():
+    return P.load_data()
 
-    def leaky(m):
-        up = m.close.shift(-1) > m.close
-        return up.astype(float) * 0.5
+
+def test_lookahead_detector_catches_leaks_on_real_data(md):
+    from indicators import ema
 
     def clean(m):
-        up = m.close > m.close.shift(1)
-        return up.astype(float) * 0.5
+        up = (m.close > ema(m.close, 20)) & m.member & m.tradable
+        w = up.astype(float); return w.div(w.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0)
 
-    assert not P.check_no_lookahead(leaky, md, check_dates=(md.calendar[20], md.calendar[30]))["ok"]
-    assert P.check_no_lookahead(clean, md, check_dates=(md.calendar[20], md.calendar[30]))["ok"]
+    def leaky_exit(m):          # the review's example: exit before a >3% drop tomorrow, neutral at the boundary
+        up = (m.close > ema(m.close, 20)) & m.member & m.tradable
+        up &= ~((m.close.shift(-1) / m.close - 1) < -0.03)
+        w = up.astype(float); return w.div(w.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0)
+
+    def leaky_rank(m):          # rank candidates by tomorrow's return (fillna neutral)
+        up = (m.close > ema(m.close, 20)) & m.member & m.tradable
+        sc = (m.close.shift(-1) / m.close).fillna(1.0).where(up)
+        top = sc.rank(axis=1, ascending=False) <= 10
+        w = top.astype(float); return w.div(w.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0)
+
+    assert P.check_no_lookahead(clean, md, n_trunc=8, n_corrupt=4)["ok"]
+    assert not P.check_no_lookahead(leaky_exit, md, n_trunc=8, n_corrupt=4)["ok"]
+    assert not P.check_no_lookahead(leaky_rank, md, n_trunc=8, n_corrupt=4)["ok"]
 
 
 def test_metrics_basic():
@@ -168,16 +219,12 @@ def test_metrics_basic():
 
 
 # ----------------------------------------------------------------------------- real data
-@pytest.fixture(scope="module")
-def md():
-    return P.load_data()
-
-
 def test_calendar_and_coverage(md):
     cal = md.calendar
-    assert cal[0] == pd.Timestamp("2019-06-03") and cal[-1] == pd.Timestamp(P.END)
-    for d in ["2020-02-01", "2024-01-20", "2024-03-02", "2024-05-18", "2023-11-12", "2023-10-24", "2024-11-01"]:
-        assert pd.Timestamp(d) not in cal          # special sessions / holiday artifacts excluded
+    assert cal[0] == pd.Timestamp("2016-06-01") and cal[-1] == pd.Timestamp(P.END)
+    assert int(cal.searchsorted(pd.Timestamp(P.START))) >= 850    # indicator warm-up before the backtest starts
+    for d in ["2020-02-01", "2024-01-20", "2024-03-02", "2024-05-18", "2023-11-12", "2023-10-24", "2024-11-01", "2025-10-21"]:
+        assert pd.Timestamp(d) not in cal          # special sessions / holiday artifacts / Muhurat excluded
     assert pd.Timestamp("2025-02-01") in cal        # Budget Saturday 2025: a full session with broad data
     assert md.tradable.loc["2020":].values.mean() > 0.95
     c = md.close.loc["2020":]
@@ -191,7 +238,9 @@ def test_universe_point_in_time(md):
     m = md.member
     assert m.loc["2020-03-18", "YESBANK"] and not m.loc["2020-03-19", "YESBANK"]
     assert not m.loc["2020-03-18", "SHREECEM"] and m.loc["2020-03-19", "SHREECEM"]
-    assert m.loc["2023-06-30", "HDFC"] and not m.loc["2023-07-03", "HDFC"]
+    assert m.loc["2023-07-12", "HDFC"] and not m.loc["2023-07-13", "HDFC"] and m.loc["2023-07-13", "LTIM"]
+    assert not m.loc["2024-09-27", "BEL"] and m.loc["2024-09-30", "BEL"] and not m.loc["2024-09-30", "DIVISLAB"]
+    assert m.loc["2025-03-27", "BPCL"] and not m.loc["2025-03-28", "BPCL"] and m.loc["2025-03-28", "ETERNAL"]
     assert m.loc["2025-09-29", "HEROMOTOCO"] and not m.loc["2025-09-30", "HEROMOTOCO"]
     assert not m.loc["2025-09-29", "INDIGO"] and m.loc["2025-09-30", "INDIGO"]
     assert m.loc["2026-09-29", "WIPRO"] and not m.loc["2026-09-30", "WIPRO"] and m.loc["2026-09-30", "BSE"]
@@ -211,3 +260,34 @@ def test_buy_and_hold_etf_reproduces_asset_return(md):
     res = P.run_backtest(w, md, cost_bps=0)
     r = res["ret"].loc[P.START:P.END]; a = md.close[P.ETF_TICKER].pct_change().loc[P.START:P.END]
     assert abs((1 + r).prod() - (1 + a).prod()) < 1e-9
+
+
+def test_membership_change_rows_fall_on_trading_days(md):
+    w = pd.read_csv(os.path.join(os.path.dirname(HERE), "data", "universe", "nifty50_weights_2019_2025.csv"), parse_dates=["DATE"]).set_index("DATE")
+    mem = (w > 0)
+    changed = mem.ne(mem.shift(1)).any(axis=1)
+    for d in mem.index[1:][changed.values[1:]]:
+        assert d in md.calendar, d
+
+
+def test_etf_open_tracks_index_open(md):
+    e = P.ETF_TICKER
+    g_etf = md.open[e] / md.close[e].shift(1) - 1
+    g_idx = md.index_ohlc["open"]["NIFTY50"] / md.index_close["NIFTY50"].shift(1) - 1
+    d = (g_etf - g_idx).loc["2020":][md.tradable[e].loc["2020":]]
+    assert d.abs().max() < 0.01
+    ok = md.close.loc["2020":].notna()
+    assert ((md.high.loc["2020":] >= md.close.loc["2020":] - 1e-9) | ~ok).all().all()
+    assert ((md.low.loc["2020":] <= md.close.loc["2020":] + 1e-9) | ~ok).all().all()
+
+
+def test_demerger_ex_date_gaps_are_market_gaps(md):
+    for t, d in [("RELIANCE", "2023-07-20"), ("ITC", "2025-01-06"), ("TATAMOTORS", "2025-10-14")]:
+        i = md.calendar.get_loc(pd.Timestamp(d))
+        gap = md.open[t].iloc[i] / md.close[t].iloc[i - 1] - 1
+        assert abs(gap) < 0.003, (t, gap)
+
+
+def test_stale_bars_are_carried_with_zero_volume(md):
+    assert md.volume.loc["2025-03-18", "RELIANCE"] == 0 and not md.tradable.loc["2025-03-18", "RELIANCE"]
+    assert md.open.loc["2025-03-18", "RELIANCE"] == md.close.loc["2025-03-17", "RELIANCE"]
