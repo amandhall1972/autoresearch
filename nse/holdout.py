@@ -49,29 +49,38 @@ def score(strategy_mod, md, cost_bps=P.COST_BPS_PER_SIDE, check=True) -> dict:
     return out
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--strategy", default=os.path.join(HERE, "strategy.py"))
-    ap.add_argument("--label", default="final")
-    ap.add_argument("--cost", type=float, default=P.COST_BPS_PER_SIDE)
-    args = ap.parse_args()
-    src = open(args.strategy, "rb").read()
-    sha = hashlib.sha256(src).hexdigest()[:16]
-    try:
-        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=HERE, capture_output=True, text=True).stdout.strip()
-    except Exception:
-        commit = ""
-    md = P.load_data(presample=True)
-    ev = score(load_strategy(args.strategy), md, cost_bps=args.cost)
+def strategy_sha(path) -> str:
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()[:16]
+
+
+def evaluate_and_log(path, label, md=None, cost_bps=P.COST_BPS_PER_SIDE, commit=None) -> dict:
+    """Score one strategy file on the hold-out and append the look to reports/holdout_log.tsv."""
+    if commit is None:
+        try:
+            commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=HERE, capture_output=True, text=True).stdout.strip()
+        except Exception:
+            commit = ""
+    md = md if md is not None else P.load_data(presample=True)
+    ev = score(load_strategy(path), md, cost_bps=cost_bps)
     ev.pop("_res")
     row = {"utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "git_commit": commit,
-           "strategy_sha256": sha, "label": args.label, "cost_bps": args.cost, **ev}
+           "strategy_sha256": strategy_sha(path), "label": label, "cost_bps": cost_bps, **ev}
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     new = not os.path.exists(LOG)
     with open(LOG, "a") as f:
         if new:
             f.write("\t".join(COLS) + "\n")
         f.write("\t".join(str(row.get(c, "")) for c in COLS) + "\n")
+    return row
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--strategy", default=os.path.join(HERE, "strategy.py"))
+    ap.add_argument("--label", default="final")
+    ap.add_argument("--cost", type=float, default=P.COST_BPS_PER_SIDE)
+    args = ap.parse_args()
+    row = evaluate_and_log(args.strategy, args.label, cost_bps=args.cost)
     print("--- SEALED PRE-SAMPLE HOLD-OUT 2017-04-01..2019-12-31 (logged to reports/holdout_log.tsv)")
     for c in COLS[3:]:
         print(f"{c + ':':<20}{row.get(c)}")
