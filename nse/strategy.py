@@ -42,7 +42,13 @@ Rules (textbook confluence):
              vwap_n days (up or down day alike: a news or block-trade day ends the orderly trend); (c) its
              vol_n/vol_long_n vol expansion ranks in the top 5 % of members (vol_exit_q, the exit-side
              twin of the calm entry filter). A name the exit rules would sell today is not bought into a
-             new cohort either.
+             new cohort either. (d) A trend break: close below vwap_long_exit x the rolling vwap_long_n-day
+             VWAP (the slower VWAP catches names that drift down without breaching the 20-day stop).
+  sizing   : a cohort bought at a FRESH regime start (not the re-entry after an RSI>80 stand-aside) is
+             scaled by the BANK NIFTY's variance ratio, min(1, (vol_long_n-day vol / vol_n-day vol)^size_power):
+             when the market's most liquid, most leveraged sector has just become more volatile than its
+             norm, the new up-leg is less trustworthy and the book is smaller; the rest stays in cash. A
+             re-cross after only whipsaw_days or fewer days off (a whipsaw) is bought at whipsaw_size of that.
 Names with no fresh bar on a day stay held (they cannot be traded that day anyway).
 """
 import numpy as np
@@ -53,9 +59,10 @@ from prepare import ETF_TICKER
 PARAMS = dict(
     rsi_n=14, rsi_smooth=3, rsi_hi=70.0, rsi_peak=80.0, rsi_peak_n=20, rsi_lag=12.0,
     ema_fast=20, ema_slow=50, ema_spread=0.06,
-    vwap_n=20, vwap_exit=0.985, shock_k=2.5, vspike_k=4.0,
+    vwap_n=20, vwap_exit=0.985, shock_k=2.5, vspike_k=4.0, vwap_long_n=50, vwap_long_exit=0.975,
     vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0, vol_exit_q=0.95, corr_n=20,
     regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
+    size_index="BANKNIFTY", size_power=2.0, whipsaw_days=3, whipsaw_size=0.5,
     gross=1.0,
 )
 
@@ -80,8 +87,11 @@ def compute_target_weights(md) -> pd.DataFrame:
     ef, es = ema(c, p["ema_fast"]), ema(c, p["ema_slow"])
     vw = rolling_vwap(h, l, c, v, p["vwap_n"])
     idx_rsi = rsi(md.index_close[["NIFTY50"]], p["regime_rsi_n"])["NIFTY50"]
-    regime_v = hysteresis(idx_rsi, p["regime_rsi_mid"] + p["regime_rsi_band"], p["regime_rsi_mid"] - p["regime_rsi_band"])
-    regime_v &= (idx_rsi <= p["regime_rsi_max"]).values               # NaN compares False -> off
+    hyst = hysteresis(idx_rsi, p["regime_rsi_mid"] + p["regime_rsi_band"], p["regime_rsi_mid"] - p["regime_rsi_band"])
+    regime_v = hyst & (idx_rsi <= p["regime_rsi_max"]).values         # NaN compares False -> off
+    ix = md.index_close[[p["size_index"]]]
+    idx_vr = (realized_vol(ix, p["vol_long_n"]) / realized_vol(ix, p["vol_n"]))[p["size_index"]]
+    size_v = (idx_vr ** p["size_power"]).clip(upper=1.0).fillna(0.0).values   # index variance ratio (NaN -> 0)
 
     stock = md.member.copy(); stock[ETF_TICKER] = False          # the ETF is not part of the stock pool
     eligible = stock & md.tradable
@@ -98,7 +108,9 @@ def compute_target_weights(md) -> pd.DataFrame:
     beta = corr * vol.div(realized_vol(md.index_close[["NIFTY50"]], p["vol_n"])["NIFTY50"], axis=0)
     shock = (ret - beta.shift(1).mul(idx_ret, axis=0)) < -p["shock_k"] * ivol.shift(1) / np.sqrt(252)   # NaN -> no shock
     spike = v > p["vspike_k"] * v.rolling(p["vwap_n"], min_periods=p["vwap_n"]).mean().shift(1)   # NaN -> no spike
-    hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]) & ~shock & ~(vol_rank >= p["vol_exit_q"]) & ~spike)
+    vw_long = rolling_vwap(h, l, c, v, p["vwap_long_n"])
+    hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]) & ~shock & ~(vol_rank >= p["vol_exit_q"]) & ~spike
+                                     & (c > vw_long * p["vwap_long_exit"]))
 
     dates = md.calendar
     N = len(md.tickers)
@@ -108,6 +120,7 @@ def compute_target_weights(md) -> pd.DataFrame:
     entry_v, hold_v = entry.values, hold.values
     g_v = (c / c.shift(1)).fillna(1.0).values               # close-to-close growth (1 when unknown)
     iv_v = (1.0 / ivol.where(ivol > 0) ** p["vol_power"]).fillna(0.0).values   # inverse idio variance (0 when unknown)
+    last_on = -10 ** 6                                      # last day the regime was on
     for t in range(len(dates)):
         if not regime_v[t]:                                 # regime off: fully in cash
             held[:] = False
@@ -115,10 +128,17 @@ def compute_target_weights(md) -> pd.DataFrame:
         elif t == 0 or not regime_v[t - 1]:                 # regime switches on: buy the cohort
             held = entry_v[t] & hold_v[t] & (iv_v[t] > 0)     # never buy a name the exit rules would sell today
             w = np.where(held, iv_v[t], 0.0)
-            w = p["gross"] * w / w.sum() if held.any() else np.zeros(N)
+            g = p["gross"]
+            if t == 0 or not hyst[t - 1]:                   # fresh regime start (not a stand-aside re-entry)
+                g *= size_v[t]                              # index variance-ratio sizing
+                if t - last_on - 1 <= p["whipsaw_days"]:
+                    g *= p["whipsaw_size"]                  # re-cross after only a few days off: whipsaw
+            w = g * w / w.sum() if held.any() else np.zeros(N)
         else:                                               # hold the cohort, weights ride, no top-ups
             held &= hold_v[t]
             wg = w * g_v[t]
             w = np.where(held, wg, 0.0) / (wg.sum() + 1.0 - w.sum())
+        if regime_v[t]:
+            last_on = t
         W[t] = w
     return pd.DataFrame(W, index=dates, columns=md.tickers)
