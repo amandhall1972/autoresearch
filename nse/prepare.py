@@ -25,6 +25,10 @@ END = "2026-10-09"              # backtest end (last available bar)
 IS_H1_END = "2021-12-31"        # in-sample halves used by the robustness gates (IS-only information)
 IS_H2_START = "2022-01-01"
 DROP_BEST_DAYS = 5              # sharpe_is_drop5: in-sample Sharpe with the 5 best days removed
+# Sealed pre-sample hold-out (protocol v2): point-in-time Nifty 50 of 2017-2019 incl. names that left the
+# index before 2020 (data/raw_presample). Loaded only with load_data(presample=True), i.e. by holdout.py.
+PRESAMPLE_START = "2017-04-01"
+PRESAMPLE_END = "2019-12-31"
 TRADING_DAYS = 252
 COST_BPS_PER_SIDE = 15.0        # one-way cost in bps of traded value: STT 10 + exch/SEBI/stamp/GST ~1 + slippage ~4
 MIN_NAMES_FOR_SESSION = 30      # a date is a trading day only if >= this many stocks have a bar
@@ -34,12 +38,24 @@ MAX_GROSS = 1.0                 # no leverage; long-only cash equities
 # One-hour Muhurat sessions (Diwali evening) are not regular trading days: excluded from the calendar.
 MUHURAT_SESSIONS = ("2016-10-30", "2017-10-19", "2018-11-07", "2019-10-27", "2020-11-14", "2021-11-04",
                     "2022-10-24", "2023-11-12", "2024-11-01", "2025-10-21")
+# Short special live sessions run from NSE's disaster-recovery site (two segments, ~1h45 in total, 5 % price
+# bands): excluded like Muhurat. Full Saturday sessions (2020-02-01 Budget, 2024-01-20) are regular days.
+SHORT_SPECIAL_SESSIONS = ("2024-03-02", "2024-05-18")
 # Vendor demerger adjustments that differ from the NSE special-session ex-prices: multiply all bars
 # strictly before `date` by `factor` so that open/prev_close on the ex-date is the true market gap.
 CORPORATE_ACTION_FIXES = (
     ("RELIANCE", "2023-07-20", 0.9079 / 0.9230),     # Jio Financial: NSE ex-factor 2580/2841.85 vs vendor 0.9230
     ("ITC", "2025-01-06", 0.9437 / 0.9416),          # ITC Hotels: 455.60/482.60 vs vendor 0.9416
     ("TATAMOTORS", "2025-10-14", 400.0 / 398.91),    # TMCV: discovered PV price 400 vs vendor 398.91
+)
+
+# Published NIFTY 50 closes for the 7 regular sessions missing from the vendor's index series. Open/high/low of
+# those sessions are rebuilt from constituents (_fill_index_bars) and rescaled to these closes. The
+# full-coverage reconstructions agree with these closes within 5 bps; on 2019-02-13, 2019-03-29 and
+# 2020-02-01 the vendor also lacks HDFC/Reliance bars, so the reconstruction alone was off by 25-30 bps.
+INDEX_CLOSE_PATCHES = (
+    ("2016-08-12", 8672.15), ("2018-01-01", 10435.55), ("2019-01-01", 10910.10), ("2019-02-13", 10793.65),
+    ("2019-03-29", 11623.90), ("2020-02-01", 11661.85), ("2024-01-20", 21571.80),
 )
 
 # ---------------------------------------------------------------------------
@@ -50,8 +66,13 @@ def _fname(ticker: str) -> str:
     return ticker.replace("&", "_") + ".csv"
 
 
+def _raw_path(ticker: str) -> str:
+    p = os.path.join(DATA_DIR, "raw", _fname(ticker))
+    return p if os.path.exists(p) else os.path.join(DATA_DIR, "raw_presample", _fname(ticker))
+
+
 def _read_raw(ticker: str) -> pd.DataFrame:
-    df = pd.read_csv(os.path.join(DATA_DIR, "raw", _fname(ticker)), parse_dates=["date"]).set_index("date").sort_index()
+    df = pd.read_csv(_raw_path(ticker), parse_dates=["date"]).set_index("date").sort_index()
     df = df[~df.index.duplicated(keep="last")]
     # stale rows: zero volume and a flat bar -> vendor gap (price carried forward); treat as missing
     stale = (df["volume"] == 0) & (df["open"] == df["high"]) & (df["high"] == df["low"]) & (df["low"] == df["close"])
@@ -63,8 +84,9 @@ def _read_raw(ticker: str) -> pd.DataFrame:
     return df
 
 
-def available_tickers():
-    return sorted(f[:-4].replace("_", "&") for f in os.listdir(os.path.join(DATA_DIR, "raw")) if f.endswith(".csv"))
+def available_tickers(presample: bool = False):
+    dirs = ["raw"] + (["raw_presample"] if presample else [])
+    return sorted({f[:-4].replace("_", "&") for d in dirs for f in os.listdir(os.path.join(DATA_DIR, d)) if f.endswith(".csv")})
 
 
 class MarketData:
@@ -121,11 +143,16 @@ def load_rf(calendar: pd.DatetimeIndex) -> pd.Series:
     return (rate * days / 365.0).rename("rf")
 
 
-def load_universe(calendar: pd.DatetimeIndex, tickers) -> pd.DataFrame:
+def load_universe(calendar: pd.DatetimeIndex, tickers, presample: bool = False) -> pd.DataFrame:
     """Point-in-time membership: a stock is a member on date t if it was in the index per the most
     recent membership row on or before t (rows are month-ends and NSE effective dates of changes).
-    Changes after the matrix ends come from data/universe/nifty50_changes_post_dataset.csv."""
+    Changes after the matrix ends come from data/universe/nifty50_changes_post_dataset.csv.
+    The research loop's universe starts on 2019-12-31 (nothing is a member before); presample=True
+    prepends the 2016-2019 rows for the sealed pre-sample hold-out."""
     w = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2019_2025.csv"), parse_dates=["DATE"]).set_index("DATE")
+    if presample:
+        w0 = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2016_2019.csv"), parse_dates=["DATE"]).set_index("DATE")
+        w = pd.concat([w0[w0.index < w.index.min()], w]).fillna(0.0)
     mem = (w > 0)
     ch = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_changes_post_dataset.csv"), parse_dates=["effective_date"])
     new_cols = [t for t in ch["ticker"].unique() if t not in mem.columns]
@@ -142,19 +169,78 @@ def load_universe(calendar: pd.DatetimeIndex, tickers) -> pd.DataFrame:
     return full
 
 
-def load_data(start=WARMUP_START, end=END) -> MarketData:
-    tickers = available_tickers()
+def _index_weight_rows() -> pd.DataFrame:
+    """All free-float weight rows of the Nifty 50 (2016-01..2025-08), research and pre-sample files."""
+    w1 = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2019_2025.csv"), parse_dates=["DATE"]).set_index("DATE")
+    w0 = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2016_2019.csv"), parse_dates=["DATE"]).set_index("DATE")
+    return pd.concat([w0[w0.index < w1.index.min()], w1]).fillna(0.0)
+
+
+def _fill_index_bars(idx_ohlc: dict, calendar: pd.DatetimeIndex) -> dict:
+    """Fill sessions on which the vendor's index series has no bar (7 regular sessions in 2016-2026, e.g.
+    2019-03-29, the 2020-02-01 Budget session and the 2024-01-20 Saturday session).
+
+    NIFTY50 is rebuilt the way the index is computed: free-float weights of the latest membership row,
+    drifted by price to the previous session, applied to each constituent's open/high/low/close relative to
+    its previous close (validated against the vendor index on 1,398 days: RMS error 4.7 bps, p99 16 bps).
+    Constituents without a bar that day are left out and the weights renormalised over those that traded
+    (the vendor gap days also lack some stock bars). BANKNIFTY (signal-only, no weights available) is
+    carried flat. Any remaining gap is forward-filled as before."""
+    out = {k: v.copy() for k, v in idx_ohlc.items()}
+    miss = out["close"]["NIFTY50"].isna()
+    miss &= out["close"]["NIFTY50"].ffill().notna()          # only gaps after the first index bar
+    if miss.any():
+        w = _index_weight_rows()
+        names = [t for t in w.columns if (w[t] > 0).any() and os.path.exists(_raw_path(t))]
+        px = {col: pd.concat([_read_raw(t)[col].rename(t) for t in names], axis=1, sort=True)
+              for col in ["open", "high", "low", "close"]}
+        cal_pos = {d: i for i, d in enumerate(calendar)}
+        for t in calendar[miss.values]:
+            tp = calendar[cal_pos[t] - 1]
+            r0 = w.index[w.index <= tp].max()
+            ww = w.loc[r0]; ww = ww[ww > 0]
+            nm = [n for n in ww.index if n in px["close"].columns]
+            c_tp = px["close"][nm].loc[:tp].ffill().iloc[-1]
+            c_r0 = px["close"][nm].loc[:r0].ffill().iloc[-1]
+            wd = (ww[nm] * (c_tp / c_r0)).dropna(); wd = wd / wd.sum()
+            prev = out["close"].loc[tp, "NIFTY50"]
+            have = px["close"].reindex([t])[wd.index].iloc[0].notna() if t in px["close"].index else pd.Series(False, index=wd.index)
+            wa = wd[have.values]
+            if wa.sum() < 0.5:                                    # too little of the index traded: carry flat
+                continue
+            wa = wa / wa.sum()
+            for col in ["open", "high", "low", "close"]:
+                rel = px[col].loc[t, wa.index] / c_tp[wa.index]
+                out[col].loc[t, "NIFTY50"] = prev * float((wa * rel).sum())
+        for d, official in INDEX_CLOSE_PATCHES:
+            t = pd.Timestamp(d)
+            if t in calendar and bool(miss.get(t, False)) and pd.notna(out["close"].loc[t, "NIFTY50"]):
+                s = official / out["close"].loc[t, "NIFTY50"]
+                for col in ["open", "high", "low", "close"]:
+                    out[col].loc[t, "NIFTY50"] *= s
+    for col in out:
+        bn = out[col]["BANKNIFTY"]
+        out[col]["BANKNIFTY"] = bn.where(bn.notna(), out["close"]["BANKNIFTY"].ffill())
+        out[col] = out[col].ffill()
+    return out
+
+
+def load_data(start=WARMUP_START, end=None, presample: bool = False) -> MarketData:
+    """presample=False: the research data (2016-06..2026-10, universe from 2019-12-31).
+    presample=True: the sealed pre-sample hold-out data (2016-06..2019-12-31, 2016-2019 universe)."""
+    if end is None:
+        end = PRESAMPLE_END if presample else END
+    tickers = available_tickers(presample)
     raws = {t: _read_raw(t) for t in tickers}
     stocks = [t for t in tickers if t not in INDEX_TICKERS]
-    # master calendar: NIFTY50 bars that are not flat, intersected with days where enough stocks traded,
-    # minus Muhurat sessions
-    nifty = raws["NIFTY50"]
-    nifty = nifty[(nifty["high"] != nifty["low"]) & nifty["close"].notna()]
+    # master calendar: every day on which enough stocks have a fresh (non-stale) bar, minus Muhurat
+    # sessions. (Vendor stale/holiday bars were turned into NaN by _read_raw.) This includes real sessions
+    # the vendor's index series lacks (e.g. the 2020-02-01 Budget Saturday); see _fill_index_bars.
     closes = pd.concat([raws[t]["close"].rename(t) for t in stocks], axis=1, sort=True)
     enough = closes.notna().sum(axis=1) >= MIN_NAMES_FOR_SESSION
-    calendar = nifty.index.intersection(closes.index[enough])
+    calendar = closes.index[enough]
     calendar = calendar[(calendar >= pd.Timestamp(start)) & (calendar <= pd.Timestamp(end))]
-    calendar = calendar.difference(pd.to_datetime(list(MUHURAT_SESSIONS)))
+    calendar = calendar.difference(pd.to_datetime(list(MUHURAT_SESSIONS) + list(SHORT_SPECIAL_SESSIONS)))
 
     def wide(col):
         return pd.concat([raws[t][col].rename(t) for t in stocks], axis=1, sort=True).reindex(calendar)
@@ -165,8 +251,9 @@ def load_data(start=WARMUP_START, end=END) -> MarketData:
     c_ff = c.ffill()
     o = o.where(fresh, c_ff); h = h.where(fresh, c_ff); l = l.where(fresh, c_ff)
     v = v.where(fresh, 0.0).where(listed)
-    idx_ohlc = {col: pd.concat([raws[t][col].rename(t) for t in INDEX_TICKERS], axis=1, sort=True).reindex(calendar).ffill()
+    idx_ohlc = {col: pd.concat([raws[t][col].rename(t) for t in INDEX_TICKERS], axis=1, sort=True).reindex(calendar)
                 for col in ["open", "high", "low", "close"]}
+    idx_ohlc = _fill_index_bars(idx_ohlc, calendar)
     # The ETF's vendor opens are first-print artifacts (open == low or high on half the bars). Replace the
     # ETF's open/high/low by the index's open/high/low gaps applied to the ETF's previous close.
     e = ETF_TICKER
@@ -182,7 +269,7 @@ def load_data(start=WARMUP_START, end=END) -> MarketData:
     rf = load_rf(calendar)
     if rf.isna().any():
         raise ValueError("risk-free schedule does not cover the calendar")
-    member = load_universe(calendar, stocks)
+    member = load_universe(calendar, stocks, presample)
     return MarketData(o, h, l, c_ff, v, fresh, member, idx_ohlc["close"], idx_ohlc, rf, calendar)
 
 
@@ -374,10 +461,11 @@ def evaluate(weights: pd.DataFrame, md: MarketData, cost_bps=COST_BPS_PER_SIDE) 
 # Lookahead detector
 # ---------------------------------------------------------------------------
 
-def check_no_lookahead(strategy_fn, md: MarketData, n_trunc=60, n_corrupt=30, seed=0, atol=1e-9) -> dict:
+def check_no_lookahead(strategy_fn, md: MarketData, n_trunc=60, n_corrupt=30, seed=0, atol=1e-9,
+                       lo=START, hi=IS_END) -> dict:
     """
     Dense causality test. (1) Truncation: the strategy is run on data cut at n_trunc dates spread
-    over START..END (plus the last in-sample day and the penultimate day); weights up to each cut
+    over `lo`..the end of the data (plus the day `hi` and the penultimate day); weights up to each cut
     must equal the full-sample weights. (2) Corruption: at n_corrupt further dates every later bar
     is replaced by a random permutation of the later bars (prices, volumes, membership, index, rf);
     weights up to the date must still be identical. A strategy that reads any future bar, or that
@@ -386,9 +474,9 @@ def check_no_lookahead(strategy_fn, md: MarketData, n_trunc=60, n_corrupt=30, se
     """
     cal = md.calendar
     full = strategy_fn(md).reindex(index=cal, columns=md.tickers).fillna(0.0)
-    i0 = int(cal.searchsorted(pd.Timestamp(START))); i1 = len(cal) - 2
+    i0 = int(cal.searchsorted(pd.Timestamp(lo))); i1 = len(cal) - 2
     pos = np.unique(np.concatenate([np.linspace(i0, i1, n_trunc).astype(int),
-                                    [int(cal.searchsorted(pd.Timestamp(IS_END))), i1]]))
+                                    [min(int(cal.searchsorted(pd.Timestamp(hi))), i1), i1]]))
     rng = np.random.default_rng(seed)
     cpos = np.sort(rng.choice(np.arange(i0, i1), size=min(n_corrupt, i1 - i0), replace=False))
     worst = 0.0; bad = None; informative = 0; n_checks = 0

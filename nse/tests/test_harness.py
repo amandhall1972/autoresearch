@@ -223,8 +223,10 @@ def test_calendar_and_coverage(md):
     cal = md.calendar
     assert cal[0] == pd.Timestamp("2016-06-01") and cal[-1] == pd.Timestamp(P.END)
     assert int(cal.searchsorted(pd.Timestamp(P.START))) >= 850    # indicator warm-up before the backtest starts
-    for d in ["2020-02-01", "2024-01-20", "2024-03-02", "2024-05-18", "2023-11-12", "2023-10-24", "2024-11-01", "2025-10-21"]:
-        assert pd.Timestamp(d) not in cal          # special sessions / holiday artifacts / Muhurat excluded
+    for d in ["2024-03-02", "2024-05-18", "2023-11-12", "2023-10-24", "2024-11-01", "2025-10-21"]:
+        assert pd.Timestamp(d) not in cal          # short DR sessions / holiday artifacts / Muhurat excluded
+    for d in ["2020-02-01", "2024-01-20", "2019-03-29", "2019-01-01"]:
+        assert pd.Timestamp(d) in cal              # full sessions the vendor's index series lacks are kept
     assert pd.Timestamp("2025-02-01") in cal        # Budget Saturday 2025: a full session with broad data
     assert md.tradable.loc["2020":].values.mean() > 0.95
     c = md.close.loc["2020":]
@@ -324,3 +326,76 @@ def test_run_py_hides_holdout_by_default():
     assert not any(k.endswith("_oos") or k.endswith("_full") for k in hidden)
     shown = run.visible_keys(True)
     assert "sharpe_oos" in shown and "sharpe_full" in shown
+
+
+# ----------------------------------------------------------------------------- calendar repair / index rebuild
+def test_missing_index_sessions_use_published_closes_and_consistent_bars(md):
+    ic = md.index_ohlc
+    for d, official in P.INDEX_CLOSE_PATCHES:
+        t = pd.Timestamp(d)
+        if t not in md.calendar:
+            continue
+        o, h, l, c = (float(ic[k].loc[t, "NIFTY50"]) for k in ["open", "high", "low", "close"])
+        assert abs(c - official) < 1e-6
+        assert h >= max(o, c) - 1e-9 and l <= min(o, c) + 1e-9
+        assert abs(o / float(md.index_close["NIFTY50"].shift(1).loc[t]) - 1) < 0.05
+    assert not md.index_close.isna().loc["2016-07-01":].any().any()
+
+
+def test_index_rebuild_matches_vendor_index_on_normal_days():
+    """Drop real vendor index bars, rebuild them from constituents and compare (the method used for gaps)."""
+    md = P.load_data()
+    cal = md.calendar
+    days = cal[(cal >= pd.Timestamp("2021-03-01")) & (cal <= pd.Timestamp("2021-03-31"))]
+    raw = {k: md.index_ohlc[k].copy() for k in md.index_ohlc}
+    holed = {k: v.copy() for k, v in raw.items()}
+    for k in holed:
+        holed[k].loc[days, "NIFTY50"] = np.nan
+    rebuilt = P._fill_index_bars(holed, cal)["close"]["NIFTY50"]
+    # chained rebuild over a whole month: daily returns must track the real index closely
+    err = (rebuilt.loc[days].pct_change() - raw["close"]["NIFTY50"].loc[days].pct_change()).dropna()
+    assert float(np.sqrt((err ** 2).mean())) < 0.0010
+
+
+# ----------------------------------------------------------------------------- sealed pre-sample hold-out data
+@pytest.fixture(scope="module")
+def md_pre():
+    return P.load_data(presample=True)
+
+
+def test_presample_universe_is_point_in_time_and_complete(md_pre):
+    m = md_pre.member.drop(columns=[P.ETF_TICKER]).loc[P.PRESAMPLE_START:P.PRESAMPLE_END]
+    assert (m.sum(axis=1) == 50).all()
+    c = md_pre.close.loc[m.index, m.columns]
+    assert not (m & c.isna()).values.any()                      # every member has a price
+    assert md_pre.calendar[-1] <= pd.Timestamp(P.PRESAMPLE_END)
+    checks = [("2017-03-30", {"IBULHSGFIN": False, "BHEL": True}), ("2017-03-31", {"IBULHSGFIN": True, "BHEL": False}),
+              ("2017-05-25", {"VEDL": False, "GRASIM": True}), ("2017-05-26", {"VEDL": True, "GRASIM": False}),
+              ("2017-09-28", {"BAJFINANCE": False, "ACC": True}), ("2017-09-29", {"BAJFINANCE": True, "ACC": False}),
+              ("2018-03-28", {"TITAN": False, "BOSCHLTD": True}), ("2018-04-02", {"TITAN": True, "BOSCHLTD": False}),
+              ("2018-09-27", {"JSWSTEEL": False, "LUPIN": True}), ("2018-09-28", {"JSWSTEEL": True, "LUPIN": False}),
+              ("2019-03-28", {"BRITANNIA": False, "HINDPETRO": True}), ("2019-03-29", {"BRITANNIA": True, "HINDPETRO": False}),
+              ("2019-09-26", {"NESTLEIND": False, "IBULHSGFIN": True}), ("2019-09-27", {"NESTLEIND": True, "IBULHSGFIN": False})]
+    for d, exp in checks:
+        assert {k: bool(md_pre.member.loc[d, k]) for k in exp} == exp, d
+
+
+def test_research_data_never_contains_presample_names_or_members(md):
+    pre_only = set(P.available_tickers(True)) - set(P.available_tickers(False))
+    assert pre_only and not (pre_only & set(md.tickers))
+    assert not md.member.drop(columns=[P.ETF_TICKER]).loc[:"2019-12-30"].values.any()
+
+
+def test_holdout_score_reports_presample_window(md_pre):
+    import holdout
+
+    class BuyHoldETF:
+        @staticmethod
+        def compute_target_weights(m):
+            W = pd.DataFrame(0.0, index=m.calendar, columns=m.tickers); W[P.ETF_TICKER] = 1.0
+            return W
+
+    ev = holdout.score(BuyHoldETF, md_pre, check=False)
+    assert ev["days_pre"] == len(md_pre.calendar[md_pre.calendar >= pd.Timestamp(P.PRESAMPLE_START)])
+    assert {"sharpe_pre", "sharpe_2017", "sharpe_2018", "sharpe_2019", "turnover_yr_pre"} <= set(ev)
+    assert ev["exposure_pre"] > 0.99 and ev["turnover_yr_pre"] < 1.0
