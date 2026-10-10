@@ -4,7 +4,6 @@ Uses FMP 1-hour bars (Jan-Mar 2025, five liquid names) saved under data/intraday
 Writes reports/vwap_proxy_study.md. Usage: python vwap_proxy_study.py
 """
 import glob, os
-import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
