@@ -224,3 +224,18 @@ def test_compare4_sanity_accepts_an_etf_core_book():
 def test_evaluate_v4_reports_the_etf_share(md):
     ev = P.evaluate_v4(_hold_etf(md), md); ev.pop("_res")
     assert ev["etf_share_span"] == pytest.approx(1.0)
+
+
+def test_live_signal_loader_gives_the_research_weights(md):
+    """signals.py trades from load_data() (the live universe); the v2 strategy must hold exactly the weights the
+    protocol-v4 research data give it over 2024-2026, and nothing outside the live universe."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("final_v4", os.path.join(NSE, "strategy.py"))
+    S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+    live = P.load_data(end=P.END)
+    Wl, Wr = S.compute_target_weights(live), S.compute_target_weights(md)
+    idx = live.calendar[live.calendar >= pd.Timestamp(P.OOS_START)]
+    cols = [c for c in Wl.columns if c in Wr.columns]
+    assert np.allclose(Wl.loc[idx, cols].values, Wr.reindex(index=idx, columns=cols).fillna(0.0).values)
+    assert Wr.reindex(index=idx).drop(columns=cols).abs().to_numpy().sum() == 0.0
+    assert (Wr.loc[idx].sum(axis=1) > 0).any()                 # the check is not vacuous: the book trades

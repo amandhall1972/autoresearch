@@ -1,6 +1,8 @@
 """
-Build reports/index.html: a self-contained results page (inline SVG charts, no external data) from the
-outputs of validate.py, lineage.py --holdout, diagnose.py and results.tsv. Usage: python make_page.py [--dir reports]
+Build reports/index.html: a self-contained results page (inline SVG charts, no external data). With the
+protocol-v4 reports (reports/v4: validate4.py, lineage4.py, deep4.py) it is the v2-strategy page; otherwise, or
+with --v1, the v1 study page from validate.py, lineage.py --holdout, diagnose.py and results.tsv.
+Usage: python make_page.py [--dir reports] [--v1]
 """
 import csv, html, json, math, os, sys
 import numpy as np
@@ -84,10 +86,13 @@ def line_chart(series, width=860, height=300, log=True, shade=None, labels=None,
     return f'<figure class="fig">{"".join(out)}<figcaption class="legend">{leg}</figcaption></figure>'
 
 
-def bar_groups(groups, keys, width=860, height=300, ylab="Sharpe"):
-    """groups: list of (label, {key: value}); keys: list of (key, name, css var)."""
+def bar_groups(groups, keys, width=860, height=300, ylab="Sharpe", cap=None):
+    """groups: list of (label, {key: value}); keys: list of (key, name, css var). With cap, bars above it are
+    drawn to the cap and labelled with their value."""
     pad_l, pad_r, pad_t, pad_b = 48, 12, 16, 46
     vals = [g[1].get(k) for g in groups for k, _, _ in keys if g[1].get(k) is not None]
+    if cap is not None:
+        vals = [min(v, cap) for v in vals]
     lo, hi = min(0.0, min(vals)), max(0.0, max(vals))
     span = hi - lo or 1.0
     lo -= 0.06 * span; hi += 0.08 * span
@@ -109,8 +114,11 @@ def bar_groups(groups, keys, width=860, height=300, ylab="Sharpe"):
             if val is None:
                 continue
             x = gx + ki * bw
-            y0, y1 = Y(0), Y(val)
+            shown = min(val, cap) if cap is not None else val
+            y0, y1 = Y(0), Y(shown)
             out.append(f'<rect x="{x:.1f}" y="{min(y0, y1):.1f}" width="{bw * 0.92:.1f}" height="{abs(y1 - y0):.1f}" fill="var({col})"><title>{esc(lab)}: {val:.2f}</title></rect>')
+            if shown != val:
+                out.append(f'<text x="{x + bw * 0.46:.1f}" y="{y1 + 12:.1f}" class="tick inbar" text-anchor="middle">{val:.2f}↑</text>')
         out.append(f'<text x="{pad_l + gi * gw + gw / 2:.1f}" y="{height - 26}" class="tick" text-anchor="middle">{esc(lab)}</text>')
     out.append(f'<text x="12" y="{pad_t + 8}" class="tick" transform="rotate(-90 12 {pad_t + 8})" text-anchor="end">{esc(ylab)}</text>')
     out.append("</svg>")
@@ -134,7 +142,257 @@ def table(head, rows, num_from=1):
 
 
 # ----------------------------------------------------------------------------- page
+# ----------------------------------------------------------------------------- the v2 (protocol v4) page
+CSS_V4 = """
+/* Layout: one reading column, figures full width; RAAS identity (Neela ink-blue, Kagaz paper, Syahi ink),
+   Outfit for display, IBM Plex for text and numbers; the Kesari saffron accent appears once, on the eyebrow rule. */
+:root {
+  --bg:#F4F1E9; --surface:#FAF8F3; --fg:#101B29; --muted:#5F6979; --line:#D8D3C5; --shade:rgba(16,31,88,.06);
+  --brand:#101F58; --accent:#D07018; --pos:#1F7A4D; --neg:#B3261E; --chip:#E9E5DA; --on-bar:#FAF8F3;
+  --c-v2:#101F58; --c-r0:#6381B0; --c-v1:#B3261E; --c-bees:#8A93A1; --c-nifty:#C3C9D2;
+  --f-display:"Outfit","Avenir Next","Segoe UI",sans-serif; --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg:#0B1230; --surface:#111A3D; --fg:#ECE8DD; --muted:#A3ABBA; --line:#26305A; --shade:rgba(168,204,240,.07);
+  --brand:#A8CCF0; --accent:#E9A15A; --pos:#5CC58E; --neg:#F07A62; --chip:#1A2450; --on-bar:#0B1230;
+  --c-v2:#A8CCF0; --c-r0:#6381B0; --c-v1:#F07A62; --c-bees:#8A93A1; --c-nifty:#3B4453; color-scheme:dark } }
+:root[data-theme="dark"] {
+  --bg:#0B1230; --surface:#111A3D; --fg:#ECE8DD; --muted:#A3ABBA; --line:#26305A; --shade:rgba(168,204,240,.07);
+  --brand:#A8CCF0; --accent:#E9A15A; --pos:#5CC58E; --neg:#F07A62; --chip:#1A2450; --on-bar:#0B1230;
+  --c-v2:#A8CCF0; --c-r0:#6381B0; --c-v1:#F07A62; --c-bees:#8A93A1; --c-nifty:#3B4453; color-scheme:dark }
+body { background:var(--bg); color:var(--fg); font:16px/1.6 var(--f-body); }
+.wrap { max-width:920px; margin:0 auto; padding-inline:16px; padding-block:40px 64px; display:flex; flex-direction:column; gap:44px }
+h1,h2,h3 { font-family:var(--f-display); text-wrap:balance; margin:0; color:var(--brand) }
+h1 { font-size:clamp(30px,5.2vw,48px); font-weight:600; line-height:1.06; letter-spacing:-.015em }
+h2 { font-size:25px; font-weight:600; margin-bottom:12px; letter-spacing:-.01em }
+h3 { font-size:18px; font-weight:600; margin:18px 0 8px }
+p { margin:0 0 12px; max-width:68ch }
+.eyebrow { font:500 12px/1.3 var(--f-mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }
+.rule { width:56px; height:3px; background:var(--accent); border-radius:2px }
+.lede { font-size:18px; max-width:68ch }
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px }
+.card { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:16px 16px 14px; display:flex; flex-direction:column; gap:4px; min-width:0 }
+.card .sub { color:var(--muted); font-size:13px }
+.big { font:500 38px/1.1 var(--f-mono); font-variant-numeric:tabular-nums }
+.note { font-size:13px; color:var(--muted) }
+.pos { color:var(--pos) } .neg { color:var(--neg) }
+.fig { margin:0; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:12px 12px 8px }
+.chart { width:100%; height:auto; display:block }
+.fig { overflow-x:auto }
+@media (max-width:560px) { .chart { min-width:620px } }
+.chart .grid { stroke:var(--line); stroke-width:1 } .chart .zero { stroke:var(--muted); stroke-width:1 }
+.chart .tick { fill:var(--muted); font:11px var(--f-mono) } .chart .ann { fill:var(--muted); font:12px var(--f-body) }
+.chart .inbar { fill:var(--on-bar) }
+.legend { display:flex; flex-wrap:wrap; gap:16px; font-size:13px; color:var(--muted); padding:6px 4px 2px }
+.key { display:inline-flex; align-items:center; gap:6px } .key i { width:14px; height:4px; border-radius:2px; display:inline-block }
+.tw { overflow-x:auto; border:1px solid var(--line); border-radius:8px; background:var(--surface) }
+table { border-collapse:collapse; width:100%; font-size:14px }
+th { text-align:left; font:600 12px var(--f-body); letter-spacing:.04em; text-transform:uppercase; color:var(--muted); padding:10px 12px; border-bottom:1px solid var(--line); white-space:nowrap }
+td { padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap }
+
+tr:last-child td { border-bottom:0 }
+td.num { font-family:var(--f-mono); font-variant-numeric:tabular-nums; text-align:right }
+td.tx { white-space:normal; text-align:left; font-family:var(--f-body); min-width:240px }
+code { font-family:var(--f-mono); font-size:.92em; background:var(--chip); padding:1px 5px; border-radius:4px }
+dl.rules { margin:0; border:1px solid var(--line); border-radius:8px; background:var(--surface) }
+.rulerow { display:grid; grid-template-columns:150px 1fr; gap:12px; padding:12px 16px; border-bottom:1px solid var(--line) }
+.rulerow:last-child { border-bottom:0 }
+.rulerow dt { font-weight:600 } .rulerow dd { margin:0; min-width:0 }
+.tag { font:500 11px var(--f-mono); color:var(--muted); display:block; margin-top:2px; letter-spacing:.04em }
+@media (max-width:560px) { .rulerow { grid-template-columns:1fr; gap:2px } }
+.callout { border:1px solid var(--line); border-left:4px solid var(--brand); background:var(--surface); padding:14px 16px; border-radius:0 8px 8px 0 }
+ul { margin:0; padding-left:20px; max-width:70ch } li { margin-bottom:6px }
+pre { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow-x:auto; font:13px/1.5 var(--f-mono) }
+footer { color:var(--muted); font-size:13px }
+a { color:var(--brand) }
+:focus-visible { outline:2px solid var(--brand); outline-offset:2px }
+"""
+
+
+def main_v4(R4):
+    """The results page for the v2 strategy (protocol v4); False when its reports are missing."""
+    def ld(name):
+        p = os.path.join(R4, name)
+        return json.load(open(p)) if os.path.exists(p) else None
+    v, lin, deep = ld("validation.json"), ld("lineage.json"), ld("deep_holdout.json")
+    if v is None or lin is None or deep is None:
+        return False
+    m, bm = v["metrics"], v["benchmarks"]
+    by = {r["file"]: r for r in lin}
+    v1, r0 = by["v4/v1_final.py"], by["v4/r0_ema_timer.py"]
+    drow = {r["file"]: r for r in deep["rows"]}
+    dfin = next(r for r in deep["rows"] if "final" in r["roles"])
+    eq = pd.read_csv(os.path.join(R4, "equity_curves.csv"), index_col=0, parse_dates=True)
+    tsv = pd.read_csv(os.path.join(HERE, "results_v4.tsv"), sep="\t")
+    by_round = tsv.groupby("round").size().to_dict()
+    lenses = tsv[tsv["round"].str.match(r"v4-[1-9]")].groupby("round")["lens"].nunique().to_dict()
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("strategy_page_v4", os.path.join(HERE, v["strategy"]))
+    S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+    p = S.PARAMS
+    nifty = bm["nifty50"]
+    cs = {r["cost_bps"]: r for r in v["cost_sensitivity"]}
+    bs, jp, evd, wf = v["bootstrap"], v["joint_perturbation"], v["event_days"], v["walk_forward"]
+    dsr = bs["span"]["deflated"]
+    W = {"pre": "2017–19", "is": "2020–23", "oos": "2024–26", "span": "2017–26", "full": "2020–26"}
+
+    cards = "".join(
+        f'<div class="card"><div class="eyebrow">{esc(a)}</div><div class="sub">{esc(c)}</div>'
+        f'<div class="big {cls(x)}">{fmt(x)}</div><div class="note">{esc(n)}</div></div>' for a, c, x, n in [
+            ("2024–2026", "Jan 2024 – Oct 2026", m["sharpe_oos"], f"v1 strategy: {fmt(v1['sharpe_oos'])}"),
+            ("2020–2026", "Jan 2020 – Oct 2026", m["sharpe_full"], f"NIFTY 50: {fmt(nifty['full'])}"),
+            ("Worst window", "2017–19, 2020–23, 2024–26", m["objective"], f"v1 strategy: {fmt(v1['objective'])}"),
+            ("Deep hold-out", "Apr 2011 – May 2016, scored once", dfin["sharpe_deep"], f"NIFTY 50: {fmt(dfin['bench_sharpe_deep'])}"),
+        ])
+    series = [("NIFTY 50 index", eq["nifty50"], "--c-nifty", 1.3), ("NIFTYBEES", eq["niftybees"], "--c-bees", 1.3)]
+    if "v1_final" in eq:
+        series.append(("v1 strategy", eq["v1_final"], "--c-v1", 1.3))
+    series += [("EMA timer R0", eq["r0_ema_timer"], "--c-r0", 1.5), ("v2 strategy", eq["strategy"], "--c-v2", 2.4)]
+    eq_chart = line_chart(series, shade=("2020-01-01", "2023-12-31", "2020–23"))
+    groups = [(f"{W[k]}", {"v1": v1[f"sharpe_{k}"], "r0": r0[f"sharpe_{k}"], "nifty": nifty[k], "v2": m[f"sharpe_{k}"]})
+              for k in ("pre", "is", "oos")]
+    groups.append(("2011–16 (deep)", {"v1": drow["v4/v1_final.py"]["sharpe_deep"], "r0": drow["v4/r0_ema_timer.py"]["sharpe_deep"],
+                                      "nifty": dfin["bench_sharpe_deep"], "v2": dfin["sharpe_deep"]}))
+    win_chart = bar_groups(groups, [("v1", "v1 strategy", "--c-v1"), ("r0", "EMA timer R0", "--c-r0"),
+                                    ("nifty", "NIFTY 50", "--c-bees"), ("v2", "v2 strategy", "--c-v2")], cap=2.0)
+    yearly = table(["Year", "Return", "Sharpe", "Max DD", "Exposure", "NIFTYBEES", "NIFTY Sharpe", "Cash"],
+                   [[r["year"], (fmt(r["strat_ret"], 1, pct=True), cls(r["strat_ret"] - r["rf"])), (fmt(r["strat_sharpe"]), cls(r["strat_sharpe"])),
+                     fmt(r["strat_maxdd"], 1, pct=True), fmt(r["exposure"], 0, pct=True), fmt(r["bees_ret"], 1, pct=True),
+                     fmt(r["nifty_sharpe"]), fmt(r["rf"], 1, pct=True)] for r in v["yearly"]])
+    costs = table(["One-way cost (bps)", "2017–19", "2020–23", "2024–26", "Worst window", "CAGR 2017–26"],
+                  [[k, fmt(r["sharpe_pre"]), fmt(r["sharpe_is"]), fmt(r["sharpe_oos"]), (fmt(r["objective"]), cls(r["objective"])),
+                    fmt(r["cagr_span"], 1, pct=True)] for k, r in sorted(cs.items())])
+    boot = table(["Window", "Sharpe", "t-stat", "95% bootstrap interval", "P(Sharpe > 0)"],
+                 [[W[k], fmt(bs[k]["sharpe"]), fmt(bs[k]["tstat"]), f'{fmt(bs[k]["ci95"][0])} to {fmt(bs[k]["ci95"][1])}',
+                   fmt(bs[k]["p_sharpe_gt_0"], 0, pct=True)] for k in ("pre", "is", "oos", "span", "full")])
+    events = table(["Best days removed", "2017–19", "2020–23", "2024–26", "Worst", "R0 worst"],
+                   [[f"{k} per window", fmt(evd["strategy"][k]["pre"]), fmt(evd["strategy"][k]["is"]), fmt(evd["strategy"][k]["oos"]),
+                     (fmt(evd["strategy"][k]["worst"]), cls(evd["strategy"][k]["worst"])), fmt(evd["r0_ema_timer"][k]["worst"])]
+                    for k in ("0", "5", "10")])
+    order = [dfin] + [drow[f] for f in ("v4/r0_ema_timer.py", "v4/v1_final.py", "v4/v1_baseline.py") if f in drow] + \
+        [r for r in deep["rows"] if r is not dfin and r["file"] not in ("v4/r0_ema_timer.py", "v4/v1_final.py", "v4/v1_baseline.py")]
+    deep_tab = table(["Strategy", "Role", "Sharpe", "CAGR", "Max DD", "Exposure"],
+                     [[f"<code>{esc(r['file'])}</code>", esc("/".join(r["roles"])), (fmt(r["sharpe_deep"]), cls(r["sharpe_deep"])),
+                       fmt(r["cagr_deep"], 1, pct=True), fmt(r["maxdd_deep"], 1, pct=True), fmt(r["exposure_deep"], 0, pct=True)]
+                      for r in order], num_from=2)
+    outcomes = {
+        "v4-1": "every lens beat v1; the one effect present in every window was the NIFTY's EMA trend, so the plain EMA timer R0 became the bar (v4.1)",
+        "v4-2": "a pullback sleeve on top of R0 beat it in every window; all rejected in audit, which exposed two rule flaws (v4.2)",
+        "v4-3": "merge: the pullback strategy alone, after the audits showed the R0 core lowered the objective",
+        "v4-4": "dry: each lever raised the objective but failed the year-by-year or plateau gates",
+        "v4-5": "dry: no change passed every gate; the strategy was fixed and the deep hold-out scored",
+    }
+    rounds_tab = table(["Round", "Lenses", "Logged rows", "Outcome"],
+                       [[k[-1], lenses.get(k, 0), f"{by_round.get(k, 0):,}", (esc(outcomes[k]), "tx")]
+                        for k in ("v4-1", "v4-2", "v4-3", "v4-4", "v4-5") if k in by_round], num_from=1)
+    rules = [
+        ("Trigger", "EMA, VWAP", f"Trade only on days when the NIFTY 50 closes above its {p['trend_n']}-day EMA and more than "
+                                 f"{p['breadth_cut'] * 100:.0f}% of the members in their own uptrend (close above their {p['trend_n']}-day EMA) "
+                                 f"close below their {p['vwap_n']}-day VWAP: a broad pullback inside a long uptrend."),
+        ("Name filter", "EMA, RSI", f"On a trigger day, a member in its own uptrend whose Wilder RSI({p['rsi_n']}) is below {p['rsi_max']:g}: it was sold hard."),
+        ("Selection", "VWAP", f"Free slots ({p['slots']}, each 1/{p['slots']} of the book) go to the eligible names deepest below their {p['vwap_n']}-day VWAP."),
+        ("Exit", "VWAP", f"Sell as soon as the name closes back above its {p['vwap_n']}-day VWAP, or after {p['max_hold']} sessions; "
+                         "names leaving the index are sold by the harness."),
+        ("Execution", "", "Signals on the close, orders at the next open, 15 bps one-way cost (STT, fees, slippage); idle capital earns the RBI repo rate."),
+    ]
+    rules_html = "".join(f"<div class='rulerow'><dt>{esc(a)}<span class='tag'>{esc(t)}</span></dt><dd>{esc(b_)}</dd></div>" for a, t, b_ in rules)
+    changed = table(["", "v1 (RCG-RN-REV-001)", "v2 (this page)"], [
+        ["Chosen on", ("one window, 2020–2023", "tx"), ("the worst of 2017–19, 2020–23 and 2024–26", "tx")],
+        ["The trade", ("timed baskets bought when the index RSI turned up", "tx"), ("broad pullbacks in uptrending names, sold when bought back to VWAP", "tx")],
+        ["Parameters", "40", str(sum(1 for k in p if not k.startswith("use_")))],
+        ["2024–26 Sharpe", (fmt(v1["sharpe_oos"]), "num neg"), (fmt(m["sharpe_oos"]), "num " + cls(m["sharpe_oos"]))],
+        ["2020–26 Sharpe", (fmt(v1["sharpe_full"]), "num"), (fmt(m["sharpe_full"]), "num")],
+        ["Deep hold-out", (fmt(drow["v4/v1_final.py"]["sharpe_deep"]), "num " + cls(drow["v4/v1_final.py"]["sharpe_deep"])),
+         (fmt(dfin["sharpe_deep"]), "num " + cls(dfin["sharpe_deep"]))],
+    ], num_from=9)
+    s_ = dfin["sharpe_deep"]; b_ = dfin["bench_sharpe_deep"]
+    deep_line = (f"On data no rule was chosen on it scores {fmt(s_)}, against {fmt(b_)} for the NIFTY 50 and "
+                 f"{fmt(drow['v4/r0_ema_timer.py']['sharpe_deep'])} for the EMA timer.")
+    page = f"""<title>Nifty RSI·EMA·VWAP Study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>{CSS_V4}</style>
+<div class="wrap">
+<header style="display:flex;flex-direction:column;gap:14px">
+  <div class="rule" aria-hidden="true"></div>
+  <div class="eyebrow">RAAS Capital · Quant Desk · RCG-RN-REV-002 · NSE Nifty 50 · daily bars</div>
+  <h1>RSI + EMA + VWAP on the Nifty 50, v2</h1>
+  <p class="lede">The v1 strategy was chosen on 2020–2023 alone and lost money in every other window ({fmt(v1['sharpe_pre'])} on 2017–2019,
+  {fmt(v1['sharpe_oos'])} on 2024–2026). The v2 strategy keeps RSI, EMA and VWAP but uses them for a different trade, buying broad pullbacks
+  inside uptrends, and was chosen on the worst of all three windows: <b class="{cls(m['sharpe_pre'])}">{fmt(m['sharpe_pre'])}</b>,
+  <b class="{cls(m['sharpe_is'])}">{fmt(m['sharpe_is'])}</b> and <b class="{cls(m['sharpe_oos'])}">{fmt(m['sharpe_oos'])}</b>. {deep_line}</p>
+</header>
+<section class="cards" aria-label="Headline Sharpe ratios">{cards}</section>
+<section><h2>Equity, net of costs</h2>
+<p>Growth of ₹1 from April 2017, log scale; shaded: 2020–2023, the only window v1 was chosen on. The v2 book holds stocks on
+{fmt(m['pct_days_invested_span'], 0, pct=True)} of sessions with {fmt(m['exposure_span'], 0, pct=True)} of the capital on average; the rest earns the repo rate.
+Maximum drawdown {fmt(m['maxdd_span'], 1, pct=True)}, CAGR {fmt(m['cagr_span'], 1, pct=True)} over 2017–2026.
+The v1 line ends higher only because of 2020–2023, the window it was fitted to; it lost to cash before and after it.</p>
+{eq_chart}</section>
+<section><h2>Every window, and the one nobody saw</h2>
+<p>Sharpe ratio of daily returns over the RBI repo rate, net of 15 bps one-way. The first three windows were all used to choose the v2 rules;
+2011–2016 was built for this study, kept sealed, and scored once at the end. Bars above 2 are cut and labelled.</p>
+{win_chart}</section>
+<section><h2>What changed</h2>{changed}</section>
+<section><h2>The v2 strategy</h2><dl class="rules">{rules_html}</dl>
+<p style="margin-top:12px" class="note">Parameters: <code>{esc(json.dumps({k: x for k, x in p.items() if not k.startswith('use_')}))}</code>.
+The source is <code>nse/strategy.py</code>; the research note RCG-RN-REV-002 explains each rule and traces a trigger day to its exits.</p></section>
+<section><h2>Year by year</h2>
+<p>Green: the year beat cash (positive excess return); red: it did not. 2017 runs from April, 2026 to October.</p>{yearly}</section>
+<section><h2>Robustness</h2>
+<p><b>Costs.</b> Turnover is {fmt(m['turnover_yr_span'], 1)}x a year, so costs matter: the worst window falls from {fmt(cs[15]['objective'])} at 15 bps to
+{fmt(cs[25]['objective'])} at 25 bps and {fmt(cs[40]['objective'])} at 40 bps.</p>{costs}
+<p style="margin-top:16px"><b>Sampling error and multiple testing.</b> Stationary block bootstrap, mean block 20 sessions. The deflated Sharpe ratio over 2017–2026,
+charging for all {dsr['n_trials']:,} protocol-v4 trials, is {fmt(dsr['dsr'])}.</p>{boot}
+<p style="margin-top:16px"><b>Parameters.</b> Moving every parameter at once by a random factor between 0.8 and 1.2 ({jp['draws']} draws) gives a mean
+worst-window Sharpe of {fmt(jp['mean'])} (10th percentile {fmt(jp['p10'])}); read {fmt(jp['mean'])}, not {fmt(m['objective'])}, as the point estimate.
+Re-selecting the parameters each year from 2019 on the years before gives {fmt(wf['sharpe_concat'])} over 2019–2026 and
+{fmt(wf['sharpe_concat_2024_26'])} on 2024–2026.</p>
+<p><b>Event days.</b> A dip buyer is paid on rebound days: {fmt(evd['concentration']['top10_share_of_span_excess'], 0, pct=True)} of the
+2017–2026 excess return came on its 10 best days. Without each window's own best days:</p>{events}</section>
+<section><h2>Deep hold-out, April 2011 – May 2016</h2>
+<p>The point-in-time Nifty 50 of 2008–2016 ({deep['data']['members_with_bars_min']}–{deep['data']['members_with_bars_max']} members with bars on any day),
+{deep['data']['sessions_scored']:,} sessions, scored once for a set of strategies registered before the look. NIFTY 50 over the same window:
+Sharpe {fmt(dfin['bench_sharpe_deep'])}, CAGR {fmt(dfin['bench_cagr_deep'], 1, pct=True)}.</p>{deep_tab}</section>
+<section><h2>How the research ran</h2>
+<ul>
+<li>One objective for every regime: the lowest of the three window Sharpe ratios, so a rule that buys one regime at the cost of another does not raise it.</li>
+<li>Keep gates against the incumbent: no window more than 0.10 worse, the 10 best days removed, every single calendar year removed, positive years,
+0.05 of objective per added parameter, ±20% parameter plateaus, and RSI, EMA and VWAP each measurably used.</li>
+<li>Researchers worked in parallel with one lens each; every candidate was re-run and audited by an independent agent before the lead decided.</li>
+<li>Two amendments and one merge were written into <code>program.md</code> before the next round, and before any look at 2011–2016.</li>
+</ul>
+<div style="margin-top:14px">{rounds_tab}</div></section>
+<section class="callout"><h2>Bottom line</h2>
+<p>2024–2026 is now positive ({fmt(m['sharpe_oos'])}) and 2020–2026 strong ({fmt(m['sharpe_full'])}), but both windows were used to choose the rules.
+The evidence that was not is the deep hold-out ({fmt(dfin['sharpe_deep'])}), the walk-forward re-selection and the joint parameter moves.
+The strategy is a low-exposure liquidity-provision sleeve, sensitive to costs and to a few rebound days. Paper-trade it with the kill rules
+of RCG-RN-REV-002 fixed before the first trade.</p></section>
+<section><h2>Reproduce</h2>
+<pre>cd nse
+python -m pytest -q tests                      # harness, protocol v4, deep loader, PDFs
+python run4.py --strategy strategy.py          # the three windows + look-ahead check
+python validate4.py --strategy strategy.py     # costs, bootstrap, DSR, plateau, walk-forward
+python lineage4.py                             # every v4 strategy on every window
+python deep4.py --final strategy.py            # the one deep look (refuses a second)
+python make_pdf_v4.py                          # research note RCG-RN-REV-002</pre></section>
+<footer>Data: Financial Modeling Prep daily bars; Nifty 50 membership from NSE index data via the Historical Nifty 50 Constituent Weights dataset;
+repo rate from the Reserve Bank of India. Price returns (no dividends). Hypothetical backtest results, not investment advice. Branch <code>autoresearch/oct9-nse</code>.</footer>
+</div>"""
+    open(os.path.join(R, "index.html"), "w").write(page)
+    print("wrote", os.path.join(R, "index.html"), len(page), "bytes")
+    return True
+
+
 def main():
+    if "--v1" not in sys.argv and main_v4(os.path.join(R, "v4")):
+        return
+    main_v1()
+
+
+def main_v1():
+    """The v1 study page (protocol v1-v3); built when the protocol-v4 reports are absent, or with --v1."""
     v = load("validation.json"); b = load("baseline/validation.json"); lin = load("lineage.json") or []
     dg = load("diagnostics.json")
     m = v["metrics"]
