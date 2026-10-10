@@ -58,13 +58,20 @@ Rules (textbook confluence):
              left untrimmed: the switch-on thrust is the bet itself, and the NIFTY vol at a switch-on still
              carries the sell-off that preceded it. As names exit, drift or market vol rises, the trims
              keep the remaining book inside the budget; when vol falls the book is not re-levered.
+             A trim is not pro rata: it keeps what the cohort's own weighting likes best. Name i keeps
+             min(1, lam x score_i) of its weight, lam set so the model vol lands on the cap; the score is
+             today's beta / idiosyncratic variance for a fresh cohort (its mean-variance weight, so the trim
+             cuts the names with the most idiosyncratic risk per unit of market exposure first) and today's
+             ladder height (VWAP20/VWAP50 - 1)+ x rung for a stand-aside re-entry cohort (the score its
+             weights were bought on). NIFTYBEES carries no idiosyncratic risk and is not trimmed.
   sizing   : a cohort bought at a FRESH regime start (not the re-entry after an RSI>80 stand-aside) is
              scaled by the BANK NIFTY's variance ratio, min(1, (vol_long_n-day vol / vol_n-day vol)^size_power):
              when the market's most liquid, most leveraged sector has just become more volatile than its
              norm, the new up-leg is less trustworthy and the book is smaller; the rest stays in cash. A
              re-cross after only whipsaw_days or fewer days off (a whipsaw) is bought at whipsaw_size of that.
-             A re-entry cohort after the RSI>80 stand-aside is bought EQUAL weighted: on those hot days the
-             idiosyncratic-variance estimates are least reliable and the cohorts are small.
+             A re-entry cohort after the RSI>80 stand-aside is weighted by ladder height
+             (VWAP20/VWAP50 - 1)+ x rung instead: on those hot days the idiosyncratic-variance estimates are
+             least reliable, and medium-term volume-weighted momentum ranks the names.
   weights  : cohort weight = Blume-adjusted beta / idiosyncratic variance (w_corr_n-day correlation),
              times min(1, days since the name's last shock or volume-spike day / vwap_n): names that were
              in the news recently are bought small and earn their full weight back over one VWAP window.
@@ -99,6 +106,25 @@ def hysteresis(x: pd.Series, on: float, off: float) -> np.ndarray:
             state = True
         out[i] = state
     return out
+
+
+def budget_trim(w, b, s2, nv, cap, score):
+    """Trim (never add) a book to the model-vol budget, keeping what the cohort's own weighting likes best: name i
+    keeps min(1, lam x score_i) of its weight, lam (bisection) puts the model vol on the cap. NIFTYBEES scores
+    infinite (no idiosyncratic risk) and is cut only if it alone is over the budget."""
+    mvol = lambda x: np.sqrt((x @ b) ** 2 * nv ** 2 + x ** 2 @ s2)
+    fin = np.isfinite(score); fs = np.where(fin, score, 0.0)
+    keep = lambda lam: np.where(fin, np.minimum(1.0, lam * fs), 1.0)
+    fin = fin & (w > 0)
+    lo, hi = 0.0, (1.0 / max(score[fin].min(), 1e-12) if fin.any() else 0.0)   # at hi every name keeps its weight
+    for _ in range(60):
+        lam = 0.5 * (lo + hi)
+        if mvol(w * keep(lam)) > cap:
+            hi = lam
+        else:
+            lo = lam
+    x = w * keep(lo)
+    return x * min(1.0, cap / max(mvol(x), 1e-12))
 
 
 def compute_target_weights(md) -> pd.DataFrame:
@@ -158,13 +184,16 @@ def compute_target_weights(md) -> pd.DataFrame:
     b_v = beta_w.fillna(0.0).to_numpy(copy=True); b_v[:, e] = 1.0          # single-index model of the riding book: betas (ETF 1)
     s2_v = (ivol_w ** 2).fillna(0.0).to_numpy(copy=True); s2_v[:, e] = 0.0  # ... idiosyncratic variances (ETF 0)
     nv_v = nvol.values                                       # ... and the NIFTY 50 vol (NaN -> no trim)
+    mvs_v = np.where(s2_v > 0, b_v / np.where(s2_v > 0, s2_v, 1.0), np.inf)   # trim scores: fresh cohorts beta / idio var,
+    hs_v = height_v.copy(); hs_v[:, e] = np.inf                                # re-entry cohorts their ladder height
+    score_v = mvs_v
     last_on, t_form = -10 ** 6, -10 ** 6                    # last day the regime was on; the cohort's formation day
     for t in range(len(dates)):
         if not regime_v[t]:                                 # regime off: fully in cash
             held[:] = False
             w = np.zeros(N)
         elif t == 0 or not regime_v[t - 1]:                 # regime switches on: buy the cohort
-            t_form = t
+            t_form, score_v = t, mvs_v
             held = entry_v[t] & hold_v[t] & (iv_v[t] > 0)     # never buy a name the exit rules would sell today
             w = np.where(held, iv_v[t], 0.0)
             g = p["gross"]
@@ -175,6 +204,7 @@ def compute_target_weights(md) -> pd.DataFrame:
             else:                                           # re-entry after the RSI>80 stand-aside: ladder-height weights
                 w = np.where(held, height_v[t], 0.0)
                 held &= w > 0                               # a name whose VWAP20 is not above its VWAP50 is not bought
+                score_v = hs_v
             if held.any():
                 w = w / w.sum()                             # cohort shares
                 excess = np.clip(w - p["w_cap"], 0.0, None)   # share above the single-name cap ...
@@ -188,7 +218,7 @@ def compute_target_weights(md) -> pd.DataFrame:
             w = np.where(held, wg, 0.0) / (wg.sum() + 1.0 - w.sum())
             mv = np.sqrt((w @ b_v[t]) ** 2 * nv_v[t] ** 2 + w ** 2 @ s2_v[t])   # the riding book's model vol
             if mv > p["vol_cap"] and t - t_form > p["vol_cap_delay"]:   # the first days of the up-leg run untrimmed
-                w = w * (p["vol_cap"] / mv)                 # trim (never add) back to the vol budget
+                w = budget_trim(w, b_v[t], s2_v[t], nv_v[t], p["vol_cap"], score_v[t])   # trim (never add) to budget
         if regime_v[t]:
             last_on = t
         W[t] = w
