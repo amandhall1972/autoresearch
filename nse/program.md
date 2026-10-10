@@ -303,7 +303,7 @@ against incumbent 1.
 
 ## v4 round 4 (dry)
 
-Three lenses against incumbent 1 (288 logged rows; candidates `v4/r4_*.py`), three audits, nothing merged. Each lens
+Three lenses against incumbent 1 (468 logged rows; candidates `v4/r4_*.py`), three audits, nothing merged. Each lens
 found one lever that raised the objective but failed gates: a cap of 5 new names per trigger day (0.910; fails
 sanity at 4.91 names, leave-one-year-out without 2020 and 2024, plateau4), 10 slots instead of 12 (0.843; fails
 leave-one-year-out in 4 years, consistency as 2018 turns negative, plateau4), and an exit at the 7-session VWAP
