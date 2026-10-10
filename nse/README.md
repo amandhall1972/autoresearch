@@ -20,7 +20,7 @@ and non-use of RSI/EMA/VWAP. Five rounds, 3,559 logged variants and 20 independe
 | window | role | Sharpe (excess of repo) | CAGR | max DD | Nifty Sharpe | v1 Sharpe |
 |---|---|---:|---:|---:|---:|---:|
 | 2017-04 → 2019-12 | chosen on (worst-window objective) | **0.79** | 10.3 % | −4.2 % | 0.42 | −0.72 |
-| 2020-01 → 2023-12 | chosen on | **1.12** | 14.4 % | −6.6 % | 0.58 | 4.97 |
+| 2020-01 → 2023-12 | chosen on | **1.12** | 14.3 % | −6.6 % | 0.58 | 4.97 |
 | 2024-01 → 2026-10 | chosen on | **0.85** | 11.2 % | −5.7 % | −0.28 | −1.06 |
 | 2020-01 → 2026-10 | whole period asked about | **1.02** | 13.1 % | −6.6 % | 0.31 | 2.78 |
 | 2011-04 → 2016-05 | **deep hold-out, sealed, scored once at the end** | **0.68** | 13.5 % | −5.0 % | 0.01 | −0.09 |
