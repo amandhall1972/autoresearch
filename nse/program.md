@@ -248,3 +248,28 @@ passes `windows` or `drop10`.
    is final.
 5. The stopping rule restarts with round 2: at most 4 further rounds (2-5), stop after 2 consecutive rounds whose
    merged objective gain is below 0.05.
+
+## Protocol v4.2 (amended after v4 round 2, before round 3, before any deep hold-out look)
+
+**What round 2 showed.** Five lens researchers (892 logged variants; candidates `v4/r2_*.py`) and five audits.
+Every candidate beat R0 in the worst window (0.35 to 0.75) and four passed every mechanical gate, but all five
+were rejected, and the reasons exposed two flaws in the rules rather than in the candidates:
+
+1. The *sanity* rule's "at least 5 names" was written for the v1 stock picker. NIFTYBEES holds all 50 members but
+   counts as one name, so R0-based books added token equal-weight slivers (0.1 % per name) only to pass it, which
+   the auditors rightly flagged as window dressing.
+2. R0's EMA20/EMA50 is itself a narrow peak in the binding 2024-26 window (fast 16 or 24 gives R0 an objective of
+   0.02-0.03), so every candidate that keeps R0's core fails an absolute plateau on fast/slow, although each beats
+   R0 at R0's own neighbouring settings.
+
+**Amendments (in force from round 3).**
+
+1. *Diversification.* The sanity gate is met by at least 5 names on average **or** NIFTYBEES making up at least half
+   of the gross on invested days (`etf_share_span`, now reported by `evaluate_v4`). Slivers that exist only to
+   pass the old rule are simplifications to delete.
+2. *Plateau, mechanical* (`plateau4.py`). New or moved parameters: each +-20 % neighbour must beat the incumbent's
+   objective and keep at least 60 % of the margin (unchanged). Parameters inherited unchanged from the incumbent:
+   each neighbour must beat the incumbent evaluated at the same neighbour value (relative rule): the change must help
+   wherever the inherited core sits. The inherited core's own fragility is reported, not hidden: R0's fast/slow
+   neighbours are part of the final report and of the deep hold-out reading.
+3. Round 2 merged nothing (dry round 1 of 2 under the v4.1 stopping rule).

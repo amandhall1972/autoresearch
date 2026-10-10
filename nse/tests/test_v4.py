@@ -201,3 +201,26 @@ def test_compliance_counts_sessions_moved_by_each_family(md, tmp_path):
     assert comp["use_vwap"] == 0.0 and not comp["compliant"]          # the switch exists but binds nowhere
     assert compare4.n_params(mod) == 1                                  # switches are not parameters
     assert mod.PARAMS["use_rsi"] is True                                # restored after the ablation
+
+
+def test_plateau_neighbours():
+    import plateau4
+    assert plateau4.neighbours(20) == [16, 24]
+    assert plateau4.neighbours(3) == [2, 4]                    # integers move at least one step
+    assert plateau4.neighbours(1) == [1, 2]
+    assert plateau4.neighbours(0.5) == [0.4, 0.6]
+    assert plateau4.neighbours(0.985) == [0.988, 0.982]        # a stop near 1 moves through its distance from 1
+    assert plateau4.neighbours(True) == [] and plateau4.neighbours("BANKNIFTY") == []
+
+
+def test_compare4_sanity_accepts_an_etf_core_book():
+    import compare4
+    etf = _row(n_names_avg_span=1.0, etf_share_span=1.0)
+    assert compare4.gates(etf, _row(), [(2020, 0.4, 0.3)])["sanity"]
+    thin = _row(n_names_avg_span=3.0, etf_share_span=0.2)
+    assert not compare4.gates(thin, _row(), [(2020, 0.4, 0.3)])["sanity"]
+
+
+def test_evaluate_v4_reports_the_etf_share(md):
+    ev = P.evaluate_v4(_hold_etf(md), md); ev.pop("_res")
+    assert ev["etf_share_span"] == pytest.approx(1.0)

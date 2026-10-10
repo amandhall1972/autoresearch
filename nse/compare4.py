@@ -2,8 +2,9 @@
 Protocol v4 keep gates (program.md): compare a candidate strategy file with the incumbent on the 2016-2026 data
 and print every gate that can be computed mechanically.
 
-  sanity       invested on >= 30 % of days, >= 5 names on average, turnover <= 40x a year, span max drawdown above
-               -30 %, at most 3 harness fixes
+  sanity       invested on >= 30 % of days, diversified (>= 5 names on average, or NIFTYBEES - one unit of all
+               50 members - at least half of the gross on invested days: protocol v4.2), turnover <= 40x a year,
+               span max drawdown above -30 %, at most 3 harness fixes
   improves     the objective (lowest of the three window Sharpe ratios) rises
   windows      no window (2017-19, 2020-23, 2024-26) falls more than 0.10 below the incumbent's
   drop10       the 2017-04..2026-10 Sharpe without its 10 best days rises
@@ -80,7 +81,8 @@ def year_table(c, i, rf):
 
 def gates(c, i, ytab) -> dict:
     g = {
-        "sanity": bool(c["pct_days_invested_span"] >= 0.30 and c["n_names_avg_span"] >= 5
+        "sanity": bool(c["pct_days_invested_span"] >= 0.30
+                       and (c["n_names_avg_span"] >= 5 or c.get("etf_share_span", 0.0) >= 0.5)
                        and c["turnover_yr_span"] <= 40 and c["maxdd_span"] > -0.30 and c["n_harness_fixes"] <= 3),
         "improves": bool(c["objective"] > i["objective"]),
         "windows": bool(all(c[f"sharpe_{w}"] >= i[f"sharpe_{w}"] - 0.10 for w, _, _ in P.V4_WINDOWS)),
@@ -108,7 +110,7 @@ def main():
     ytab = year_table(c, i, rf)
     keys = (["objective", "sharpe_pre", "sharpe_is", "sharpe_oos", "sharpe_span", "sharpe_full", "sharpe_span_drop10",
              "sharpe_span_gross", "years_positive", "worst_year_sharpe"] + [f"sharpe_{y}" for y in range(2017, 2027)]
-            + ["maxdd_span", "turnover_yr_span", "exposure_span", "n_names_avg_span", "pct_days_invested_span",
+            + ["maxdd_span", "turnover_yr_span", "exposure_span", "n_names_avg_span", "etf_share_span", "pct_days_invested_span",
                "n_harness_fixes", "n_params"])
     print(f"{'':<24}{'candidate':>12}{'incumbent':>12}")
     for k in keys:

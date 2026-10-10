@@ -565,6 +565,10 @@ def evaluate_v4(weights: pd.DataFrame, md: MarketData, cost_bps=COST_BPS_PER_SID
     out["years_positive"] = int(sum(1 for y in years if (r[r.index.year == y] - rf[rf.index.year == y]).sum() > 0))
     out["years"] = len(years)
     out["worst_year_sharpe"] = round(min(yearly.values()), 4)
+    W = res["weights"].loc[V4_START:END]
+    gross = W.sum(axis=1)
+    inv = gross > 1e-9
+    out["etf_share_span"] = round(float((W.loc[inv, ETF_TICKER] / gross[inv]).mean()) if inv.any() else 0.0, 4)
     out["cost_bps"] = cost_bps
     out["n_harness_fixes"] = res["n_harness_fixes"]
     out["_res"] = res
