@@ -81,7 +81,7 @@ PARAMS = dict(
     ema_fast=20, ema_slow=50, ema_spread=0.06,
     vwap_n=20, vwap_exit=0.985, shock_k=2.5, vspike_k=4.0, vwap_long_n=50, vwap_short_n=3,
     vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0, corr_n=20,
-    w_corr_n=15, beta_shrink=1.0 / 3.0, w_cap=0.4,
+    w_corr_n=15, beta_shrink=1.0 / 3.0, w_cap=0.4, rung_power=20.0,
     regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
     size_index="BANKNIFTY", size_power=2.0, whipsaw_days=3, whipsaw_size=0.5, vol_cap=0.10, vol_cap_delay=2,
     gross=1.0,
@@ -132,7 +132,10 @@ def compute_target_weights(md) -> pd.DataFrame:
     shock = (ret - beta.shift(1).mul(idx_ret, axis=0)) < -p["shock_k"] * ivol.shift(1) / np.sqrt(252)   # NaN -> no shock
     spike = v > p["vspike_k"] * v.rolling(p["vwap_n"], min_periods=p["vwap_n"]).mean().shift(1)   # NaN -> no spike
     vw_short = rolling_vwap(h, l, c, v, p["vwap_short_n"])
-    ladder_break = (c < vw_short) & (vw_short < rolling_vwap(h, l, c, v, p["vwap_long_n"]))   # NaN -> no break
+    vw_long = rolling_vwap(h, l, c, v, p["vwap_long_n"])
+    ladder_break = (c < vw_short) & (vw_short < vw_long)            # NaN -> no break
+    rung_v = ((c / vw_short) ** p["rung_power"]).fillna(0.0).values     # bottom-rung tilt (close/VWAP3)^k (NaN -> 0)
+    height_v = (vw / vw_long - 1.0).clip(lower=0.0).fillna(0.0).values * rung_v   # re-entry: (VWAP20/VWAP50 - 1)+ x rung
     hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]) & ~shock & ~spike
                                      & ~ladder_break)
     hold[ETF_TICKER] = True                                 # a parked index slot rides until the regime switches off
@@ -151,7 +154,7 @@ def compute_target_weights(md) -> pd.DataFrame:
     iv_v = (beta_w / ivol_w.where(ivol_w > 0) ** p["vol_power"]).fillna(0.0).values   # 0 when unknown
     i_v = np.arange(len(dates))[:, None]                    # days since the name's last abnormal day (shock or spike)
     age = i_v - pd.DataFrame(np.where((shock | spike).values, i_v, np.nan)).ffill().values   # NaN: none on record
-    iv_v = iv_v * np.nan_to_num(np.minimum(1.0, age / p["vwap_n"]), nan=1.0)   # weight ramps back over vwap_n days
+    iv_v = iv_v * np.nan_to_num(np.minimum(1.0, age / p["vwap_n"]), nan=1.0) * rung_v   # ramp back over vwap_n days
     b_v = beta_w.fillna(0.0).to_numpy(copy=True); b_v[:, e] = 1.0          # single-index model of the riding book: betas (ETF 1)
     s2_v = (ivol_w ** 2).fillna(0.0).to_numpy(copy=True); s2_v[:, e] = 0.0  # ... idiosyncratic variances (ETF 0)
     nv_v = nvol.values                                       # ... and the NIFTY 50 vol (NaN -> no trim)
@@ -169,8 +172,9 @@ def compute_target_weights(md) -> pd.DataFrame:
                 g *= size_v[t]                              # index variance-ratio sizing
                 if t - last_on - 1 <= p["whipsaw_days"]:
                     g *= p["whipsaw_size"]                  # re-cross after only a few days off: whipsaw
-            else:                                           # re-entry after the RSI>80 stand-aside: equal weights
-                w = held.astype(float)
+            else:                                           # re-entry after the RSI>80 stand-aside: ladder-height weights
+                w = np.where(held, height_v[t], 0.0)
+                held &= w > 0                               # a name whose VWAP20 is not above its VWAP50 is not bought
             if held.any():
                 w = w / w.sum()                             # cohort shares
                 excess = np.clip(w - p["w_cap"], 0.0, None)   # share above the single-name cap ...
