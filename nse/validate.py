@@ -9,7 +9,7 @@ Final validation of strategy.py (run after the research loop):
   * walk-forward re-selection of parameters (expanding window, yearly) over the perturbation grid
   * Monte Carlo (block bootstrap) distribution of terminal wealth and max drawdown
   * charts under reports/
-Usage: python validate.py [--boot 2000] [--out reports]
+Usage: python validate.py [--boot 2000] [--out reports] [--strategy path/to/strategy.py]
 """
 import argparse, copy, json, math, os, sys, time
 import numpy as np
@@ -114,10 +114,16 @@ def main():
     ap.add_argument("--boot", type=int, default=2000)
     ap.add_argument("--out", default=os.path.join(HERE, "reports"))
     ap.add_argument("--no-charts", action="store_true")
+    ap.add_argument("--strategy", default=None, help="validate this strategy file instead of strategy.py")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     t0 = time.time(); rng = np.random.default_rng(42)
-    import strategy
+    if args.strategy:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("strategy_under_validation", args.strategy)
+        strategy = importlib.util.module_from_spec(spec); spec.loader.exec_module(strategy)
+    else:
+        import strategy
     md = P.load_data()
     W = strategy.compute_target_weights(md)
     la = P.check_no_lookahead(strategy.compute_target_weights, md)
