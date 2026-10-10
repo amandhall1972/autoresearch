@@ -161,3 +161,58 @@ regime switching, combining mean-reversion (RSI low) and momentum (RSI high) sle
 
 **NEVER STOP** once the loop has begun; if out of ideas, re-read `strategy.py` and the indicator helpers
 for new angles, combine near-misses, try more radical structural changes.
+
+## Protocol v4 (opened 2026-10-10, after the loop above closed): every regime at once
+
+**Why.** The question after the v1-v3 loop was which changes make 2024-2026 positive as well and the strategy
+effective over the whole of 2020-2026. Choosing rules on 2024-2026 makes that window in-sample, and the
+2017-2019 hold-out has been seen too, so protocol v4 does two things:
+
+1. It researches on **all three seen windows together**: 2017-04..2019-12 (`pre`), 2020-2023 (`is`) and
+   2024-01..2026-10 (`oos`), on the 2016-2026 point-in-time universe (`load_data(presample=True, end=END)`).
+   **The objective is the lowest of the three window Sharpe ratios** (`objective` in `run4.py`), so a rule
+   that buys one regime at the cost of another is not progress.
+2. It builds a **new sealed test** that no strategy in this repository has ever been run on: the
+   **deep hold-out, 2011-04-01..2016-05-31**, on the point-in-time Nifty 50 of 2008-2016 (`data/raw_deep`,
+   built by `build_deep_holdout.py`; 2007-09..2011-03 is indicator warm-up). It is scored once, at the end, by
+   `deep_holdout.py`, and the score cannot change which strategy is final.
+
+**Pre-registered deep hold-out set** (fixed before v4 round 1): the v1 baseline `3659aab`, the v1 final
+`c44574d` (the v4 starting incumbent), every v4 incumbent merged by the lead, and the v4 final strategy.
+Nothing else is ever run on the deep hold-out; every look is appended to `reports/deep_holdout_log.tsv`.
+Researchers never run `deep_holdout.py`, never call `load_data(deep=True)` and never read `data/raw_deep`
+(the files are kept out of the repository until the final scoring).
+
+**What you can do** is unchanged (edit `strategy.py` only; RSI, EMA and VWAP stay the core of the signal; any
+causal use of `MarketData`; NIFTYBEES is a tradable instrument for index exposure), plus one new limit:
+**no lookback longer than `V4_MAX_LOOKBACK` = 200 sessions** for anything that is NaN during its warm-up (the
+data start on 2016-06-01, so a longer lookback would be undefined in 2017). A structural rewrite is a
+candidate like any other.
+
+**Tools.** `v4lab.py` (data cached once; `v4lab.score(path, md, **param_overrides)` in about 0.5 s, no
+lookahead check) for exploration; `python run4.py --strategy FILE` (dense lookahead check over 2017-2026, about
+35 s) for every candidate you report; `python compare4.py FILE` for the keep gates.
+
+**Keep gates (protocol v4)**, mechanical in `compare4.py`:
+
+* *sanity*: invested on at least 30 % of days, at least 5 names on average, turnover at most 40x a year, span
+  maximum drawdown above -30 %, at most 3 harness fixes, `lookahead_ok` True;
+* *improves*: the objective rises;
+* *windows*: no window Sharpe falls more than 0.10 below the incumbent's;
+* *drop10*: the 2017-04..2026-10 Sharpe without its 10 best days rises;
+* *years*: leave-one-year-out, the candidate's objective stays above the incumbent's with any single
+  calendar year removed;
+* *consistency*: no fewer calendar years with a positive excess return;
+* *parsimony*: every added `PARAMS` entry must buy at least 0.05 of objective (fewer parameters at no worse
+  objective passes);
+
+and by hand: *plateau* (every moved or new numeric parameter's neighbours, about +-20 % or the adjacent natural
+grid points, must also beat the incumbent's objective) and *simplification* (deleting a rule that costs less
+than 0.02 of objective while passing the other gates is a keep).
+
+**Stopping rule** (declared before v4 round 1): at most 5 rounds; stop after 2 consecutive rounds whose merged
+gain in the objective is below 0.05.
+
+**Logging.** Every experiment goes into `results_v4.tsv`:
+`round	lens	objective	sharpe_pre	sharpe_is	sharpe_oos	sharpe_span	sharpe_full	turnover_yr	status	description`
+(status `keep`, `discard` or `crash`). The deflated Sharpe at the end counts every row.

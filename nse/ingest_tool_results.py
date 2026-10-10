@@ -5,9 +5,12 @@ agent harness) into clean per-ticker CSVs under data/raw/.
 Canonical ticker names follow the Nifty 50 constituent dataset (e.g. BAJAJAUTO, M&M).
 Files are named with '&' replaced by '_' (M&M -> M_M.csv).
 
+Fetch M&M as "M%26M.NS": an unencoded "M&M.NS" is cut at the ampersand and returns the US ticker "M".
+
 Usage: python ingest_tool_results.py [--out data/raw_presample] <dir-with-mcp-FMP-chart-*.txt> [more dirs...]
 (default output: data/raw; the pre-sample hold-out names that left the Nifty 50 before 2020 go to
-data/raw_presample so that they never enter the research loop's data.)
+data/raw_presample so that they never enter the research loop's data; the 2007-2016 bars of the deep
+hold-out go to data/raw_deep, which only deep_holdout.py reads.)
 """
 import glob, json, os, sys
 import pandas as pd
@@ -19,6 +22,7 @@ FMP_TO_CANON = {
     "INDUSTOWER.NS": "INFRATEL",   # Bharti Infratel renamed Indus Towers (Dec 2020); same listed entity
     "TMPV.NS": "TATAMOTORS",       # Tata Motors renamed Tata Motors Passenger Vehicles after the Oct-2025 CV demerger
     "SAMMAANCAP.NS": "IBULHSGFIN", # Indiabulls Housing Finance renamed Sammaan Capital (2024); same listed entity
+    "UNITDSPR.NS": "MCDOWELL-N",   # United Spirits traded as MCDOWELL-N until its 2024 symbol change; same entity
 }
 
 def canon(sym: str) -> str:

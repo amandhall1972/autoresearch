@@ -29,6 +29,29 @@ DROP_BEST_DAYS = 5              # sharpe_is_drop5: in-sample Sharpe with the 5 b
 # index before 2020 (data/raw_presample). Loaded only with load_data(presample=True), i.e. by holdout.py.
 PRESAMPLE_START = "2017-04-01"
 PRESAMPLE_END = "2019-12-31"
+# Protocol v4 (program.md): after both earlier tests were spent, the research objective spans every window seen
+# so far on the 2016-2026 point-in-time universe (load_data(presample=True, end=END)): its worst window counts.
+V4_START = PRESAMPLE_START
+V4_WINDOWS = (("pre", PRESAMPLE_START, PRESAMPLE_END), ("is", START, IS_END), ("oos", OOS_START, END))
+V4_MAX_LOOKBACK = 200           # sessions from WARMUP_START to V4_START: longer lookbacks would be NaN in 2017
+# Deep hold-out (protocol v4): the point-in-time Nifty 50 of 2008-2016 (data/raw_deep, built by
+# build_deep_holdout.py). Loaded only with load_data(deep=True), i.e. by deep_holdout.py, never by the loop.
+DEEP_WARMUP_START = "2007-09-17"   # first NIFTY 50 bar at the vendor
+DEEP_START = "2011-04-01"          # about 870 sessions of indicator warm-up before the first scored day
+DEEP_END = "2016-05-31"            # the research data starts on the next day: the two never overlap
+DEEP_MUHURAT_SESSIONS = ("2007-11-09", "2008-10-28", "2009-10-17", "2010-11-05", "2011-10-26", "2012-11-13",
+                         "2013-11-03", "2014-10-23", "2015-11-11")
+DEEP_CLOSED_SESSIONS = ("2014-10-15",)    # exchange holiday (Maharashtra election); the vendor carries flat bars
+# Samruddhi Cement demerger (ex 2010-05-26, warm-up only): the vendor leaves a -20.7 % gap on a +2.3 % market
+# day; without an NSE ex-price for that date the ex-day return is set to the market's (close/close / NIFTY).
+DEEP_CORPORATE_ACTION_FIXES = (("GRASIM", "2010-05-26", 0.7751),)
+# Bars kept per name: Bajaj Auto as listed today begins after the 2008 demerger (the vendor's earlier rows are
+# the pre-demerger company plus ten weeks of flat carry); the vendor has no HDFC bars 2013-12-12..2015-12-24,
+# so HDFC is treated as leaving the universe on 2013-12-12 (its later rows would book a fake +50 % jump).
+DEEP_BAR_WINDOWS = (("BAJAJAUTO", "2008-05-27", None), ("HDFC", None, "2013-12-11"))
+# Bank Nifty members with bars: the vendor's BANK NIFTY lacks 159 sessions in 2010-2016; they are rebuilt
+# from these names' Nifty 50 free-float weights (tracking on the sessions both exist: see deep_holdout.py).
+DEEP_BANKS = ("AXISBANK", "BANKBARODA", "HDFCBANK", "ICICIBANK", "INDUSINDBK", "KOTAKBANK", "PNB", "SBIN", "YESBANK")
 TRADING_DAYS = 252
 COST_BPS_PER_SIDE = 15.0        # one-way cost in bps of traded value: STT 10 + exch/SEBI/stamp/GST ~1 + slippage ~4
 MIN_NAMES_FOR_SESSION = 30      # a date is a trading day only if >= this many stocks have a bar
@@ -66,26 +89,32 @@ def _fname(ticker: str) -> str:
     return ticker.replace("&", "_") + ".csv"
 
 
-def _raw_path(ticker: str) -> str:
+def _raw_path(ticker: str, deep: bool = False) -> str:
+    if deep:
+        return os.path.join(DATA_DIR, "raw_deep", _fname(ticker))
     p = os.path.join(DATA_DIR, "raw", _fname(ticker))
     return p if os.path.exists(p) else os.path.join(DATA_DIR, "raw_presample", _fname(ticker))
 
 
-def _read_raw(ticker: str) -> pd.DataFrame:
-    df = pd.read_csv(_raw_path(ticker), parse_dates=["date"]).set_index("date").sort_index()
+def _read_raw(ticker: str, deep: bool = False) -> pd.DataFrame:
+    df = pd.read_csv(_raw_path(ticker, deep), parse_dates=["date"]).set_index("date").sort_index()
     df = df[~df.index.duplicated(keep="last")]
     # stale rows: zero volume and a flat bar -> vendor gap (price carried forward); treat as missing
     stale = (df["volume"] == 0) & (df["open"] == df["high"]) & (df["high"] == df["low"]) & (df["low"] == df["close"])
     df.loc[stale, ["open", "high", "low", "close", "volume"]] = np.nan
-    for t, d, f in CORPORATE_ACTION_FIXES:
+    for t, d, f in (DEEP_CORPORATE_ACTION_FIXES if deep else CORPORATE_ACTION_FIXES):
         if t == ticker:
             m = df.index < pd.Timestamp(d)
             df.loc[m, ["open", "high", "low", "close"]] *= f
+    if deep:
+        for t, a, b in DEEP_BAR_WINDOWS:
+            if t == ticker:
+                df = df.loc[a:b]
     return df
 
 
-def available_tickers(presample: bool = False):
-    dirs = ["raw"] + (["raw_presample"] if presample else [])
+def available_tickers(presample: bool = False, deep: bool = False):
+    dirs = ["raw_deep"] if deep else ["raw"] + (["raw_presample"] if presample else [])
     return sorted({f[:-4].replace("_", "&") for d in dirs for f in os.listdir(os.path.join(DATA_DIR, d)) if f.endswith(".csv")})
 
 
@@ -143,12 +172,25 @@ def load_rf(calendar: pd.DatetimeIndex) -> pd.Series:
     return (rate * days / 365.0).rename("rf")
 
 
-def load_universe(calendar: pd.DatetimeIndex, tickers, presample: bool = False) -> pd.DataFrame:
+def load_universe(calendar: pd.DatetimeIndex, tickers, presample: bool = False, deep: bool = False) -> pd.DataFrame:
     """Point-in-time membership: a stock is a member on date t if it was in the index per the most
     recent membership row on or before t (rows are month-ends and NSE effective dates of changes).
     Changes after the matrix ends come from data/universe/nifty50_changes_post_dataset.csv.
     The research loop's universe starts on 2019-12-31 (nothing is a member before); presample=True
-    prepends the 2016-2019 rows for the sealed pre-sample hold-out."""
+    prepends the 2016-2019 rows for the sealed pre-sample hold-out. deep=True is the 2008-2016 matrix of the
+    deep hold-out alone; a name is not a member outside the bars kept for it (DEEP_BAR_WINDOWS)."""
+    if deep:
+        w = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2008_2016.csv"), parse_dates=["DATE"]).set_index("DATE")
+        mem = (w > 0).astype(bool)
+        full = mem.reindex(calendar.union(mem.index)).ffill().reindex(calendar).fillna(False).astype(bool)
+        full = full.reindex(columns=tickers, fill_value=False)
+        for t, a, b in DEEP_BAR_WINDOWS:
+            if t in full.columns:
+                outside = np.ones(len(calendar), dtype=bool)
+                outside[(calendar >= pd.Timestamp(a or calendar[0])) & (calendar <= pd.Timestamp(b or calendar[-1]))] = False
+                full.loc[outside, t] = False
+        full[ETF_TICKER] = True
+        return full
     w = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2019_2025.csv"), parse_dates=["DATE"]).set_index("DATE")
     if presample:
         w0 = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2016_2019.csv"), parse_dates=["DATE"]).set_index("DATE")
@@ -169,14 +211,18 @@ def load_universe(calendar: pd.DatetimeIndex, tickers, presample: bool = False) 
     return full
 
 
-def _index_weight_rows() -> pd.DataFrame:
-    """All free-float weight rows of the Nifty 50 (2016-01..2025-08), research and pre-sample files."""
+def _index_weight_rows(deep: bool = False) -> pd.DataFrame:
+    """All free-float weight rows of the Nifty 50 (2016-01..2025-08), research and pre-sample files; deep=True:
+    the 2008-2016 rows of the deep hold-out."""
+    if deep:
+        return pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2008_2016.csv"),
+                           parse_dates=["DATE"]).set_index("DATE").fillna(0.0)
     w1 = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2019_2025.csv"), parse_dates=["DATE"]).set_index("DATE")
     w0 = pd.read_csv(os.path.join(DATA_DIR, "universe", "nifty50_weights_2016_2019.csv"), parse_dates=["DATE"]).set_index("DATE")
     return pd.concat([w0[w0.index < w1.index.min()], w1]).fillna(0.0)
 
 
-def _fill_index_bars(idx_ohlc: dict, calendar: pd.DatetimeIndex) -> dict:
+def _fill_index_bars(idx_ohlc: dict, calendar: pd.DatetimeIndex, deep: bool = False) -> dict:
     """Fill sessions on which the vendor's index series has no bar (7 regular sessions in 2016-2026, e.g.
     2019-03-29, the 2020-02-01 Budget session and the 2024-01-20 Saturday session).
 
@@ -185,25 +231,33 @@ def _fill_index_bars(idx_ohlc: dict, calendar: pd.DatetimeIndex) -> dict:
     its previous close (validated against the vendor index on 1,398 days: RMS error 4.7 bps, p99 16 bps).
     Constituents without a bar that day are left out and the weights renormalised over those that traded
     (the vendor gap days also lack some stock bars). BANKNIFTY (signal-only, no weights available) is
-    carried flat. Any remaining gap is forward-filled as before."""
+    carried flat. Any remaining gap is forward-filled as before.
+    deep=True (deep hold-out): the 2008-2016 weight rows, and BANK NIFTY gaps (159 sessions in 2010-2016) are
+    rebuilt the same way from the Nifty 50 weights of DEEP_BANKS instead of being carried flat."""
     out = {k: v.copy() for k, v in idx_ohlc.items()}
-    miss = out["close"]["NIFTY50"].isna()
-    miss &= out["close"]["NIFTY50"].ffill().notna()          # only gaps after the first index bar
-    if miss.any():
-        w = _index_weight_rows()
-        names = [t for t in w.columns if (w[t] > 0).any() and os.path.exists(_raw_path(t))]
-        px = {col: pd.concat([_read_raw(t)[col].rename(t) for t in names], axis=1, sort=True)
-              for col in ["open", "high", "low", "close"]}
-        cal_pos = {d: i for i, d in enumerate(calendar)}
+    w = None; px = None
+    cal_pos = {d: i for i, d in enumerate(calendar)}
+
+    def rebuild(ix, restrict=None):
+        nonlocal w, px
+        miss = out["close"][ix].isna()
+        miss &= out["close"][ix].ffill().notna()               # only gaps after the first index bar
+        if not miss.any():
+            return miss
+        if w is None:
+            w = _index_weight_rows(deep)
+            names = [t for t in w.columns if (w[t] > 0).any() and os.path.exists(_raw_path(t, deep))]
+            px = {col: pd.concat([_read_raw(t, deep)[col].rename(t) for t in names], axis=1, sort=True)
+                  for col in ["open", "high", "low", "close"]}
         for t in calendar[miss.values]:
             tp = calendar[cal_pos[t] - 1]
             r0 = w.index[w.index <= tp].max()
             ww = w.loc[r0]; ww = ww[ww > 0]
-            nm = [n for n in ww.index if n in px["close"].columns]
+            nm = [n for n in ww.index if n in px["close"].columns and (restrict is None or n in restrict)]
             c_tp = px["close"][nm].loc[:tp].ffill().iloc[-1]
             c_r0 = px["close"][nm].loc[:r0].ffill().iloc[-1]
             wd = (ww[nm] * (c_tp / c_r0)).dropna(); wd = wd / wd.sum()
-            prev = out["close"].loc[tp, "NIFTY50"]
+            prev = out["close"].loc[tp, ix]
             have = px["close"].reindex([t])[wd.index].iloc[0].notna() if t in px["close"].index else pd.Series(False, index=wd.index)
             wa = wd[have.values]
             if wa.sum() < 0.5:                                    # too little of the index traded: carry flat
@@ -211,7 +265,13 @@ def _fill_index_bars(idx_ohlc: dict, calendar: pd.DatetimeIndex) -> dict:
             wa = wa / wa.sum()
             for col in ["open", "high", "low", "close"]:
                 rel = px[col].loc[t, wa.index] / c_tp[wa.index]
-                out[col].loc[t, "NIFTY50"] = prev * float((wa * rel).sum())
+                out[col].loc[t, ix] = prev * float((wa * rel).sum())
+        return miss
+
+    miss = rebuild("NIFTY50")
+    if deep:
+        rebuild("BANKNIFTY", DEEP_BANKS)
+    elif miss.any():
         for d, official in INDEX_CLOSE_PATCHES:
             t = pd.Timestamp(d)
             if t in calendar and bool(miss.get(t, False)) and pd.notna(out["close"].loc[t, "NIFTY50"]):
@@ -225,13 +285,17 @@ def _fill_index_bars(idx_ohlc: dict, calendar: pd.DatetimeIndex) -> dict:
     return out
 
 
-def load_data(start=WARMUP_START, end=None, presample: bool = False) -> MarketData:
+def load_data(start=None, end=None, presample: bool = False, deep: bool = False) -> MarketData:
     """presample=False: the research data (2016-06..2026-10, universe from 2019-12-31).
-    presample=True: the sealed pre-sample hold-out data (2016-06..2019-12-31, 2016-2019 universe)."""
+    presample=True: the sealed pre-sample hold-out data (2016-06..2019-12-31, 2016-2019 universe); with
+    end=END it is the protocol-v4 research data (2016-06..2026-10 on the 2016-2026 universe).
+    deep=True: the deep hold-out data (2007-09..2016-05, 2008-2016 universe), for deep_holdout.py only."""
+    if start is None:
+        start = DEEP_WARMUP_START if deep else WARMUP_START
     if end is None:
-        end = PRESAMPLE_END if presample else END
-    tickers = available_tickers(presample)
-    raws = {t: _read_raw(t) for t in tickers}
+        end = DEEP_END if deep else (PRESAMPLE_END if presample else END)
+    tickers = available_tickers(presample, deep)
+    raws = {t: _read_raw(t, deep) for t in tickers}
     stocks = [t for t in tickers if t not in INDEX_TICKERS]
     # master calendar: every day on which enough stocks have a fresh (non-stale) bar, minus Muhurat
     # sessions. (Vendor stale/holiday bars were turned into NaN by _read_raw.) This includes real sessions
@@ -240,7 +304,8 @@ def load_data(start=WARMUP_START, end=None, presample: bool = False) -> MarketDa
     enough = closes.notna().sum(axis=1) >= MIN_NAMES_FOR_SESSION
     calendar = closes.index[enough]
     calendar = calendar[(calendar >= pd.Timestamp(start)) & (calendar <= pd.Timestamp(end))]
-    calendar = calendar.difference(pd.to_datetime(list(MUHURAT_SESSIONS) + list(SHORT_SPECIAL_SESSIONS)))
+    skip = (DEEP_MUHURAT_SESSIONS + DEEP_CLOSED_SESSIONS) if deep else (MUHURAT_SESSIONS + SHORT_SPECIAL_SESSIONS)
+    calendar = calendar.difference(pd.to_datetime(list(skip)))
 
     def wide(col):
         return pd.concat([raws[t][col].rename(t) for t in stocks], axis=1, sort=True).reindex(calendar)
@@ -253,7 +318,7 @@ def load_data(start=WARMUP_START, end=None, presample: bool = False) -> MarketDa
     v = v.where(fresh, 0.0).where(listed)
     idx_ohlc = {col: pd.concat([raws[t][col].rename(t) for t in INDEX_TICKERS], axis=1, sort=True).reindex(calendar)
                 for col in ["open", "high", "low", "close"]}
-    idx_ohlc = _fill_index_bars(idx_ohlc, calendar)
+    idx_ohlc = _fill_index_bars(idx_ohlc, calendar, deep)
     # The ETF's vendor opens are first-print artifacts (open == low or high on half the bars). Replace the
     # ETF's open/high/low by the index's open/high/low gaps applied to the ETF's previous close.
     e = ETF_TICKER
@@ -269,7 +334,7 @@ def load_data(start=WARMUP_START, end=None, presample: bool = False) -> MarketDa
     rf = load_rf(calendar)
     if rf.isna().any():
         raise ValueError("risk-free schedule does not cover the calendar")
-    member = load_universe(calendar, stocks, presample)
+    member = load_universe(calendar, stocks, presample, deep)
     return MarketData(o, h, l, c_ff, v, fresh, member, idx_ohlc["close"], idx_ohlc, rf, calendar)
 
 
@@ -451,6 +516,55 @@ def evaluate(weights: pd.DataFrame, md: MarketData, cost_bps=COST_BPS_PER_SIDE) 
     out.update(robustness_is(res, md))
     out.update(summarize(res, md, OOS_START, END, "_oos"))
     out.update(summarize(res, md, START, END, "_full"))
+    out["cost_bps"] = cost_bps
+    out["n_harness_fixes"] = res["n_harness_fixes"]
+    out["_res"] = res
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Protocol v4 evaluation (program.md): every seen window is research data; the worst window is the objective
+# ---------------------------------------------------------------------------
+
+V4_DROP_BEST_DAYS = 10          # sharpe_span_drop10: 2017-04..2026-10 Sharpe with the 10 best days removed
+
+
+def v4_objective(ret: pd.Series, rf: pd.Series, skip_year=None) -> float:
+    """The protocol-v4 objective: the lowest Sharpe of the three V4_WINDOWS. skip_year drops one calendar year
+    from every window first (the leave-one-year-out gate)."""
+    vals = []
+    for _, a, b in V4_WINDOWS:
+        r = ret.loc[a:b]
+        if skip_year is not None:
+            r = r[r.index.year != skip_year]
+        vals.append(sharpe(r, rf.loc[r.index]))
+    return float(min(vals))
+
+
+def evaluate_v4(weights: pd.DataFrame, md: MarketData, cost_bps=COST_BPS_PER_SIDE) -> dict:
+    """Protocol-v4 evaluation on load_data(presample=True, end=END): each window (pre 2017-04..2019-12, is
+    2020-2023, oos 2024-2026), the whole span 2017-04..2026-10, 2020-2026 (full), every calendar year, the
+    objective (worst window), the span Sharpe without its 10 best days and the cost-free span Sharpe."""
+    res = run_backtest(weights, md, cost_bps=cost_bps)
+    out = {}
+    for lab, a, b in V4_WINDOWS:
+        out.update(summarize(res, md, a, b, f"_{lab}"))
+    out.update(summarize(res, md, V4_START, END, "_span"))
+    out.update(summarize(res, md, START, END, "_full"))
+    r = res["ret"].loc[V4_START:END]; rf = md.rf.loc[V4_START:END]
+    out["objective"] = round(v4_objective(r, rf), 4)
+    ex = (r - rf).dropna()
+    ex_d = ex.drop(ex.nlargest(V4_DROP_BEST_DAYS).index)
+    s_d = ex_d.std(ddof=1)
+    out["sharpe_span_drop10"] = round(float(ex_d.mean() / s_d * np.sqrt(TRADING_DAYS)) if s_d > 1e-12 else 0.0, 4)
+    out["sharpe_span_gross"] = round(sharpe(res["ret_gross"].loc[V4_START:END], rf), 4)
+    years = sorted(set(r.index.year))
+    yearly = {y: sharpe(r[r.index.year == y], rf[rf.index.year == y]) for y in years}
+    for y, v in yearly.items():
+        out[f"sharpe_{y}"] = round(v, 4)
+    out["years_positive"] = int(sum(1 for y in years if (r[r.index.year == y] - rf[rf.index.year == y]).sum() > 0))
+    out["years"] = len(years)
+    out["worst_year_sharpe"] = round(min(yearly.values()), 4)
     out["cost_bps"] = cost_bps
     out["n_harness_fixes"] = res["n_harness_fixes"]
     out["_res"] = res
