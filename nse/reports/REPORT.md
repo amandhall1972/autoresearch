@@ -109,7 +109,7 @@ Each row is a strategy the loop kept (baseline, every merged round winner, final
 
 ## Diagnostics: why it fails after 2023
 
-An invested spell is a maximal run of invested sessions (from a switch-on or re-entry to the switch-off or until the exits empty the book); excess is its return over cash. The selection edge compares the next-20-session return of the names a cohort bought with the average member on the same days (`python diagnose.py`; every spell is listed in `reports/diagnostics.md`).
+An invested spell is a maximal run of invested sessions (from a switch-on or re-entry to the switch-off, a stand-aside above RSI 80, or until the exits empty the book); excess is its return over cash. The selection edge compares the next-20-session return of the names a cohort bought with the average member on the same days (`python diagnose.py`; every spell is listed in `reports/diagnostics.md`).
 
 ### Invested spells by period
 

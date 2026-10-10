@@ -73,7 +73,7 @@ def line_chart(series, width=860, height=300, log=True, shade=None, labels=None,
         x = X(t)
         out.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{pad_t}" y2="{height - pad_b}" class="grid"/>')
         out.append(f'<text x="{x + 3:.1f}" y="{height - 10}" class="tick">{yr}</text>')
-    for name, s, col, sw in series:
+    for _name, s, col, sw in series:
         s = s.dropna()
         step = max(1, len(s) // 600)
         pts = " ".join(f"{X(t):.1f},{Y(v):.1f}" for t, v in list(s.items())[::step] + [list(s.items())[-1]])
@@ -150,7 +150,6 @@ def main():
     final = lin[-1] if lin else {}
     pre = final.get("sharpe_pre")
     eq = pd.read_csv(os.path.join(R, "equity_curves.csv"), index_col=0, parse_dates=True)
-    cash = (1 + pd.Series(0.0, index=eq.index)).cumprod()
     hf = os.path.join(R, "holdout_final_returns.csv")
     hold = pd.read_csv(hf, index_col=0, parse_dates=True) if os.path.exists(hf) else None
     import importlib.util
@@ -202,7 +201,7 @@ def main():
         srow = [[per, s.get("spells"), fmt(s.get("hit_rate"), 0, pct=True), (fmt(s.get("mean_spell_excess"), 2, pct=True), cls(s.get("mean_spell_excess"))),
                  fmt(s.get("mean_excess_when_nifty_up"), 2, pct=True), fmt(s.get("mean_excess_when_nifty_down"), 2, pct=True), fmt(s.get("cost_drag_per_yr"), 2, pct=True)]
                 for per, s in dg["summary"].items()]
-        diag_html = ("<p>An invested spell is a maximal run of invested sessions: it starts at a switch-on or re-entry and ends at the switch-off or when the exits empty the book. Excess is the spell's return over cash; "
+        diag_html = ("<p>An invested spell is a maximal run of invested sessions: it starts at a switch-on or re-entry and ends at the switch-off, at a stand-aside above RSI 80, or when the exits empty the book. Excess is the spell's return over cash; "
                      "the two middle columns split the spells by whether the Nifty rose or fell over the same days.</p>"
                      + table(["Window", "Spells", "Won", "Mean excess", "Nifty up", "Nifty down", "Cost drag / yr"], srow))
         edge = table(["Year", "Formation days", "Bought: next 20 sessions", "All members", "Selection edge"],
@@ -309,7 +308,7 @@ Walk-forward re-selection of those parameters year by year gives a Sharpe of {fm
 {"<section><h2>Why it fails after 2023</h2>" + diag_html + "</section>" if diag_html else ""}
 <section><h2>How the research ran</h2>
 <ul>
-<li>One editable file (<code>strategy.py</code>), a fixed harness, one metric: the 2020–2023 Sharpe. Up to six parallel researchers per round (four in round 8, when two failed to start), each in its own git worktree, each with one lens; the lead verified, merged and combined their winners.</li>
+<li>One editable file (<code>strategy.py</code>), a fixed harness, one metric: the 2020–2023 Sharpe. Six researchers launched per round (the log holds experiments from five in round 1, and from four in round 8, where two failed to start), each in its own git worktree, each with one lens; the lead verified, merged and combined their winners.</li>
 <li>Experiments per round: {esc(rounds_line)}.</li>
 <li>A keep had to raise in-sample Sharpe and pass five gates: both halves of 2020–2023, the five best days removed, every new parameter on a plateau, simplifications allowed, and no single trading episode carrying the gain.</li>
 <li>After round 1 the lead looked at the 2024–2026 numbers, so that window became a validation window and a fresh, sealed 2017–2019 hold-out was built before round 2. From round 2 researchers saw neither.</li>

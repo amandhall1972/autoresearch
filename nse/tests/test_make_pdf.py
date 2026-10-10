@@ -144,7 +144,7 @@ def test_headline_numbers_match_the_reports(built):
 def test_full_strategy_source_and_parameter_register_are_included(built):
     import strategy
     full = built["full"]
-    for name, val in strategy.PARAMS.items():
+    for name in strategy.PARAMS:
         assert name in full, name
     squash = lambda s: re.sub(r"\s+", "", s)               # noqa: E731
     furniture = ["RAAS Capital  ·  Quant Desk", "RCG-RN-REV-001  ·  RSI + EMA + VWAP on the Nifty 50",
@@ -181,8 +181,16 @@ def test_code_block_wraps_and_splits_without_losing_text(built):
     text = "".join(t for _, frags in cb.vlines for t, _, _ in frags).replace(" ", "")
     assert text == src.replace("\n", "").replace(" ", "")
     assert sum(1 for no, _ in cb.vlines if no is not None) == 2
-    head, tail = cb.split(300, cb.PAD * 2 + cb.LEAD * 3 + 1e-6 + cb.LEAD)
-    assert len(head.vlines) + len(tail.vlines) == len(cb.vlines)
+
+    long = mk.CodeBlock.from_source("".join(f"a_{i} = {i}\n" for i in range(30)), 300)
+    fits = lambda k: long.PAD * 2 + long.LEAD * k + 1e-6     # noqa: E731  height that holds k lines
+    head, tail = long.split(300, fits(12))                     # an ordinary split: nothing lost or repeated
+    assert (len(head.vlines), len(tail.vlines)) == (12, 18)
+    assert head.vlines + tail.vlines == long.vlines
+    assert long.split(300, fits(4)) == []                      # never open a listing with a stub: move it whole
+    head, tail = long.split(300, fits(27))                     # never strand a tail of fewer than six lines
+    assert (len(head.vlines), len(tail.vlines)) == (24, 6)
+    assert long.split(300, fits(30)) == [long]                 # fits whole: no split
 
 
 @needs_build

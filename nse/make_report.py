@@ -70,7 +70,7 @@ def main():
         dmd = open(dpath).read().split("## Every spell", 1)[0]
         dmd = dmd.split("\n", 1)[1].replace("\n## ", "\n### ")   # drop the file title, demote headings
         L += ["## Diagnostics: why it fails after 2023", "",
-              "An invested spell is a maximal run of invested sessions (from a switch-on or re-entry to the switch-off or until the exits empty the book); excess is its return over cash. "
+              "An invested spell is a maximal run of invested sessions (from a switch-on or re-entry to the switch-off, a stand-aside above RSI 80, or until the exits empty the book); excess is its return over cash. "
               "The selection edge compares the next-20-session return of the names a cohort bought with the average member "
               "on the same days (`python diagnose.py`; every spell is listed in `reports/diagnostics.md`).", "", dmd.strip(), ""]
     L += ["## Research log (kept experiments)", "", "| # | commit | Sharpe IS | Sharpe OOS | Sharpe FULL | maxDD IS | turnover/yr | description |", "|---|---|---|---|---|---|---|---|"]
