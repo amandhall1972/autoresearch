@@ -59,7 +59,9 @@ def main():
                    **{k: ev[k] for k in ["sharpe_is", "sharpe_is_h1", "sharpe_is_h2", "sharpe_is_drop5", "sharpe_oos",
                                          "sharpe_full", "cagr_full", "maxdd_full", "turnover_yr_is", "exposure_is"]}}
             if args.holdout:
-                h = H.evaluate_and_log(path, f"lineage:{stage}:{r.commit}", md=md_pre, commit=r.commit)
+                last = (i == len(rows) - 1)
+                h = H.evaluate_and_log(path, f"lineage:{stage}:{r.commit}", md=md_pre, commit=r.commit,
+                                       returns_out=os.path.join(args.out, "holdout_final_returns.csv") if last else None)
                 rec.update({k: h[k] for k in ["sharpe_pre", "cagr_pre", "maxdd_pre", "bench_sharpe_pre",
                                               "sharpe_2017", "sharpe_2018", "sharpe_2019", "lookahead_ok"]})
             out.append(rec)

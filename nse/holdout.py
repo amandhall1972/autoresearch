@@ -53,8 +53,9 @@ def strategy_sha(path) -> str:
     return hashlib.sha256(open(path, "rb").read()).hexdigest()[:16]
 
 
-def evaluate_and_log(path, label, md=None, cost_bps=P.COST_BPS_PER_SIDE, commit=None) -> dict:
-    """Score one strategy file on the hold-out and append the look to reports/holdout_log.tsv."""
+def evaluate_and_log(path, label, md=None, cost_bps=P.COST_BPS_PER_SIDE, commit=None, returns_out=None) -> dict:
+    """Score one strategy file on the hold-out and append the look to reports/holdout_log.tsv. With returns_out,
+    the same evaluation's daily net returns (and the NIFTYBEES/cash comparison) are written there as CSV."""
     if commit is None:
         try:
             commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=HERE, capture_output=True, text=True).stdout.strip()
@@ -62,7 +63,11 @@ def evaluate_and_log(path, label, md=None, cost_bps=P.COST_BPS_PER_SIDE, commit=
             commit = ""
     md = md if md is not None else P.load_data(presample=True)
     ev = score(load_strategy(path), md, cost_bps=cost_bps)
-    ev.pop("_res")
+    res = ev.pop("_res")
+    if returns_out:
+        a, b = P.PRESAMPLE_START, P.PRESAMPLE_END
+        pd.DataFrame({"strategy": res["ret"].loc[a:b], "niftybees": md.close[P.ETF_TICKER].pct_change().loc[a:b],
+                      "cash": md.rf.loc[a:b], "exposure": res["exposure"].loc[a:b]}).to_csv(returns_out)
     row = {"utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "git_commit": commit,
            "strategy_sha256": strategy_sha(path), "label": label, "cost_bps": cost_bps, **ev}
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
