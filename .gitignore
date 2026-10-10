@@ -27,3 +27,8 @@ nse/runs/
 nse/run.log
 nse/__pycache__/
 nse/.pytest_cache/
+
+# RAAS Capital brand assets and branded output stay out of the public repo
+# (the logo master comes from the private brand kit; the note is internal research)
+nse/brand/logo/
+nse/reports/RCG-*.pdf
