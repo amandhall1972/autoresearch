@@ -103,7 +103,7 @@ PARAMS = dict(
     w_corr_n=15, beta_shrink=1.0 / 3.0, w_cap=0.4, rung_power=20.0,
     regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
     size_index="BANKNIFTY", size_power=2.0, whipsaw_days=3, whipsaw_size=0.5, vol_cap=0.10, vol_cap_delay=2,
-    rerank_drop=1.0 / 3.0, stretch_score=0.5, exhaust=0.4, gross=1.0,
+    rerank_drop=1.0 / 3.0, stretch_score=0.5, exhaust=0.4, dip_k=0.15, gross=1.0,
 )
 
 
@@ -202,14 +202,18 @@ def compute_target_weights(md) -> pd.DataFrame:
     mvs_v = np.where(s2_v > 0, b_v / np.where(s2_v > 0, s2_v, 1.0), np.inf)   # trim scores: fresh cohorts beta / idio var,
     hs_v = height_v.copy(); hs_v[:, e] = np.inf                                # re-entry cohorts their ladder height
     score_v = mvs_v
+    breadth = ((c > vw) & eligible).sum(axis=1) / eligible.sum(axis=1).replace(0, np.nan)   # share above VWAP20
+    dip = breadth < breadth.rolling(p["vwap_n"], min_periods=p["vwap_n"]).mean() - p["dip_k"]   # NaN -> no dip
+    dip_up_v = (dip.shift(1, fill_value=False) & (breadth > breadth.shift(1))).values   # yesterday a dip, today up
     last_on, t_form = -10 ** 6, -10 ** 6                    # last day the regime was on; the cohort's formation day
+    fresh = True                                            # the riding cohort is a fresh (not a re-entry) cohort
     w0 = np.zeros(N)                                        # the cohort's formation stock weights
     for t in range(len(dates)):
         if not regime_v[t]:                                 # regime off: fully in cash
             held[:] = False
             w = np.zeros(N)
         elif t == 0 or not regime_v[t - 1]:                 # regime switches on: buy the cohort
-            t_form, score_v = t, mvs_v
+            t_form, score_v, fresh = t, mvs_v, True
             held = entry_v[t] & hold_v[t] & (iv_v[t] > 0)     # never buy a name the exit rules would sell today
             w = np.where(held, iv_v[t], 0.0)
             g = p["gross"]
@@ -222,7 +226,7 @@ def compute_target_weights(md) -> pd.DataFrame:
                 if (w > 0).sum() > p["re_k"]:
                     w = np.where(w >= np.sort(w)[-p["re_k"]], w, 0.0)   # only the re_k strongest names
                 held &= w > 0                               # no ladder height or no RSI lead: not bought
-                score_v = hs_v
+                score_v, fresh = hs_v, False
             if held.any():
                 w = w / w.sum()                             # cohort shares
                 excess = np.clip(w - p["w_cap"], 0.0, None)   # share above the single-name cap ...
@@ -248,6 +252,18 @@ def compute_target_weights(md) -> pd.DataFrame:
             mv = np.sqrt((w @ b_v[t]) ** 2 * nv_v[t] ** 2 + w ** 2 @ s2_v[t])   # the riding book's model vol
             if mv > p["vol_cap"] and t - t_form > p["vol_cap_delay"]:   # the first days of the up-leg run untrimmed
                 w = budget_trim(w, b_v[t], s2_v[t], nv_v[t], p["vol_cap"], sc)   # trim (never add) to budget
+            x = np.where(held, w, 0.0); x[e] = 0.0             # breadth-dip recovery: top up the riding stock names
+            if dip_up_v[t] and fresh and x.sum() > 0:       # pro rata, with idle cash, up to the vol budget
+                x = x / x.sum()
+                mvol = lambda a: np.sqrt(((w + a * x) @ b_v[t]) ** 2 * nv_v[t] ** 2 + (w + a * x) ** 2 @ s2_v[t])
+                lo, hi = 0.0, max(0.0, 1.0 - w.sum())
+                if mvol(hi) > p["vol_cap"]:
+                    for _ in range(40):
+                        mid = 0.5 * (lo + hi)
+                        lo, hi = (lo, mid) if mvol(mid) > p["vol_cap"] else (mid, hi)
+                else:
+                    lo = hi
+                w = w + lo * x
         if regime_v[t]:
             last_on = t
         W[t] = w
