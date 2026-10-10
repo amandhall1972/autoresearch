@@ -4,7 +4,7 @@ This is the ONLY file the research agent edits. The harness (prepare.py) execute
 weights at the next day's open and charges costs; signals here must use data up to the close.
 
 Rules (textbook confluence):
-  trend    : EMA(fast) > EMA(slow) and close > EMA(fast)
+  trend    : EMA(fast) > EMA(slow) (a separate close > EMA(fast) check adds nothing once close > VWAP)
   value    : close > rolling N-day VWAP (buyers in control)
   momentum : smoothed RSI(n) (EMA(rsi_smooth) of Wilder RSI, to damp one-day noise) below rsi_hi
              (not yet overbought; a lower bound such as RSI > 50 practically never binds once the trend
@@ -63,7 +63,7 @@ def compute_target_weights(md) -> pd.DataFrame:
 
     stock = md.member.copy(); stock[ETF_TICKER] = False          # the ETF is not part of the stock pool
     eligible = stock & md.tradable
-    entry = eligible & (ef > es) & (c > ef) & (c > vw) & (r < p["rsi_hi"])
+    entry = eligible & (ef > es) & (c > vw) & (r < p["rsi_hi"])
     hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]))
 
     dates = md.calendar
