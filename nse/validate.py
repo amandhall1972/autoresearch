@@ -220,6 +220,8 @@ def main():
              "## Headline", "", "| period | Sharpe | CAGR | vol | maxDD | Sortino | turnover/yr | exposure | Nifty Sharpe | t-stat |", "|---|---|---|---|---|---|---|---|---|---|"]
     for lab in ("is", "oos", "full"):
         lines.append(f"| {lab.upper()} | {m['sharpe_'+lab]} | {m['cagr_'+lab]} | {m['vol_'+lab]} | {m['maxdd_'+lab]} | {m['sortino_'+lab]} | {m['turnover_yr_'+lab]} | {m['exposure_'+lab]} | {m['bench_sharpe_'+lab]} | {m['tstat_'+lab]} |")
+    lines += ["", f"In-sample robustness (protocol v2 gates): Sharpe 2020-21 {m['sharpe_is_h1']}, 2022-23 {m['sharpe_is_h2']}, "
+                  f"with the 5 best days removed {m['sharpe_is_drop5']}, before costs {m['sharpe_is_gross']}."]
     lines += ["", "## Cost sensitivity", "", "| cost bps | Sharpe IS | Sharpe OOS | Sharpe FULL | CAGR FULL | maxDD FULL |", "|---|---|---|---|---|---|"]
     lines += [f"| {r['cost_bps']} | {r['sharpe_is']} | {r['sharpe_oos']} | {r['sharpe_full']} | {r['cagr_full']} | {r['maxdd_full']} |" for r in cs]
     lines += ["", "## Yearly", "", "| year | strat ret | strat Sharpe | strat maxDD | exposure | Nifty ret | Nifty Sharpe | NIFTYBEES ret | cash |", "|---|---|---|---|---|---|---|---|---|"]

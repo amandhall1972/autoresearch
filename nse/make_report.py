@@ -26,7 +26,8 @@ def main():
     L += ["# RSI + EMA + VWAP on the Nifty 50 universe, 2020-2026: final report", "",
           f"Branch `autoresearch/oct9-nse`. {len(tsv)} experiments logged, {len(keeps)} kept. "
           f"Objective: in-sample Sharpe (2020-01-01..2023-12-31, net of 15 bps one-way costs, next-open execution). "
-          f"Out-of-sample (2024-01-01..2026-10-09) was never used for any decision.", ""]
+          f"The 2024-01-01..2026-10-09 window was never used by the loop (validation window, see below); the 2017-2019 "
+          f"pre-sample hold-out was sealed until the end and scored once for the pre-registered incumbent lineage.", ""]
     L += ["## Headline", "", "| | Sharpe IS | Sharpe OOS | Sharpe FULL | CAGR FULL | maxDD FULL | turnover/yr | exposure |", "|---|---|---|---|---|---|---|---|"]
     L.append(f"| **final strategy** | {m['sharpe_is']} | {m['sharpe_oos']} | {m['sharpe_full']} | {m['cagr_full']} | {m['maxdd_full']} | {m['turnover_yr_full']} | {m['exposure_full']} |")
     if b:
@@ -36,6 +37,18 @@ def main():
     L += ["", f"Cash (RBI repo) returned {', '.join(f'{r.year}: {r.rf:.1%}' for r in yt.itertuples())}.", ""]
     L += ["![equity](equity.png)", "", "![rolling](rolling_sharpe.png)", "", "![yearly](yearly.png)", ""]
     L += ["## The strategy", "", "```", doc, "```", "", f"Parameters: `{json.dumps(final['params'])}`", ""]
+    lin = load(os.path.join(R, "lineage.json"))
+    if lin:
+        has_pre = "sharpe_pre" in lin[0]
+        L += ["## Incumbent lineage on every window", "",
+              "Each row is a strategy the loop kept (baseline, every merged round winner, final), re-scored on the final harness."
+              + (" The sealed pre-sample column is the first and only look at 2017-2019 for these strategies (log: `reports/holdout_log.tsv`)." if has_pre else ""), "",
+              "| stage | commit | Sharpe IS 2020-23 | IS 2020-21 | IS 2022-23 | Sharpe 2024-26 | Sharpe FULL 2020-26 |" + (" Sharpe pre-sample 2017-19 | Nifty 2017-19 |" if has_pre else ""),
+              "|---|---|---|---|---|---|---|" + ("---|---|" if has_pre else "")]
+        for o in lin:
+            L.append(f"| {o['stage']} | {o['commit']} | {o['sharpe_is']} | {o['sharpe_is_h1']} | {o['sharpe_is_h2']} | {o['sharpe_oos']} | {o['sharpe_full']} |"
+                     + (f" {o['sharpe_pre']} | {o['bench_sharpe_pre']} |" if has_pre else ""))
+        L += ["", "![lineage](lineage.png)", ""]
     L += ["## Research log (kept experiments)", "", "| # | commit | Sharpe IS | Sharpe OOS | Sharpe FULL | maxDD IS | turnover/yr | description |", "|---|---|---|---|---|---|---|---|"]
     for i, r in keeps.iterrows():
         L.append(f"| {i} | {r.commit} | {r.sharpe_is} | {r.sharpe_oos} | {r.sharpe_full} | {r.maxdd_is} | {r.turnover_yr} | {r.description} |")
@@ -47,7 +60,8 @@ def main():
     L += ["### Headline (full metrics)" + vmd, ""]
     L += ["## How to read this", "",
           "* `sharpe_is` is the number the loop optimised; it is subject to selection bias across all logged trials. The deflated Sharpe ratio above accounts for the number and dispersion of those trials.",
-          "* `sharpe_oos` is a true hold-out: nothing in 2024-2026 was used to choose rules or parameters.",
+          "* `sharpe_oos` (2024-2026) was never used by the loop to choose rules or parameters, and since protocol v2 researchers cannot see it. The lead researcher did inspect its yearly values after round 1, which is why it is called a validation window here and why a second, sealed hold-out (2017-2019) was created before round 2.",
+          "* The sealed pre-sample hold-out (2017-2019) uses its own point-in-time Nifty 50 including 11 names that left the index before 2020; it was scored once at the end for the pre-registered lineage and could not change the final choice.",
           "* The walk-forward row re-selects parameters each year from a perturbation grid using only prior years; it tests the parameter choice, not the rule structure (which was chosen in-sample).",
           "* Costs: 15 bps one-way (STT 10 + fees ~1 + slippage ~4). The cost table shows how quickly the edge decays if execution is worse.",
           "* Stock returns are price returns (no dividends), which understates long-only returns by roughly 1-1.5 %/yr versus a total-return benchmark; cash earns the repo rate.", ""]
