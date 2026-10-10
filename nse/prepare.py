@@ -22,6 +22,9 @@ START = "2020-01-01"            # backtest start
 IS_END = "2023-12-31"           # in-sample / development period end (inclusive)
 OOS_START = "2024-01-01"        # out-of-sample period start
 END = "2026-10-09"              # backtest end (last available bar)
+IS_H1_END = "2021-12-31"        # in-sample halves used by the robustness gates (IS-only information)
+IS_H2_START = "2022-01-01"
+DROP_BEST_DAYS = 5              # sharpe_is_drop5: in-sample Sharpe with the 5 best days removed
 TRADING_DAYS = 252
 COST_BPS_PER_SIDE = 15.0        # one-way cost in bps of traded value: STT 10 + exch/SEBI/stamp/GST ~1 + slippage ~4
 MIN_NAMES_FOR_SESSION = 30      # a date is a trading day only if >= this many stocks have a bar
@@ -336,11 +339,29 @@ def summarize(res: dict, md: MarketData, start, end, label="") -> dict:
     }
 
 
+def robustness_is(res: dict, md: MarketData) -> dict:
+    """In-sample-only robustness statistics used by the keep gates (program.md):
+    Sharpe of each in-sample half, Sharpe with the DROP_BEST_DAYS best days removed, and the
+    cost-free (gross) Sharpe. None of these touch data after IS_END."""
+    r = res["ret"].loc[START:IS_END]
+    rf = md.rf.loc[START:IS_END]
+    ex = (r - rf).dropna()
+    ex_d = ex.drop(ex.nlargest(DROP_BEST_DAYS).index)
+    s_d = ex_d.std(ddof=1)
+    return {
+        "sharpe_is_h1": round(sharpe(r.loc[START:IS_H1_END], rf), 4),
+        "sharpe_is_h2": round(sharpe(r.loc[IS_H2_START:IS_END], rf), 4),
+        "sharpe_is_drop5": round(float(ex_d.mean() / s_d * np.sqrt(TRADING_DAYS)) if s_d > 1e-12 else 0.0, 4),
+        "sharpe_is_gross": round(sharpe(res["ret_gross"].loc[START:IS_END], rf), 4),
+    }
+
+
 def evaluate(weights: pd.DataFrame, md: MarketData, cost_bps=COST_BPS_PER_SIDE) -> dict:
     """Full evaluation: IS (START..IS_END), OOS (OOS_START..END) and FULL. The loop's objective is sharpe_is."""
     res = run_backtest(weights, md, cost_bps=cost_bps)
     out = {}
     out.update(summarize(res, md, START, IS_END, "_is"))
+    out.update(robustness_is(res, md))
     out.update(summarize(res, md, OOS_START, END, "_oos"))
     out.update(summarize(res, md, START, END, "_full"))
     out["cost_bps"] = cost_bps

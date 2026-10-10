@@ -1,6 +1,10 @@
 """
 Run one experiment: load data, build target weights from strategy.py, verify no lookahead,
-evaluate IS/OOS/FULL and print a summary block. Usage: python run.py [--cost 15]
+evaluate and print a summary block. Usage: python run.py [--cost 15] [--report]
+
+By default only in-sample (2020-2023) information is printed and written to runs/latest/: the
+research loop must never see the 2024-2026 hold-out. `--report` (used by the lead/merge step and
+the final report, never by researchers) also prints and writes the OOS and FULL metrics.
 """
 import argparse, json, os, sys, time
 import numpy as np
@@ -11,11 +15,26 @@ sys.path.insert(0, HERE)
 import prepare as P
 
 
+IS_KEYS = ["sharpe_is", "sharpe_is_h1", "sharpe_is_h2", "sharpe_is_drop5", "sharpe_is_gross", "cagr_is", "vol_is",
+           "maxdd_is", "sortino_is", "hit_is", "beta_is", "alpha_ann_is", "tstat_is", "turnover_yr_is", "exposure_is",
+           "n_names_avg_is", "pct_days_invested_is", "bench_sharpe_is", "cost_bps", "n_harness_fixes", "lookahead_ok",
+           "lookahead_max_diff", "lookahead_checks", "lookahead_first_bad", "days_is", "runtime_s"]
+REPORT_KEYS = ["sharpe_oos", "sharpe_full", "cagr_oos", "cagr_full", "vol_full", "maxdd_oos", "maxdd_full",
+               "calmar_full", "tstat_oos", "turnover_yr_full", "exposure_full", "n_names_avg_full",
+               "pct_days_invested_full", "bench_sharpe_oos", "bench_sharpe_full", "bench_cagr_full", "days_oos"]
+
+
+def visible_keys(report: bool) -> list:
+    """Keys printed/written by run.py. Without --report nothing after IS_END is exposed."""
+    return IS_KEYS + (REPORT_KEYS if report else [])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cost", type=float, default=P.COST_BPS_PER_SIDE)
     ap.add_argument("--out", default=os.path.join(HERE, "runs", "latest"))
     ap.add_argument("--no-lookahead-check", action="store_true")
+    ap.add_argument("--report", action="store_true", help="also show OOS/FULL metrics (lead/report use only)")
     args = ap.parse_args()
     t0 = time.time()
     src = open(os.path.join(HERE, "strategy.py")).read()
@@ -40,20 +59,15 @@ def main():
     ev["runtime_s"] = round(time.time() - t0, 1)
     ev["params"] = getattr(strategy, "PARAMS", {})
     os.makedirs(args.out, exist_ok=True)
-    res["ret"].loc[P.START:P.END].to_csv(os.path.join(args.out, "daily_returns.csv"), header=True)
-    res["turnover"].loc[P.START:P.END].to_csv(os.path.join(args.out, "turnover.csv"), header=True)
-    Wx.to_csv(os.path.join(args.out, "weights.csv"))
+    end = P.END if args.report else P.IS_END
+    res["ret"].loc[P.START:end].to_csv(os.path.join(args.out, "daily_returns.csv"), header=True)
+    res["turnover"].loc[P.START:end].to_csv(os.path.join(args.out, "turnover.csv"), header=True)
+    Wx.loc[:end].to_csv(os.path.join(args.out, "weights.csv"))
+    shown = visible_keys(args.report)
     with open(os.path.join(args.out, "summary.json"), "w") as f:
-        json.dump(ev, f, indent=2, default=str)
+        json.dump({k: ev[k] for k in shown + ["params"]}, f, indent=2, default=str)
     print("---")
-    order = ["sharpe_is", "sharpe_oos", "sharpe_full", "cagr_is", "cagr_oos", "cagr_full", "vol_is", "vol_full",
-             "maxdd_is", "maxdd_oos", "maxdd_full", "sortino_is", "calmar_full", "hit_is", "beta_is", "alpha_ann_is",
-             "tstat_is", "tstat_oos", "turnover_yr_is", "turnover_yr_full", "exposure_is", "exposure_full",
-             "n_names_avg_is", "n_names_avg_full", "pct_days_invested_is", "pct_days_invested_full",
-             "bench_sharpe_is", "bench_sharpe_oos", "bench_sharpe_full", "bench_cagr_full", "cost_bps",
-             "n_harness_fixes", "lookahead_ok", "lookahead_max_diff", "lookahead_checks", "lookahead_first_bad",
-             "days_is", "days_oos", "runtime_s"]
-    for k in order:
+    for k in shown:
         print(f"{k + ':':<22}{ev[k]}")
     if not ev["lookahead_ok"]:
         print("LOOKAHEAD DETECTED - result is invalid", file=sys.stderr)

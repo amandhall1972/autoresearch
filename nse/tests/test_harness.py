@@ -291,3 +291,36 @@ def test_demerger_ex_date_gaps_are_market_gaps(md):
 def test_stale_bars_are_carried_with_zero_volume(md):
     assert md.volume.loc["2025-03-18", "RELIANCE"] == 0 and not md.tradable.loc["2025-03-18", "RELIANCE"]
     assert md.open.loc["2025-03-18", "RELIANCE"] == md.close.loc["2025-03-17", "RELIANCE"]
+
+
+# ----------------------------------------------------------------------------- robustness gates / holdout hygiene
+def test_robustness_is_halves_drop5_and_gross_use_only_in_sample(md):
+    cal = md.calendar
+    rng = np.random.default_rng(3)
+    ret = pd.Series(rng.normal(0.0008, 0.01, len(cal)), index=cal)
+    gross = ret + 0.0002
+    # poison everything after IS_END: the statistics must not move
+    ret2 = ret.copy(); ret2.loc[P.OOS_START:] = 9.9
+    rf = md.rf
+    for r in (ret, ret2):
+        res = {"ret": r, "ret_gross": gross if r is ret else gross.where(gross.index <= pd.Timestamp(P.IS_END), -5.0)}
+        out = P.robustness_is(res, md)
+        h1 = P.sharpe(ret.loc[P.START:P.IS_H1_END], rf.loc[P.START:P.IS_H1_END])
+        h2 = P.sharpe(ret.loc[P.IS_H2_START:P.IS_END], rf.loc[P.IS_H2_START:P.IS_END])
+        assert abs(out["sharpe_is_h1"] - round(h1, 4)) < 1e-9
+        assert abs(out["sharpe_is_h2"] - round(h2, 4)) < 1e-9
+        ex = (ret - rf).loc[P.START:P.IS_END]
+        kept = ex.sort_values().iloc[:-P.DROP_BEST_DAYS]
+        ref = kept.mean() / kept.std(ddof=1) * np.sqrt(P.TRADING_DAYS)
+        assert abs(out["sharpe_is_drop5"] - round(ref, 4)) < 1e-9
+        assert out["sharpe_is_drop5"] < P.sharpe(ret.loc[P.START:P.IS_END], rf.loc[P.START:P.IS_END])
+        assert abs(out["sharpe_is_gross"] - round(P.sharpe(gross.loc[P.START:P.IS_END], rf.loc[P.START:P.IS_END]), 4)) < 1e-9
+
+
+def test_run_py_hides_holdout_by_default():
+    import run
+    hidden = run.visible_keys(False)
+    assert "sharpe_is" in hidden and "sharpe_is_drop5" in hidden
+    assert not any(k.endswith("_oos") or k.endswith("_full") for k in hidden)
+    shown = run.visible_keys(True)
+    assert "sharpe_oos" in shown and "sharpe_full" in shown

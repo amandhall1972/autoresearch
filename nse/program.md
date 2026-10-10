@@ -20,7 +20,9 @@ metric improves, and repeats.
 ## Experimentation
 
 Each experiment: `python run.py > run.log 2>&1` (takes ~10 s). Read the result with
-`grep -E "^(sharpe_is|sharpe_oos|sharpe_full|maxdd_is|turnover_yr_is|exposure_is|n_names_avg_is|pct_days_invested_is|lookahead_ok|n_harness_fixes):" run.log`.
+`grep -E "^(sharpe_is|sharpe_is_h1|sharpe_is_h2|sharpe_is_drop5|maxdd_is|turnover_yr_is|exposure_is|n_names_avg_is|pct_days_invested_is|lookahead_ok|n_harness_fixes):" run.log`.
+`run.py` prints in-sample information only. The lead/merge step runs `python run.py --report` to
+record the hold-out columns; researchers never do.
 
 **What you CAN do:** modify `strategy.py` only. Any causal transformation of the data provided in
 `MarketData` is fair game: indicator periods and thresholds, how RSI/EMA/VWAP are combined, anchored vs
@@ -49,16 +51,46 @@ specific (e.g. RSI 53.7) are a smell - prefer round, structurally motivated choi
 `n_names_avg_is` >= 5, `turnover_yr_is` <= 60, `maxdd_is` > -0.45, and the improvement is not driven
 by a single day. If a change improves `sharpe_is` only by cutting exposure to near zero, discard it.
 
+**Robustness gates for a keep (protocol v2, from round 2 on; all in-sample):**
+
+1. *Both halves*: neither `sharpe_is_h1` (2020-21) nor `sharpe_is_h2` (2022-23) may fall more than
+   0.10 below the incumbent's value for the same half.
+2. *Not a few days*: `sharpe_is_drop5` (in-sample Sharpe with the 5 best days removed) must also be
+   strictly higher than the incumbent's `sharpe_is_drop5`.
+3. *Plateau*: every numeric parameter that the change introduces or moves must sit on a plateau: the
+   two neighbouring values (about +-20 %, or the adjacent natural grid points such as 50/55/60) must
+   each still give `sharpe_is` above the incumbent's. A gain that exists at one value only is noise.
+4. *Simplification is a keep*: deleting a rule that does not bind (identical metrics) or that costs
+   less than 0.02 of `sharpe_is` while passing gates 1-2 is kept: fewer moving parts generalise better.
+
 **The first run** establishes the baseline: run `strategy.py` as is.
+
+## Protocol v2 (amended before round 2; why)
+
+Round 1 (six parallel researchers, 244 logged experiments) lifted `sharpe_is` from 0.79 to 1.88,
+almost entirely through fast index-timing rules (index RSI hysteresis, breadth ramps). After round 1
+the lead researcher looked at the yearly 2024-2026 results of all round-1 candidates (the
+pre-registered report-only columns): every candidate lost money there even before costs. So:
+
+* The 2024-2026 window is no longer a pristine hold-out for the lead researcher; it is still reported
+  and still never used by the loop, and `run.py` now hides it from researchers entirely.
+* A new sealed hold-out was created: the **pre-sample 2017-04-01..2019-12-31** with its own
+  point-in-time Nifty 50 membership (including names that left the index before 2020). No strategy
+  has ever been evaluated on it. It is scored exactly once, at the end, by `holdout.py`.
+  Researchers never run `holdout.py`.
+* The keep rule gained the in-sample robustness gates above, to stop the loop from buying fragile
+  timing rules with in-sample Sharpe.
 
 ## Output format
 
 ```
 ---
 sharpe_is:            1.2345
-sharpe_oos:           0.9876
-sharpe_full:          1.1111
-cagr_is: ...  maxdd_is: ...  turnover_yr_full: ...  exposure_is: ...  n_names_avg: ...
+sharpe_is_h1:         1.4000
+sharpe_is_h2:         1.0500
+sharpe_is_drop5:      0.9000
+sharpe_is_gross:      1.6000
+cagr_is: ...  maxdd_is: ...  turnover_yr_is: ...  exposure_is: ...  n_names_avg_is: ...
 lookahead_ok:         True
 ```
 
@@ -72,8 +104,8 @@ commit	sharpe_is	sharpe_oos	sharpe_full	maxdd_is	turnover_yr	status	description
 
 1. git commit hash (short, 7 chars)
 2. sharpe_is (4 dp) - 0.0000 for crashes
-3. sharpe_oos (4 dp) - record only
-4. sharpe_full (4 dp) - record only
+3. sharpe_oos (4 dp) - filled in by the lead with `run.py --report`; researchers leave it blank
+4. sharpe_full (4 dp) - same
 5. maxdd_is (4 dp)
 6. turnover_yr_is (2 dp)
 7. status: `keep`, `discard`, or `crash`
