@@ -11,6 +11,9 @@ Protocol-v4 validation of a strategy file on the 2016-2026 data (every window se
   * walk-forward: each test year 2019-2026 uses the perturbation-grid point with the best Sharpe on 2017-04..the year
     before (expanding window)
   * Monte Carlo of the span and a regime split (NIFTY above / below its EMA200)
+  * the protocol's robustness checks: plateau4 against the incumbent the strategy was merged over, the joint +-20 %
+    perturbation (60 draws, numpy default_rng(20261010)) and each window with its own 5 / 10 best days removed,
+    for the strategy and for R0
 Writes reports/v4/validation.json, validation.md and equity_curves.csv.
 
 Usage: python validate4.py --strategy FILE [--boot 2000] [--out reports/v4]
@@ -38,6 +41,8 @@ def main():
     ap.add_argument("--strategy", required=True)
     ap.add_argument("--boot", type=int, default=2000)
     ap.add_argument("--out", default=os.path.join(HERE, "reports", "v4"))
+    ap.add_argument("--incumbent", default="v4/r0_ema_timer.py",
+                    help="the incumbent the strategy was merged over (plateau4 reference)")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     t0 = time.time(); rng = np.random.default_rng(42)
@@ -141,6 +146,46 @@ def main():
     rep["regime"] = {"days_above": int(above.sum()), "sharpe_above": round(P.sharpe(span[above], rfs[above]), 3),
                      "days_below": int((~above).sum()), "sharpe_below": round(P.sharpe(span[~above], rfs[~above]), 3),
                      "nifty_sharpe_above": round(P.sharpe(ns[above], rfs[above]), 3), "nifty_sharpe_below": round(P.sharpe(ns[~above], rfs[~above]), 3)}
+    # ---- protocol robustness checks
+    import plateau4
+    inc = os.path.join(HERE, args.incumbent) if not os.path.isabs(args.incumbent) else args.incumbent
+    pb, pi, prow = plateau4.plateau(args.strategy, inc)
+    rep["plateau"] = {"incumbent": os.path.relpath(inc, HERE), "objective": pb, "incumbent_objective": pi,
+                      "rows": prow, "ok": all(r["ok"] for r in prow), "min": min((r["objective"] for r in prow), default=None)}
+    jr = np.random.default_rng(20261010)
+    num = {k: v for k, v in strategy.PARAMS.items()
+           if not k.startswith("use_") and isinstance(v, (int, float)) and not isinstance(v, bool)}
+    jo = []
+    for _ in range(60):
+        ov = {}
+        for k, v in num.items():
+            f = jr.uniform(0.8, 1.2)
+            nv = 1.0 - (1.0 - v) * f if (isinstance(v, float) and 0.9 < v < 1.0) else v * f
+            ov[k] = max(1, int(round(nv))) if isinstance(v, int) else nv
+        p2 = copy.deepcopy(strategy.PARAMS); p2.update(ov)
+        r2 = V.run_with_params(strategy, p2, md)["ret"]
+        jo.append(P.v4_objective(r2.loc[P.V4_START:P.END], rf.loc[P.V4_START:P.END]))
+    jo = np.array(jo)
+    r0_obj = rep["benchmarks"]["r0_ema_timer"]
+    rep["joint_perturbation"] = {"draws": 60, "seed": 20261010, "mean": round(float(jo.mean()), 4),
+                                 "median": round(float(np.median(jo)), 4), "p10": round(float(np.percentile(jo, 10)), 4),
+                                 "min": round(float(jo.min()), 4), "max": round(float(jo.max()), 4),
+                                 "share_above_r0": round(float((jo > min(r0_obj["pre"], r0_obj["is"], r0_obj["oos"])).mean()), 3),
+                                 "values": [round(float(x), 4) for x in jo]}
+
+    def own_best_removed(ret, k):
+        out = {}
+        for lab, a, b in P.V4_WINDOWS:
+            r = ret.loc[a:b]; ex = r - rf.loc[r.index]
+            keep = ex.drop(ex.nlargest(k).index).index
+            out[lab] = round(P.sharpe(r.loc[keep], rf.loc[keep]), 4)
+        out["worst"] = min(out[w] for w, _, _ in P.V4_WINDOWS)
+        return out
+    rep["event_days"] = {name: {str(k): own_best_removed(r, k) for k in (0, 5, 10)}
+                         for name, r in (("strategy", ret), ("r0_ema_timer", r0_res["ret"]), ("niftybees", bees))}
+    spn = (ret.loc[P.V4_START:P.END] - rf.loc[P.V4_START:P.END])
+    rep["event_days"]["concentration"] = {"top10_share_of_span_excess": round(float(spn.nlargest(10).sum() / spn.sum()), 3),
+                                          "top10_days": [str(d.date()) for d in spn.nlargest(10).index]}
     rep["runtime_s"] = round(time.time() - t0, 1)
 
     with open(os.path.join(args.out, "validation.json"), "w") as f:
@@ -184,6 +229,19 @@ def main():
           f"max DD median {mc['maxdd_p50']}, 5th-percentile worst {mc['maxdd_p95_worst']}",
           f"* NIFTY above its EMA200: {rg['days_above']} days, Sharpe {rg['sharpe_above']} (NIFTY {rg['nifty_sharpe_above']}); "
           f"below: {rg['days_below']} days, Sharpe {rg['sharpe_below']} (NIFTY {rg['nifty_sharpe_below']})", ""]
+    pl, jp, evd = rep["plateau"], rep["joint_perturbation"], rep["event_days"]
+    L += ["## Protocol robustness checks", "",
+          f"* plateau4 against `{pl['incumbent']}`: ok={pl['ok']}, minimum neighbour objective {pl['min']} "
+          f"(strategy {pl['objective']}, incumbent {pl['incumbent_objective']})",
+          f"* joint +-20 % perturbation of every parameter (60 draws): mean {jp['mean']}, median {jp['median']}, p10 {jp['p10']}, "
+          f"min {jp['min']}; {jp['share_above_r0']:.0%} of draws above R0's objective",
+          "* each window with its own best days removed (worst window):"]
+    for name in ("strategy", "r0_ema_timer", "niftybees"):
+        d = evd[name]
+        L.append(f"  * {name}: none {d['0']['worst']}, 5 days {d['5']['worst']} ({d['5']['pre']} / {d['5']['is']} / {d['5']['oos']}), "
+                 f"10 days {d['10']['worst']}")
+    L.append(f"* the 10 best days carry {evd['concentration']['top10_share_of_span_excess']:.0%} of the 2017-26 excess return")
+    L.append("")
     with open(os.path.join(args.out, "validation.md"), "w") as f:
         f.write("\n".join(L))
     print("\n".join(L))

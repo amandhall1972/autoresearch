@@ -953,7 +953,7 @@ class NoteDoc(BaseDocTemplate):
     def __init__(self, filename, meta, **kw):
         super().__init__(filename, pagesize=A4, leftMargin=ML, rightMargin=MR, topMargin=MT, bottomMargin=MB,
                          title=f"{DOC_ID} · {DOC_TITLE}", author=f"RAAS Capital · {DESK}",
-                         subject=DOC_SUBTITLE, creator="make_pdf.py (RAAS Capital brand)",
+                         subject=DOC_SUBTITLE, creator=meta.get("creator", "make_pdf.py (RAAS Capital brand)"),
                          keywords="RAAS Capital, research note, NSE, Nifty 50, RSI, EMA, VWAP, backtest", **kw)
         self.meta = meta
         frame = Frame(ML, MB, FW, PH - MT - MB, id="body", leftPadding=0, rightPadding=0, topPadding=0,
@@ -992,16 +992,17 @@ class NoteDoc(BaseDocTemplate):
         c.setFillColor(C(B.KESARI[60])); c.rect(ML, y - 10 * mm, 22 * mm, 2.4, stroke=0, fill=1)
         c.setFillColor(SAFED)
         ty = y - 24 * mm
-        for line in ["RSI + EMA + VWAP", "on the Nifty 50"]:
+        for line in m.get("cover_title", ["RSI + EMA + VWAP", "on the Nifty 50"]):
             c.setFont("Outfit-Medium", 38); c.drawString(ML, ty, line); ty -= 44
         ty -= 6
         c.setFont("Outfit-Light", 15); c.setFillColor(C(B.KAGAZ[100]))
-        for line in ["An autonomous research loop, the strategy it", "produced, and why we would not trade it"]:
+        for line in m.get("cover_sub", ["An autonomous research loop, the strategy it",
+                                        "produced, and why we would not trade it"]):
             c.drawString(ML, ty, line); ty -= 21
         # key figures, on navy colours
         ty -= 16 * mm
-        figs = [("Selection window 2020–23", m["sharpe_is"]), ("Validation 2024–26", m["sharpe_oos"]),
-                ("Sealed hold-out 2017–19", m["sharpe_pre"]), ("Nifty, 2017–19", m["bench_pre"])]
+        figs = m.get("cover_figs") or [("Selection window 2020–23", m["sharpe_is"]), ("Validation 2024–26", m["sharpe_oos"]),
+                                       ("Sealed hold-out 2017–19", m["sharpe_pre"]), ("Nifty, 2017–19", m["bench_pre"])]
         colw = (PW - ML - MR) / 4
         for k, (lab, val) in enumerate(figs):
             x = ML + k * colw
@@ -1010,7 +1011,8 @@ class NoteDoc(BaseDocTemplate):
             c.setFillColor(C(signed_colour(val, on_navy=True))); c.setFont("Outfit-Medium", 24)
             c.drawString(x, ty - 6, B.num(val, 2))
         c.setFillColor(C(B.NEELA[100])); c.setFont("PlexMono", 7.4)
-        c.drawString(ML, ty - 22, "Sharpe ratios of daily returns over the RBI repo rate, net of 15 bps one-way costs.")
+        c.drawString(ML, ty - 22, m.get("cover_figs_note",
+                                        "Sharpe ratios of daily returns over the RBI repo rate, net of 15 bps one-way costs."))
         # foot
         c.setStrokeColor(C(B.NEELA[600])); c.line(ML, 24 * mm, PW - MR, 24 * mm)
         c.setFont("PlexMono", 7.6); c.setFillColor(C(B.NEELA[100]))
