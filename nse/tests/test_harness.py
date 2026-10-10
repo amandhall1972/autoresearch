@@ -415,3 +415,34 @@ def test_next_session_targets_match_backtest_weights(md):
     d = md.calendar[-60]
     t2 = signals.next_session_targets(md.slice(d), strategy)
     assert np.allclose(t2["weight"].reindex(Wh.columns).fillna(0.0).values, Wh.loc[d].values)
+
+
+# ----------------------------------------------------------------------------- compare.py (keep gates)
+def test_compare_spells_and_gate5_logic():
+    import compare
+    idx = pd.date_range("2021-01-01", periods=10, freq="B")
+    e1 = pd.Series([0, 1, 1, 0, 0, 1, 0, 0, 0, 0], index=idx, dtype=float)
+    e2 = pd.Series([0, 0, 1, 1, 0, 0, 0, 1, 1, 0], index=idx, dtype=float)
+    assert compare.spells(e1, e2) == [(1, 4), (5, 6), (7, 9)]
+    rf = pd.Series(0.0, index=idx)
+    rng = np.random.default_rng(0)
+    base = pd.Series(rng.normal(0, 0.01, 10), index=idx)
+    lo = compare.leave_one_spell_out(base + 0.002, base, rf, compare.spells(e1, e2))
+    assert len(lo) == 3 and (lo.gain > 0).all()
+    lucky = base.copy(); lucky.iloc[7:9] += 0.05            # the whole edge sits in one spell
+    lo2 = compare.leave_one_spell_out(lucky, base, rf, compare.spells(e1, e2))
+    assert (lo2.gain <= 1e-12).any()
+    c = dict(sharpe_is=2.0, sharpe_is_h1=2.0, sharpe_is_h2=1.9, sharpe_is_drop5=1.5, pct_days_invested_is=0.5,
+             n_names_avg_is=6, turnover_yr_is=10, maxdd_is=-0.1, n_harness_fixes=0)
+    i = dict(c, sharpe_is=1.8, sharpe_is_h1=1.85, sharpe_is_h2=2.05, sharpe_is_drop5=1.4)
+    g = compare.gates(c, i, lo)
+    assert g["improves"] and g["gate1_halves"] and g["gate2_drop5"] and g["gate5_spells"] and g["all_mechanical_gates"]
+    g2 = compare.gates(dict(c, sharpe_is_h2=1.9), dict(i, sharpe_is_h2=2.1), lo)
+    assert not g2["gate1_halves"] and not g2["all_mechanical_gates"]
+    assert not compare.gates(c, i, lo2)["gate5_spells"]
+
+
+def test_compare_uses_only_in_sample_data():
+    import compare
+    md_is = compare.in_sample_data()
+    assert md_is.calendar[-1] <= pd.Timestamp(P.IS_END)

@@ -62,6 +62,16 @@ by a single day. If a change improves `sharpe_is` only by cutting exposure to ne
    each still give `sharpe_is` above the incumbent's. A gain that exists at one value only is noise.
 4. *Simplification is a keep*: deleting a rule that does not bind (identical metrics) or that costs
    less than 0.02 of `sharpe_is` while passing gates 1-2 is kept: fewer moving parts generalise better.
+5. *Not one episode* (protocol v3, from round 5 on): an invested spell is a maximal run of days on which
+   either book holds stocks; with each spell removed in turn from both return series, the candidate's
+   in-sample Sharpe must stay above the incumbent's. An improvement that rests on one episode is noise.
+
+`python compare.py candidate.py` (incumbent = `strategy.py`) prints both books' in-sample numbers and
+gates 1, 2 and 5 plus the sanity gates mechanically; it only ever loads data up to 2023-12-31.
+
+**Stopping rule** (declared before round 5): at most 8 rounds; a round whose merged gain over the
+previous incumbent is below 0.10 `sharpe_is` (about the noise of a one-step threshold change) is
+*dry*; the loop stops after 2 consecutive dry rounds or after round 8.
 
 **The first run** establishes the baseline: run `strategy.py` as is.
 
