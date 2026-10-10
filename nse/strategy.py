@@ -6,27 +6,34 @@ weights at the next day's open and charges costs; signals here must use data up 
 Rules (textbook confluence):
   trend    : EMA(fast) > EMA(slow) and close > EMA(fast)
   value    : close > rolling N-day VWAP (buyers in control)
-  momentum : smoothed RSI(n) (EMA(rsi_smooth) of Wilder RSI, to damp one-day noise) between rsi_lo
-             and rsi_hi (bullish, not yet overbought)
+  momentum : smoothed RSI(n) (EMA(rsi_smooth) of Wilder RSI, to damp one-day noise) below rsi_hi
+             (not yet overbought; a lower bound such as RSI > 50 practically never binds once the trend
+             and value filters hold, so there is none)
   regime   : the NIFTY 50's own RSI(n) must be in its bullish zone: the book is switched on when the
              index RSI crosses above regime_rsi_mid + regime_rsi_band and switched off (fully to cash)
              when it falls below regime_rsi_mid - regime_rsi_band (hysteresis avoids whipsaw); the book
              also stands aside while the index RSI is extremely overbought (above regime_rsi_max)
-  sizing   : equal weight across the top `max_names` qualifying members (ranked by RSI),
-             hold while a looser exit condition is not triggered (hysteresis).
+  cohort   : the book is bought once, on the day the regime switches on: every member in confluence,
+             weighted by inverse vol_n-day realised variance (vol ** -vol_power, vol_power = 2: minimum
+             variance if names were uncorrelated). Each name is then held while a looser exit condition is not triggered
+             (hysteresis: close above vwap_exit * VWAP) and its weight rides with its own price (no
+             rebalancing trades); a name that exits leaves its weight in cash. There are no
+             replacement entries until the regime switches off and on again, so exposure decays as
+             the move matures and the only trades are the cohort buy, single-name exits and the
+             regime-off liquidation.
 Names with no fresh bar on a day stay held (they cannot be traded that day anyway).
 """
 import numpy as np
 import pandas as pd
-from indicators import ema, rsi, rolling_vwap
+from indicators import ema, rsi, rolling_vwap, realized_vol
 from prepare import ETF_TICKER
 
 PARAMS = dict(
-    rsi_n=14, rsi_smooth=3, rsi_lo=50.0, rsi_hi=70.0, rsi_exit=40.0,
+    rsi_n=14, rsi_smooth=3, rsi_hi=70.0,
     ema_fast=20, ema_slow=50,
-    vwap_n=20,
+    vwap_n=20, vwap_exit=0.985,
+    vol_n=20, vol_power=2.0,
     regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
-    max_names=20,
     gross=1.0,
 )
 
@@ -56,26 +63,29 @@ def compute_target_weights(md) -> pd.DataFrame:
 
     stock = md.member.copy(); stock[ETF_TICKER] = False          # the ETF is not part of the stock pool
     eligible = stock & md.tradable
-    entry = eligible & (ef > es) & (c > ef) & (c > vw) & (r > p["rsi_lo"]) & (r < p["rsi_hi"])
-    hold = (stock & ~md.tradable) | (eligible & (c > es) & (c > vw * 0.98) & (r > p["rsi_exit"]))
-    score = r.where(entry)
+    entry = eligible & (ef > es) & (c > ef) & (c > vw) & (r < p["rsi_hi"])
+    hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]))
 
     dates = md.calendar
-    W = np.zeros((len(dates), len(md.tickers)))
-    held = np.zeros(len(md.tickers), dtype=bool)
-    entry_v, hold_v, score_v = entry.values, hold.values, score.values
+    N = len(md.tickers)
+    W = np.zeros((len(dates), N))
+    held = np.zeros(N, dtype=bool)
+    w = np.zeros(N)                                         # yesterday's target weights
+    entry_v, hold_v = entry.values, hold.values
+    g_v = (c / c.shift(1)).fillna(1.0).values               # close-to-close growth (1 when unknown)
+    vol = realized_vol(c, p["vol_n"])
+    iv_v = (1.0 / vol.where(vol > 0) ** p["vol_power"]).fillna(0.0).values   # inverse variance (0 when unknown)
     for t in range(len(dates)):
-        if not regime_v[t]:
+        if not regime_v[t]:                                 # regime off: fully in cash
             held[:] = False
-            continue
-        held &= hold_v[t]                                   # drop names that violated the hold rule
-        n_free = p["max_names"] - held.sum()
-        if n_free > 0:
-            cand = np.where(entry_v[t] & ~held)[0]
-            if len(cand):
-                cand = cand[np.argsort(-score_v[t][cand])][:n_free]
-                held[cand] = True
-        n = held.sum()
-        if n:
-            W[t, held] = p["gross"] / n
+            w = np.zeros(N)
+        elif t == 0 or not regime_v[t - 1]:                 # regime switches on: buy the cohort
+            held = entry_v[t] & (iv_v[t] > 0)
+            w = np.where(held, iv_v[t], 0.0)
+            w = p["gross"] * w / w.sum() if held.any() else np.zeros(N)
+        else:                                               # hold the cohort, weights ride, no top-ups
+            held &= hold_v[t]
+            wg = w * g_v[t]
+            w = np.where(held, wg, 0.0) / (wg.sum() + 1.0 - w.sum())
+        W[t] = w
     return pd.DataFrame(W, index=dates, columns=md.tickers)
