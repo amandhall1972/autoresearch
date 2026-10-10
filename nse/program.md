@@ -77,7 +77,10 @@ pre-registered report-only columns): every candidate lost money there even befor
 * A new sealed hold-out was created: the **pre-sample 2017-04-01..2019-12-31** with its own
   point-in-time Nifty 50 membership (including names that left the index before 2020). No strategy
   has ever been evaluated on it. It is scored exactly once, at the end, by `holdout.py`.
-  Researchers never run `holdout.py`.
+  Researchers never run `holdout.py`. **Pre-registered set of strategies to be scored** (fixed before
+  round 2 started): the baseline, every merged round winner (the incumbent lineage) and the final
+  strategy, nothing else. Every look is appended to `reports/holdout_log.tsv`, and the hold-out result
+  can not change which strategy is final: the final strategy is the last incumbent of the loop.
 * The keep rule gained the in-sample robustness gates above, to stop the loop from buying fragile
   timing rules with in-sample Sharpe.
 
