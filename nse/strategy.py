@@ -2,93 +2,58 @@
 RSI + EMA + VWAP strategy on the point-in-time Nifty 50 universe. Long-only, daily bars.
 This is the ONLY file the research agent edits. The harness (prepare.py) executes the target
 weights at the next day's open and charges costs; signals here must use data up to the close.
+Final version after 8 autoresearch rounds (see results.tsv and reports/REPORT.md).
 
-Rules (textbook confluence):
-  trend    : EMA(fast) > EMA(slow) (a separate close > EMA(fast) check adds nothing once close > VWAP),
-             but EMA(fast) no more than ema_spread above EMA(slow): a trend that is already stretched
-             tends to stall over the short life of a cohort
-  value    : close > rolling N-day VWAP (buyers in control)
-  momentum : smoothed RSI(n) (EMA(rsi_smooth) of Wilder RSI, to damp one-day noise) below rsi_hi
-             (not yet overbought; a lower bound such as RSI > 50 practically never binds once the trend
-             and value filters hold, so there is none), and it has not been extremely overbought
-             (above rsi_peak) at any close of the last rsi_peak_n days: a name that has just had its
-             blow-off is skipped rather than bought as it cools back under rsi_hi; and it does not lag
-             the market's own momentum (the same smoothed RSI computed on the NIFTY 50) by more than
-             rsi_lag points. On a normal switch-on day the index RSI is in the mid 50s and this floor
-             hardly binds; on the re-entry after an index RSI>80 stand-aside the market is hot and only
-             names keeping pace with it are bought
-  calm     : the name's vol_n-day realised volatility relative to its own vol_long_n-day volatility
-             must not be in the top third of the members (vol_calm_q = 2/3): a name whose volatility has
-             just expanded is moving on news, and calm, orderly trends carry the cohort better
-  regime   : the NIFTY 50's own RSI(n) must be in its bullish zone: the book is switched on when the
-             index RSI crosses above regime_rsi_mid + regime_rsi_band and switched off (fully to cash)
-             when it falls below regime_rsi_mid - regime_rsi_band (hysteresis avoids whipsaw); the book
-             also stands aside while the index RSI is extremely overbought (above regime_rsi_max)
-  cohort   : the book is bought once, on the day the regime switches on: every member in confluence,
-             weighted by beta / idiosyncratic variance. The idiosyncratic vol is the vol_n-day
-             realised vol with the part explained by the NIFTY 50 removed (vol * sqrt(1 - corr^2), corr over
-             w_corr_n days), raised to vol_power (2: variance); beta is the same window's market beta
-             (corr * vol / NIFTY vol), Blume-adjusted toward 1 (beta_shrink = 1/3) and floored at 0. The
-             book is a timed bet on the market's up-leg: in a single-index model where each name earns its
-             beta times that move, the mean-variance weights are exactly beta / idiosyncratic variance (a
-             square-root beta tilt was used before the vol budget below existed; with the riding book's
-             risk budgeted, the full single-index weights are better). No name may hold more than w_cap
-             (40 %) of the cohort: the share above the cap is parked in NIFTYBEES (index exposure, held
-             until the regime switches off), so a one- or two-name cohort or a near-1 correlation cannot put the book into a single stock.
-             Each name is then held while a looser exit condition is not triggered
-             (hysteresis: close above vwap_exit * VWAP) and its weight rides with its own price (no
-             rebalancing trades); a name that exits leaves its weight in cash. There are no
-             replacement entries until the regime switches off and on again, so exposure decays as
-             the move matures and the only trades are the cohort buy, single-name exits and the
-             regime-off liquidation.
-  exits    : besides the VWAP stop, a held name is sold when it stops being a calm trend: (a) an
-             idiosyncratic shock, i.e. its return net of beta x the NIFTY 50 return falls more than
-             shock_k residual sigmas (beta and residual vol from the previous day's vol_n/corr_n windows);
-             (b) a volume spike, i.e. the day's volume exceeds vspike_k times its average over the previous
-             vwap_n days (up or down day alike: a news or block-trade day ends the orderly trend); (c) a
-             VWAP-ladder break: close below the vwap_short_n-day VWAP while that VWAP is
-             below the vwap_long_n-day VWAP (the short-term volume-weighted price has slipped under the
-             longer one and the stock trades below both: the trend has broken; no tuned band). A name the
-             exit rules would sell today is not bought into a new cohort either. (A top-5 % vol-expansion
-             exit was deleted once the vol budget below was in place: it no longer added anything.)
-  vol budget: the riding book is trimmed (never topped up) so that its single-index model vol,
-             sqrt((sum w*beta)^2 x NIFTY vol_n-day variance + sum w^2 x idiosyncratic variance), with the
-             same Blume betas and idiosyncratic vols as the weights (NIFTYBEES: beta 1, no idio risk), stays
-             at or below vol_cap (10 % a year). The first vol_cap_delay days after a cohort is bought are
-             left untrimmed: the switch-on thrust is the bet itself, and the NIFTY vol at a switch-on still
-             carries the sell-off that preceded it. As names exit, drift or market vol rises, the trims
-             keep the remaining book inside the budget; when vol falls the book is not re-levered.
-             A trim is not pro rata: it keeps what the cohort's own weighting likes best. Name i keeps
-             min(1, lam x score_i) of its weight, lam set so the model vol lands on the cap; the score is
-             today's beta / idiosyncratic variance for a fresh cohort (its mean-variance weight, so the trim
-             cuts the names with the most idiosyncratic risk per unit of market exposure first) and today's
-             ladder height x RSI lead for a stand-aside re-entry cohort (the score its weights were bought
-             on). NIFTYBEES carries no idiosyncratic risk and is not trimmed. A held name whose EMA20 has run
-             more than ema_spread above its EMA50 (stretched past the band it was bought in) counts at
-             stretch_score (half) of its score, so the trims cut it first.
-  re-rank  : on the first day the budget may trim (day vol_cap_delay + 1 of a cohort, when the switch-on
-             thrust is over), the riding book is re-ranked by that same score of today and the bottom
-             rerank_drop (a third, rounded down) of its held stock names are sold before the budget is
-             applied: the cohort was bought on formation-day estimates, and three days later the names its
-             own weighting likes least are the ones least worth carrying (a ranking by the formation-day
-             score, or by the score's change since formation, does not do this). Done once per cohort; the
-             proceeds stay in cash.
-  exhaust  : once the names sold by the exit rules and the re-rank make up more than 1 - exhaust (60 %) of
-             the cohort's formation stock weight, the stock remainder is sold (the NIFTYBEES slot rides on):
-             the cohort is spent. Budget trims do not count (they would fire it far too often).
-  sizing   : a cohort bought at a FRESH regime start (not the re-entry after an RSI>80 stand-aside) is
-             scaled by the BANK NIFTY's variance ratio, min(1, (vol_long_n-day vol / vol_n-day vol)^size_power):
-             when the market's most liquid, most leveraged sector has just become more volatile than its
-             norm, the new up-leg is less trustworthy and the book is smaller; the rest stays in cash. A
-             re-cross after only whipsaw_days or fewer days off (a whipsaw) is bought at whipsaw_size of that.
-             A re-entry cohort after the RSI>80 stand-aside is weighted by ladder height
-             (VWAP20/VWAP50 - 1)+ x rung instead: on those hot days the idiosyncratic-variance estimates are
-             least reliable, and medium-term volume-weighted momentum ranks the names.
-  weights  : cohort weight = Blume-adjusted beta / idiosyncratic variance (w_corr_n-day correlation),
-             times min(1, days since the name's last shock or volume-spike day / vwap_n): names that were
-             in the news recently are bought small and earn their full weight back over one VWAP window.
-             No single name may exceed w_cap of the cohort; the excess is parked in NIFTYBEES.
-Names with no fresh bar on a day stay held (they cannot be traded that day anyway).
+REGIME (when to be in the market). The NIFTY 50's own RSI(regime_rsi_n) is a hysteresis switch: the
+book switches on when it crosses above regime_rsi_mid + regime_rsi_band (57) and goes fully to cash
+below regime_rsi_mid - regime_rsi_band (53). It also stands aside while the index RSI is above
+regime_rsi_max (80); when the RSI falls back under 80 with the regime still on, the book re-enters.
+
+ENTRY (which names). On the day the regime switches on, ONE cohort is bought: every Nifty 50 member with
+  EMA      : EMA(ema_fast) > EMA(ema_slow), but EMA(fast) no more than ema_spread (6 %) above EMA(slow)
+  VWAP     : close > the rolling vwap_n-day VWAP
+  RSI      : EMA(rsi_smooth)-smoothed Wilder RSI(rsi_n) below rsi_hi (70) and no reading above rsi_peak
+             (80) in the last rsi_peak_n days (no fresh blow-off)
+  calm     : its vol_n/vol_long_n realised-vol ratio is not in the members' top third (vol_calm_q)
+  and none of the exit rules below would sell it that day.
+  A re-entry cohort after the RSI>80 stand-aside instead buys the re_k (5) names with the largest
+  (VWAP20/VWAP50 - 1)+ x (smoothed RSI - (NIFTY smoothed RSI - rsi_lag))+: medium-term volume-weighted
+  momentum times momentum relative to a hot market.
+
+WEIGHTS (how much of each). Fresh cohorts: Blume-adjusted beta (w_corr_n-day correlation, shrunk by
+beta_shrink toward 1) / idiosyncratic variance (vol_n-day vol with the NIFTY-explained part removed),
+i.e. single-index mean-variance weights for a timed bet on the market's up-leg, times
+  min(1, days since the name's last shock or volume-spike day / vwap_n)   (news names bought small)
+  (close / VWAP(vwap_short_n)) ^ rung_power                               (strongest bottom rung first)
+Re-entry cohorts: weights proportional to the re-entry score above. No name may exceed w_cap (40 %) of a
+cohort; the excess is parked in NIFTYBEES (index exposure, held until the regime switches off).
+
+SIZING. A fresh-start cohort is scaled by the BANK NIFTY's variance ratio,
+min(1, (vol_long_n-day vol / vol_n-day vol)^size_power): when the most liquid, most leveraged sector has
+just become more volatile than its norm, the new up-leg is less trustworthy. A re-cross after
+whipsaw_days or fewer days off (a whipsaw) is bought at whipsaw_size of that. Idle capital earns the
+repo rate (the harness credits cash).
+
+WHILE HELD. Weights ride with prices (no rebalancing) and no new names are added until the next
+switch-on. Day by day:
+  exits      a held name is sold on (a) close < vwap_exit (0.985) x VWAP20, (b) a VWAP-ladder break:
+             close < VWAP(vwap_short_n) < VWAP(vwap_long_n), (c) an idiosyncratic shock: return net of
+             beta x NIFTY return below -shock_k residual sigmas (previous day's vol_n/corr_n estimates),
+             (d) a volume spike: volume > vspike_k x its average over the previous vwap_n days.
+  exhaust    once the exits and the re-rank have sold more than 1 - exhaust (60 %) of the formation
+             stock weight, the stock remainder is sold (the cohort is spent; NIFTYBEES rides on).
+  re-rank    on day vol_cap_delay + 1 the riding book is re-ranked by today's own score (fresh: beta /
+             idio variance; re-entry: the re-entry score) and the bottom rerank_drop (a third, rounded
+             down) of its stock names are sold, once per cohort.
+  vol budget from day vol_cap_delay + 1 the book is trimmed (never topped up) so its single-index model
+             vol sqrt((sum w*beta)^2 x NIFTY var + sum w^2 x idio var) stays at or below vol_cap (10 %/yr);
+             name i keeps min(1, lam x score_i), so the names the cohort's own weighting likes least go
+             first. A name whose EMA20 ran more than ema_spread above its EMA50 counts at stretch_score
+             (half) of its score in the re-rank and the trims. NIFTYBEES is never trimmed.
+  dip top-up when the share of eligible members above their VWAP20 was more than dip_k (15 points)
+             below its vwap_n-day mean yesterday and rises today, a fresh cohort's riding stock names are
+             topped up pro rata with idle cash, up to the vol budget (no new names).
+Everything is sold when the regime switches off. Names with no fresh bar stay held (they cannot trade).
 """
 import numpy as np
 import pandas as pd
