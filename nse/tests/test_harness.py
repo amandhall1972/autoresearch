@@ -399,3 +399,19 @@ def test_holdout_score_reports_presample_window(md_pre):
     assert ev["days_pre"] == len(md_pre.calendar[md_pre.calendar >= pd.Timestamp(P.PRESAMPLE_START)])
     assert {"sharpe_pre", "sharpe_2017", "sharpe_2018", "sharpe_2019", "turnover_yr_pre"} <= set(ev)
     assert ev["exposure_pre"] > 0.99 and ev["turnover_yr_pre"] < 1.0
+
+
+# ----------------------------------------------------------------------------- live signals
+def test_next_session_targets_match_backtest_weights(md):
+    import signals
+    import strategy
+    W = strategy.compute_target_weights(md).reindex(index=md.calendar, columns=md.tickers).fillna(0.0)
+    Wh, _ = P.apply_harness_rules(W, md)
+    t = signals.next_session_targets(md, strategy)
+    last = Wh.iloc[-1]
+    assert np.allclose(t["weight"].reindex(last.index).fillna(0.0).values, last.values)
+    assert t["weight"].sum() <= P.MAX_GROSS + 1e-9 and (t["weight"] >= 0).all()
+    # truncating the data gives the same targets the backtest held on that day (no lookahead in the tool)
+    d = md.calendar[-60]
+    t2 = signals.next_session_targets(md.slice(d), strategy)
+    assert np.allclose(t2["weight"].reindex(Wh.columns).fillna(0.0).values, Wh.loc[d].values)
