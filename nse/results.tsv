@@ -1,0 +1,249 @@
+commit	sharpe_is	sharpe_oos	sharpe_full	maxdd_is	turnover_yr	status	description
+3659aab	0.7938	-0.5071	0.3121	-0.2241	37.23	keep	baseline: EMA20>EMA50 & close>EMA20 & close>VWAP20 & 50<RSI14<70, hold while close>EMA50 & RSI>40, Nifty>EMA200 regime, top20 equal weight (post-review harness)
+1512dc6	0.7938	-0.5071	0.3121	-0.2241	37.23	discard	[r1:turnover] (lens keep) e00 baseline incumbent reproduced exactly (also after the parametric refactor used for the experiments)
+1512dc6	0.4277	-0.2307	0.1830	-0.3125	35.17	discard	[r1:turnover] e01 regime hysteresis band +/-2% around Nifty EMA200
+1512dc6	0.7833	-0.4714	0.3104	-0.2069	28.04	discard	[r1:turnover] e02 hold rule without the close>0.98*VWAP20 condition
+1512dc6	0.7938	-0.5071	0.3121	-0.2241	37.23	discard	[r1:turnover] e03 RSI exit 40->30: identical to baseline, the RSI exit never binds
+1512dc6	0.8164	-0.2867	0.4001	-0.2127	22.46	discard	[r1:turnover] (lens keep) e04 fixed 5% slots (gross/max_names per name), no re-spread when the count changes
+1512dc6	0.7150	-0.2677	0.3425	-0.2203	17.63	discard	[r1:turnover] e05 fixed slots + hold rule without VWAP
+1512dc6	0.7659	-0.2719	0.3711	-0.1868	21.15	discard	[r1:turnover] e06 fixed slots + entry conditions required 2 consecutive days
+1512dc6	0.7735	-0.2283	0.4030	-0.2121	19.23	discard	[r1:turnover] e07 fixed slots + 10-day minimum holding period
+1512dc6	0.5833	-0.2997	0.2574	-0.2500	23.62	discard	[r1:turnover] e08 fixed slots, 15 names (6.7% slots)
+1512dc6	0.9404	-0.3261	0.4547	-0.1440	19.44	discard	[r1:turnover] (lens keep) e09 fixed slots, 30 names (3.33% slots)
+1512dc6	0.7318	-0.4957	0.2571	-0.2325	21.47	discard	[r1:turnover] e10 20 slots, regime-off only blocks new entries (no liquidation)
+1512dc6	0.7370	-0.6592	0.2000	-0.2110	34.62	discard	[r1:turnover] e11 20 slots, VWAP exit band tightened to 1.00
+1512dc6	0.8120	-0.4774	0.3197	-0.2006	26.68	discard	[r1:turnover] e12 20 slots, RSI exit raised to 50
+1512dc6	0.8379	-0.3342	0.3909	-0.1804	21.22	discard	[r1:turnover] e13 fixed slots, 25 names
+1512dc6	1.0250	-0.4294	0.4857	-0.1074	16.21	discard	[r1:turnover] (lens keep) e14 fixed slots, 40 names (2.5% slots; cap rarely binds so exposure = breadth/40)
+1512dc6	1.0015	-0.4427	0.4706	-0.0812	13.20	discard	[r1:turnover] e15 fixed slots, 50 names (2% slots)
+1512dc6	0.9696	-0.3065	0.4901	-0.1255	18.16	discard	[r1:turnover] e16 30 slots + 5-day re-entry cooldown after a hold-rule exit (beat 30 slots alone, below the 40-slot keep from the same batch)
+1512dc6	1.0100	-0.3893	0.5013	-0.0938	14.94	discard	[r1:turnover] e17 40 slots + 5-day re-entry cooldown
+1512dc6	0.8527	-0.3844	0.4001	-0.0901	13.73	discard	[r1:turnover] e18 40 slots + 10-day re-entry cooldown
+1512dc6	1.0006	-0.7046	0.3563	-0.1114	15.81	discard	[r1:turnover] e19 40 slots + regime band on the exit side only (off below 0.98*EMA200)
+1512dc6	1.0281	-0.5486	0.4332	-0.0903	12.95	discard	[r1:turnover] e20 40 slots + entries only on the first trading day of each week (+0.003 vs e14, within noise; not kept alone on the simplicity criterion)
+1512dc6	1.0229	-0.1739	0.5794	-0.1199	13.32	discard	[r1:turnover] e21 40 slots + exit only after the hold rule fails 2 consecutive days
+1512dc6	0.9605	-0.2842	0.5021	-0.1081	15.56	discard	[r1:turnover] e22 40 slots + regime band on the entry side only (on above 1.02*EMA200)
+1512dc6	0.9642	-0.4342	0.4523	-0.0894	13.54	discard	[r1:turnover] e23 40 slots + scale-in: half slot for the first 5 days of a position
+1512dc6	1.0240	-0.3641	0.5143	-0.1114	14.79	discard	[r1:turnover] e24 40 slots + VWAP exit band loosened to 0.97
+1512dc6	1.0351	-0.2842	0.5373	-0.1079	11.24	discard	[r1:turnover] (lens keep) e25 40 slots + weekly entry days + 2-day exit confirmation (combination of the two flat turnover cutters)
+1512dc6	1.0075	-0.5196	0.4405	-0.1068	15.96	discard	[r1:turnover] e26 40 slots, de-risk to half slots while regime is off instead of liquidating
+1512dc6	1.0250	-0.4294	0.4857	-0.1074	16.21	discard	[r1:turnover] e27 40 slots, RSI>40 exit removed from the hold rule: identical to e14 (dead code)
+1512dc6	0.9796	-0.5948	0.3885	-0.1115	15.68	discard	[r1:turnover] e28 40 slots, regime-off only blocks entries, positions held at full slot
+1512dc6	1.0351	-0.2842	0.5373	-0.1079	11.24	discard	[r1:turnover] (lens best) e29 final clean rewrite of e25 (unused switches and the dead RSI exit removed): metrics identical, this is the candidate
+1512dc6	0.6801	-0.4448	0.2586	-0.2537	38.38	discard	[r1:vwap] entry level = rolling VWAP50 instead of VWAP20
+1512dc6	0.3046	-0.4631	0.0231	-0.2878	51.22	discard	[r1:vwap] pullback-to-VWAP20 entry (close within -3%/+2% of VWAP) inside EMA uptrend instead of breakout
+1512dc6	0.6501	-0.4271	0.2521	-0.2388	39.26	discard	[r1:vwap] percent band: enter only if close <= 5% above VWAP20 (not overextended)
+1512dc6	0.7755	-0.4807	0.3063	-0.2363	36.33	discard	[r1:vwap] VWAP slope filter: VWAP20 rising over 5 days required for entry
+1512dc6	0.8453	-0.4062	0.3710	-0.2162	30.96	discard	[r1:vwap] (lens keep) slower stop: hold while close > 0.98*rolling VWAP30 (entry still VWAP20)
+1512dc6	0.9077	-0.4863	0.3796	-0.2006	33.46	discard	[r1:vwap] (lens keep) quarter-start anchored VWAP as entry level and 0.98 stop (replaces rolling VWAP for entry and exit)
+1512dc6	0.0000	0.0000	0.0000	0.0000	0.00	crash	[r1:vwap] drop the close>EMA50 hold rule (crash: my experiment driver wrote a JSON 'false' literal into the generated strategy.py -> NameError at import; driver fixed, idea re-run as exp 9)
+1512dc6	1.0884	-0.4000	0.5273	-0.2006	36.56	discard	[r1:vwap] (lens keep) regime: Nifty>EMA200 OR index ETF above its quarter-anchored VWAP (ETF volume)
+1512dc6	1.1527	-0.2852	0.6175	-0.1883	31.33	discard	[r1:vwap] (lens keep) drop the close>EMA50 hold rule: anchored VWAP is the sole price stop (re-run of exp 7)
+1512dc6	1.2478	-0.3457	0.6435	-0.1883	31.31	discard	[r1:vwap] (lens keep) regime VWAP: rolling 20-day index VWAP instead of quarter-anchored (still OR Nifty>EMA200)
+1512dc6	1.2113	-0.3135	0.6356	-0.1978	34.20	discard	[r1:vwap] VWAP-since-entry stop (0.98 x average traded price since entry) instead of the anchored-VWAP stop
+1512dc6	1.2552	-0.3401	0.6458	-0.1820	31.25	discard	[r1:vwap] (lens keep) entry buffer: close must be 0.5% above the anchored VWAP (entry/exit hysteresis band)
+1512dc6	1.1661	-0.3367	0.5898	-0.1764	26.80	discard	[r1:vwap] stop band 0.97 instead of 0.98
+1512dc6	1.0548	-0.6088	0.4050	-0.2101	42.17	discard	[r1:vwap] month-start anchor instead of quarter-start for the stock VWAP
+1512dc6	1.2035	-0.5297	0.5747	-0.1817	24.72	discard	[r1:vwap] top 10 names instead of 20
+1512dc6	1.3994	-0.2824	0.7690	-0.1685	31.00	discard	[r1:vwap] (lens keep) anchored-VWAP slope filter: AVWAP above its value 10 days ago required for entry
+1512dc6	1.4939	-0.3048	0.8124	-0.1637	31.10	discard	[r1:vwap] (lens best) rank candidates by closeness above the anchored VWAP instead of by RSI
+1512dc6	1.5543	-0.6279	0.6707	-0.0953	41.60	discard	[r1:vwap] regime = index above its rolling VWAP20 only (drop the Nifty>EMA200 leg); discarded on the simplicity/exposure criterion: parameter spike (index VWAP 15 -> 0.74, 30 -> 1.05 in screening), exposure cut from 0.90 to 0.66, turnover +34%
+1512dc6	1.2992	-0.3146	0.6802	-0.1777	31.63	discard	[r1:vwap] simplicity check: remove the AVWAP slope filter from the final structure
+1512dc6	0.7938	-0.5071	0.3121	-0.2241	37.23	discard	[r1:rsi] E0 baseline reproduction (incumbent, run.py): EMA20>EMA50 & close>EMA20 & close>VWAP20 & 50<RSI14<70, Nifty>EMA200 regime, top20; gross Sharpe 1.185 vs net 0.794 (cost drag)
+1512dc6	0.7224	-0.4995	0.2686	-0.2282	36.71	discard	[r1:rsi] E1 stock RSI length 21
+1512dc6	0.7539	-0.4674	0.3000	-0.2450	38.61	discard	[r1:rsi] E2 stock RSI length 10
+1512dc6	0.7438	-0.2888	0.3555	-0.2040	43.36	discard	[r1:rsi] E3 RSI14 of EMA3(close) (RSI of a smoothed price)
+1512dc6	0.6918	-0.5995	0.2155	-0.2292	39.78	discard	[r1:rsi] E4 cross-sectional RSI rank instead of thresholds: entry rank>=0.6, hold rank>=0.3
+1512dc6	0.7711	-0.5138	0.2951	-0.2381	38.55	discard	[r1:rsi] E5 cs-rank entry>=0.5 & RSI<70, hold rank>=0.2
+1512dc6	0.7938	-0.5071	0.3121	-0.2241	37.23	discard	[r1:rsi] E6 rsi_exit 40->30: identical to baseline, the RSI exit never binds (EMA50 / VWAP exits fire first)
+1512dc6	0.9710	-0.8252	0.2529	-0.1424	40.07	discard	[r1:rsi] E7 regime = Nifty RSI14>50 instead of Nifty>EMA200 (screen; superseded by the hysteresis version)
+1512dc6	0.5683	-0.8038	0.0462	-0.2604	42.30	discard	[r1:rsi] E8 regime = Nifty>EMA200 AND Nifty RSI14>45
+1512dc6	0.4894	-0.3980	0.1797	-0.3137	37.54	discard	[r1:rsi] E9 regime = Nifty RSI50>50
+1512dc6	0.7909	-1.2817	0.0160	-0.1307	51.34	discard	[r1:rsi] E10 regime Nifty RSI7>50
+1512dc6	0.8859	-0.9310	0.1970	-0.1509	44.23	discard	[r1:rsi] E10 regime Nifty RSI10>50
+1512dc6	1.0318	-0.5389	0.3966	-0.1102	36.99	discard	[r1:rsi] E10 regime Nifty RSI20>50
+1512dc6	0.8043	-0.6570	0.2487	-0.2009	34.12	discard	[r1:rsi] E10 regime Nifty RSI30>50
+1512dc6	0.6898	-0.7523	0.1405	-0.2360	46.50	discard	[r1:rsi] E11 regime Nifty RSI14>45
+1512dc6	1.3386	-1.2260	0.3711	-0.0905	30.15	discard	[r1:rsi] E11 regime Nifty RSI14>55 (screen)
+1512dc6	1.1616	-0.7654	0.3731	-0.1238	23.93	discard	[r1:rsi] E12 regime Nifty RSI14 hysteresis on>55 off<45
+1512dc6	1.2916	-0.5264	0.5465	-0.1008	28.49	discard	[r1:rsi] E12 regime hysteresis on>52 off<48
+1512dc6	0.7187	-0.4246	0.2702	-0.1514	21.62	discard	[r1:rsi] E12 regime hysteresis on>60 off<40
+1512dc6	1.0993	-0.8777	0.3424	-0.1382	32.46	discard	[r1:rsi] E13 partial exposure = clip((Nifty RSI14-40)/20, 0, 1)
+1512dc6	1.0276	-1.0125	0.2707	-0.1339	29.36	discard	[r1:rsi] E13b partial exposure = clip((Nifty RSI14-30)/40, 0, 1)
+1512dc6	0.8591	-0.3741	0.3860	-0.2323	41.44	discard	[r1:rsi] E14 regime Nifty>EMA200 OR RSI14>50
+1512dc6	0.8756	-1.0691	0.1387	-0.1424	35.93	discard	[r1:rsi] E14b regime Nifty>EMA200 AND RSI14>50
+1512dc6	1.1258	-0.3889	0.5136	-0.1258	28.85	discard	[r1:rsi] E15 regime RSI14 of EMA3(Nifty) > 50
+1512dc6	0.0006	-0.1178	-0.0319	-0.3205	14.50	discard	[r1:rsi] E16 mean-reversion sleeve alone: RSI14<30 above EMA200, exit RSI>55 (gate fail: 1.85 names avg)
+1512dc6	0.2674	-0.1614	0.1288	-0.2774	32.68	discard	[r1:rsi] E16 MR sleeve RSI14<35 above EMA200, exit RSI>55 (gate fail: 4.6 names avg)
+1512dc6	0.0000	0.0000	0.0000	0.0000	0.00	discard	[r1:rsi] E16 MR sleeve RSI14<30 above EMA50: never triggers for Nifty 50 names (no trades, gate fail)
+1512dc6	0.0000	0.0000	0.0000	0.0000	0.00	discard	[r1:rsi] E16 MR sleeve RSI14<35 above EMA50, exit RSI>60: no trades (gate fail)
+1512dc6	1.4768	-0.9637	0.4879	-0.0801	31.64	discard	[r1:rsi] E17 regime Nifty RSI14>52
+1512dc6	1.4850	-1.2498	0.4041	-0.0851	29.82	discard	[r1:rsi] E17 regime Nifty RSI14>54
+1512dc6	1.2303	-1.5602	0.2002	-0.1017	29.36	discard	[r1:rsi] E17 regime Nifty RSI14>56
+1512dc6	1.4335	-1.8672	0.2243	-0.0734	26.99	discard	[r1:rsi] E17 regime Nifty RSI14>58
+1512dc6	0.9907	-1.7443	0.0040	-0.0734	26.79	discard	[r1:rsi] E17 regime Nifty RSI14>60
+1512dc6	0.9547	-1.1964	0.1080	-0.0833	37.67	discard	[r1:rsi] E18 regime Nifty RSI10>55
+1512dc6	1.3459	-1.0272	0.4778	-0.0771	25.21	discard	[r1:rsi] E18 regime Nifty RSI20>55
+1512dc6	1.0724	-1.1104	0.2996	-0.0770	26.67	discard	[r1:rsi] E18 regime Nifty RSI28>55
+1512dc6	1.2063	-0.9768	0.3376	-0.1135	26.25	discard	[r1:rsi] E19 hysteresis on>55 off<50
+1512dc6	1.5297	-1.6943	0.2749	-0.0706	20.38	discard	[r1:rsi] E19 hysteresis on>58 off<52
+1512dc6	1.3232	-1.3428	0.2808	-0.0729	16.86	discard	[r1:rsi] E19 hysteresis on>60 off<50
+1512dc6	1.1461	-0.7250	0.3803	-0.1426	25.96	discard	[r1:rsi] E19 hysteresis on>54 off<46
+1512dc6	1.2944	-1.0261	0.3692	-0.1048	22.86	discard	[r1:rsi] E19 hysteresis on>56 off<50
+1512dc6	0.8840	-0.4672	0.3384	-0.1421	25.61	discard	[r1:rsi] E19 hysteresis on>55 off<40
+1512dc6	0.9037	-0.5962	0.3095	-0.1869	33.17	discard	[r1:rsi] E19 hysteresis on>50 off<45
+1512dc6	0.5707	-0.3875	0.1966	-0.2608	33.05	discard	[r1:rsi] E19 hysteresis on>50 off<40
+1512dc6	0.2104	-0.5159	-0.0708	-0.4238	42.48	discard	[r1:rsi] E20 soft regime-off (stop new entries, keep holdings under hold rule) with RSI14>50: the edge is in going flat
+1512dc6	0.4684	-0.7280	0.0045	-0.2683	34.42	discard	[r1:rsi] E20 soft regime-off with RSI14>55
+1512dc6	0.3677	-0.4757	0.0414	-0.4001	38.95	discard	[r1:rsi] E20 soft regime-off with hysteresis 52/48
+1512dc6	0.7585	-0.5736	0.2382	-0.3042	34.09	discard	[r1:rsi] E20 soft regime-off with hysteresis 55/45
+1512dc6	0.5908	-0.5994	0.1221	-0.2719	36.84	discard	[r1:rsi] E21 regime-off keeps holdings at 50% weight, RSI14>50
+1512dc6	0.9281	-0.9100	0.2169	-0.1054	29.09	discard	[r1:rsi] E21 regime-off keeps holdings at 50% weight, RSI14>55
+1512dc6	1.2975	-1.0303	0.3530	-0.0904	26.65	discard	[r1:rsi] E22 regime RSI14 of EMA3(Nifty) > 55
+1512dc6	1.4174	-0.9463	0.4767	-0.1181	23.11	discard	[r1:rsi] E22 regime RSI14 of EMA3(Nifty) hysteresis 55/50
+1512dc6	1.6067	-1.3849	0.5071	-0.0584	22.40	discard	[r1:rsi] E23 Nifty RSI14 hysteresis grid, on 52-62 x off 44-56 (63 cells): plateau on 56-58 x off 52-54 = 1.44-1.61, smooth decay outside; best cell 57/54 shown; chose the plateau centre 57/53 (= 55 +/- 2) for the keep
+1512dc6	1.5332	-0.6075	0.6577	-0.0888	21.79	discard	[r1:rsi] E23 Nifty RSI20 hysteresis grid (26 cells): best 54/50 shown, less stable than RSI14
+1512dc6	1.3580	-1.7810	0.1097	-0.0649	22.68	discard	[r1:rsi] E23 Nifty RSI10 hysteresis grid (16 cells): best 60/50 shown
+1512dc6	1.3939	-1.4859	0.2981	-0.0707	28.45	discard	[r1:rsi] E24 exposure ramp clip((RSI14-50)/10)
+1512dc6	1.3441	-1.0723	0.3777	-0.0917	31.33	discard	[r1:rsi] E24 exposure ramp clip((RSI14-50)/5)
+1512dc6	0.9840	-0.8394	0.2555	-0.1368	35.55	discard	[r1:rsi] E24 exposure ramp clip((RSI14-45)/10)
+1512dc6	1.4632	-1.4296	0.3863	-0.0716	27.79	discard	[r1:rsi] E24 exposure ramp clip((RSI14-52)/6)
+1512dc6	1.1671	-2.0329	0.0222	-0.0501	25.75	discard	[r1:rsi] E24 exposure ramp clip((RSI14-55)/10)
+1512dc6	1.5386	-1.6104	0.3054	-0.0739	22.10	discard	[r1:rsi] (lens keep) KEEP v1 (run.py, lookahead ok): regime = Nifty RSI14 hysteresis on>57 off<53 (55 +/- 2), fully in cash when off, replacing Nifty>EMA200; stock rules unchanged; exposure 0.517, 19.5 names
+1512dc6	1.3042	-1.6566	0.1536	-0.1015	28.98	discard	[r1:rsi] E25 (on v1) stock RSI length 7
+1512dc6	1.3328	-1.6744	0.1963	-0.0817	23.98	discard	[r1:rsi] E25 stock RSI length 10
+1512dc6	1.5448	-1.6219	0.2787	-0.0707	21.23	discard	[r1:rsi] E25 stock RSI length 21 (+0.006, noise)
+1512dc6	1.4787	-1.6504	0.2148	-0.0743	20.88	discard	[r1:rsi] E25 stock RSI length 28
+1512dc6	1.5386	-1.6104	0.3054	-0.0739	22.10	discard	[r1:rsi] E26 entry band 45-70 (and 40-70): identical, the lower RSI bound never binds under the EMA/VWAP filters
+1512dc6	1.5420	-1.6082	0.2934	-0.0798	22.68	discard	[r1:rsi] E26 entry band 55-70
+1512dc6	1.3769	-1.5073	0.2535	-0.0836	26.27	discard	[r1:rsi] E26 entry band 60-70
+1512dc6	1.4692	-1.5637	0.3115	-0.0798	25.23	discard	[r1:rsi] E26 entry band 50-65
+1512dc6	1.4743	-1.6203	0.1982	-0.0761	21.14	discard	[r1:rsi] E26 entry band 50-75
+1512dc6	1.4488	-1.5434	0.2326	-0.0733	20.88	discard	[r1:rsi] E26 entry band 50-80
+1512dc6	1.4029	-1.5886	0.1914	-0.0777	20.91	discard	[r1:rsi] E26 no overbought cap on stock RSI (the 70 cap matters)
+1512dc6	1.6092	-1.5921	0.3562	-0.0678	23.68	discard	[r1:rsi] E27 rank qualifiers by lowest RSI (pullback preference); mixed across regime settings in E33
+1512dc6	1.4430	-1.6599	0.2433	-0.0788	22.52	discard	[r1:rsi] E27 rank by RSI50
+1512dc6	1.5161	-1.5851	0.3189	-0.0793	22.28	discard	[r1:rsi] E27 rank by RSI28
+1512dc6	1.5148	-1.5769	0.3100	-0.0819	22.27	discard	[r1:rsi] E27 rank by RSI7
+1512dc6	1.4581	-1.5602	0.2786	-0.0857	22.73	discard	[r1:rsi] E27 rank by 5-day RSI slope
+1512dc6	1.4558	-1.7130	0.2110	-0.0741	22.98	discard	[r1:rsi] E27 rank by closeness to RSI 60
+1512dc6	1.5991	-1.6317	0.3516	-0.0751	22.09	discard	[r1:rsi] E27 rank by close/VWAP20 - 1
+1512dc6	1.4029	-1.5851	0.2558	-0.0932	22.48	discard	[r1:rsi] E27 rank by close/EMA50 - 1
+1512dc6	1.5542	-1.5872	0.3292	-0.0739	22.10	discard	[r1:rsi] E28 cs-rank RSI entry >= 0.3 (& RSI<70)
+1512dc6	1.5872	-1.5785	0.3237	-0.0777	22.59	discard	[r1:rsi] E28 cs-rank RSI entry >= 0.5 (& RSI<70); mixed across regime settings in E33
+1512dc6	1.5001	-1.4376	0.3436	-0.0905	23.56	discard	[r1:rsi] E28 cs-rank RSI entry >= 0.6
+1512dc6	1.3048	-1.5205	0.2089	-0.0891	26.35	discard	[r1:rsi] E28 cs-rank RSI entry >= 0.7
+1512dc6	1.5569	-1.4684	0.3611	-0.0970	28.53	discard	[r1:rsi] E29 stock RSI14 of EMA3(close)
+1512dc6	1.6125	-1.6153	0.3136	-0.0760	21.78	discard	[r1:rsi] E29 stock RSI = EMA3 of RSI14 (screen; adopted as v2 after the E33 robustness check)
+1512dc6	1.5155	-1.7446	0.2307	-0.0710	26.25	discard	[r1:rsi] E30 entry requires RSI > RSI 1 day ago
+1512dc6	1.6667	-1.5849	0.3616	-0.0601	25.23	discard	[r1:rsi] E30 entry requires RSI rising over 3 days; not robust across regime settings (E33: loses at 2 of 10)
+1512dc6	1.5655	-1.6157	0.3067	-0.0687	26.05	discard	[r1:rsi] E30 entry requires RSI rising over 5 days
+1512dc6	1.4165	-1.6775	0.2417	-0.0987	27.11	discard	[r1:rsi] E31 multi-length: entry & RSI5<70
+1512dc6	1.4325	-1.6311	0.2566	-0.0893	23.94	discard	[r1:rsi] E31 entry & RSI5<80
+1512dc6	1.5386	-1.6104	0.3054	-0.0739	22.10	discard	[r1:rsi] E31 entry & RSI28>50 (never binds, identical)
+1512dc6	1.4728	-1.6245	0.2654	-0.0759	22.85	discard	[r1:rsi] E31 entry & RSI5>50
+1512dc6	1.2719	-1.7170	0.1438	-0.1001	25.19	discard	[r1:rsi] E31 entry & RSI28>50 & RSI5<75
+1512dc6	1.3736	-1.5217	0.3187	-0.0901	19.88	discard	[r1:rsi] E32 max_names 10
+1512dc6	1.3593	-1.4493	0.2735	-0.0875	20.85	discard	[r1:rsi] E32 max_names 15
+1512dc6	1.5634	-1.6334	0.3093	-0.0811	24.39	discard	[r1:rsi] E32 max_names 25
+1512dc6	1.5159	-1.5178	0.3195	-0.0796	26.50	discard	[r1:rsi] E32 max_names 30
+1512dc6	1.6125	-1.6153	0.3136	-0.0760	21.78	discard	[r1:rsi] E33 robustness table: 13 stock-level tweaks x 10 regime settings (hysteresis 56/54..60/50 and plain >52/>54/>55). Only EMA3-smoothed RSI improves in 10/10 settings (mean 1.568 vs 1.495); rsi21/max25 flat; slope3, -RSI score, cs-rank>=0.5 mixed; slope3+(-RSI) mean +0.12 but two extra rules. Metrics shown at 57/53
+1512dc6	1.6125	-1.6153	0.3136	-0.0760	21.78	discard	[r1:rsi] (lens keep) KEEP v2 (run.py, lookahead ok): stock RSI14 smoothed by EMA3 (used for entry band, hold rule and ranking), on the v1 index-RSI hysteresis regime
+1512dc6	1.6613	-1.4138	0.4878	-0.0735	22.03	discard	[r1:rsi] E34a re-map of the raw Nifty RSI14 hysteresis grid under smoothed stock RSI (20 cells): plateau unchanged (56-58 x 52-54 = 1.56-1.66); best cell 57/54 shown; kept 57/53
+1512dc6	1.5691	-1.2383	0.4100	-0.0768	21.39	discard	[r1:rsi] E34b regime on EMA3-smoothed Nifty RSI14, hysteresis grid (27 cells): every cell worse (1.09-1.57); best 55/54 shown. Smoothing the index RSI hurts, the regime needs to be fast
+1512dc6	1.5105	-1.0472	0.4728	-0.0957	23.70	discard	[r1:rsi] E34c regime on RSI14 of EMA3(Nifty), hysteresis grid (27 cells): every cell worse (1.17-1.51); best 56/52 shown
+1512dc6	0.0000	0.0000	0.0000	0.0000	0.00	crash	[r1:rsi] E35 RSI-breadth regime, first attempt: ZeroDivisionError (member count is 0 before the universe matrix starts in 2019-12); fixed by NaN-ing zero counts and re-run
+1512dc6	1.4835	-0.5827	0.6847	-0.1002	23.14	discard	[r1:rsi] E35 breadth regime (fraction of members with RSI14>50) hysteresis on>0.6 off<0.5
+1512dc6	1.2521	-0.4075	0.5776	-0.1444	23.24	discard	[r1:rsi] E35 breadth hysteresis 0.6/0.4
+1512dc6	1.8277	-0.7931	0.8240	-0.0678	16.79	discard	[r1:rsi] E35 breadth hysteresis 0.7/0.5 (screen; grid of 26 cells later: plateau on 0.7-0.75 x off 0.5-0.55 = 1.73-1.83, falls to 1.25-1.46 at off 0.4)
+1512dc6	1.6088	-1.0797	0.5703	-0.0720	21.84	discard	[r1:rsi] E35 breadth hysteresis 0.65/0.55
+1512dc6	1.1650	-0.7752	0.3719	-0.1314	30.43	discard	[r1:rsi] E35 breadth hysteresis 0.55/0.45
+1512dc6	1.6840	-1.0217	0.6693	-0.0678	18.61	discard	[r1:rsi] E35 breadth hysteresis 0.7/0.6
+1512dc6	1.1457	-0.9614	0.2837	-0.1133	37.69	discard	[r1:rsi] E35 breadth > 0.5 (no hysteresis)
+1512dc6	1.1354	-1.1258	0.2681	-0.0869	32.39	discard	[r1:rsi] E35 breadth > 0.6
+1512dc6	1.4669	-1.0797	0.6195	-0.0513	26.98	discard	[r1:rsi] E35 breadth > 0.7
+1512dc6	1.4976	-1.3792	0.5579	-0.0427	15.89	discard	[r1:rsi] E36 regime on mean member RSI14, hysteresis 57/53
+1512dc6	1.5297	-1.1814	0.5831	-0.0640	12.59	discard	[r1:rsi] E36 mean member RSI14 hysteresis 58/52
+1512dc6	1.7324	-1.2915	0.7208	-0.0418	18.87	discard	[r1:rsi] E36 mean member RSI14 hysteresis 56/54 (bumpy neighbourhood: 57/53 = 1.50, 58/52 = 1.53, so not a plateau)
+1512dc6	1.3933	-1.3745	0.2662	-0.1212	18.81	discard	[r1:rsi] E36 mean member RSI14 hysteresis 55/50
+1512dc6	1.1016	-0.9842	0.3879	-0.0780	12.07	discard	[r1:rsi] E36 mean member RSI14 hysteresis 60/50
+1512dc6	1.2740	-1.4121	0.1744	-0.1071	30.38	discard	[r1:rsi] E36 mean member RSI14 > 52
+1512dc6	1.2525	-1.5446	0.1460	-0.0657	28.15	discard	[r1:rsi] E36 mean member RSI14 > 55
+1512dc6	0.5475	-1.8537	-0.0935	-0.0838	20.47	discard	[r1:rsi] E36 mean member RSI14 > 58 (gate fail: 26% of days invested)
+1512dc6	1.6373	-1.5542	0.3807	-0.0727	24.03	discard	[r1:rsi] E37 stock RSI cap 65 on smoothed RSI (+0.025, noise level)
+1512dc6	1.5313	-1.6699	0.2517	-0.0899	20.90	discard	[r1:rsi] E37 stock RSI cap 75
+1512dc6	1.4419	-1.5988	0.2259	-0.0922	20.85	discard	[r1:rsi] E37 stock RSI cap 80
+1512dc6	1.6125	-1.6153	0.3136	-0.0760	21.78	discard	[r1:rsi] E38 rsi_exit 45 on smoothed RSI (never binds, identical)
+1512dc6	1.5648	-1.5710	0.3010	-0.0760	22.27	discard	[r1:rsi] E38 rsi_exit 50
+1512dc6	1.3127	-1.6520	0.1213	-0.0792	26.83	discard	[r1:rsi] E38 rsi_exit 55
+1512dc6	1.5575	-1.5677	0.3359	-0.0843	22.92	discard	[r1:rsi] E39 smoothed stock RSI10
+1512dc6	1.5022	-1.6781	0.2270	-0.0877	21.13	discard	[r1:rsi] E39 smoothed stock RSI21
+1512dc6	1.5955	-1.6083	0.3216	-0.0806	21.48	discard	[r1:rsi] E39 RSI14 smoothed by EMA5
+1512dc6	1.5928	-1.7013	0.2742	-0.0749	21.90	discard	[r1:rsi] E39 RSI14 smoothed by EMA2
+1512dc6	0.5120	-1.0617	-0.0210	-0.3698	34.25	discard	[r1:rsi] E40 park in NIFTYBEES while the regime is off
+1512dc6	1.7595	-1.5154	0.3574	-0.0677	29.08	discard	[r1:rsi] E41 also flat while Nifty RSI14 > 75
+1512dc6	1.8771	-1.5995	0.4268	-0.0695	25.45	discard	[r1:rsi] E41 also flat while Nifty RSI14 > 80 (screen; adopted as v3 after the E43 robustness check)
+1512dc6	1.6261	-1.5862	0.3316	-0.0760	22.84	discard	[r1:rsi] E41 also flat while Nifty RSI14 > 85
+1512dc6	0.7585	-1.4612	-0.1090	-0.1604	23.59	discard	[r1:rsi] E42 regime on BANKNIFTY RSI14 hysteresis 57/53
+1512dc6	1.0527	-1.9315	-0.1534	-0.0626	20.99	discard	[r1:rsi] E42 Nifty AND BankNifty RSI regimes
+1512dc6	1.2965	-1.1905	0.3251	-0.1717	24.36	discard	[r1:rsi] E42 Nifty OR BankNifty RSI regimes
+1512dc6	1.2910	-1.4370	0.0839	-0.0608	35.30	discard	[r1:rsi] E41 cutoff sweep: flat while Nifty RSI14 > 70 (the 70-78 zone earns +16% over IS, so the textbook 70 level hurts; only >78 is negative: 45 days, -5.3%)
+1512dc6	1.3122	-1.5025	0.1042	-0.0677	32.16	discard	[r1:rsi] E41 cutoff 72
+1512dc6	1.6986	-1.5772	0.2968	-0.0677	28.98	discard	[r1:rsi] E41 cutoff 74
+1512dc6	1.8258	-1.4722	0.4206	-0.0677	29.15	discard	[r1:rsi] E41 cutoff 76
+1512dc6	1.8931	-1.6062	0.4311	-0.0695	26.10	discard	[r1:rsi] E41 cutoff 78 (best cell of the sweep; 80 chosen as the round centre of the 76-80 plateau; 32 IS days above 80, next-day P&L -6.3%, 2020 -4.5% / 2021 -2.5% / 2022 +0.6% / 2023 0.0%)
+1512dc6	1.7416	-1.5995	0.3854	-0.0760	24.67	discard	[r1:rsi] E41 cutoff 82
+1512dc6	1.5839	-1.5862	0.3077	-0.0760	23.39	discard	[r1:rsi] E41 cutoff 84 (86 and 90: no IS days above, identical to v2)
+1512dc6	1.8965	-1.5995	0.4312	-0.0695	24.27	discard	[r1:rsi] E41 sticky overbought exit: off above 80 until RSI < 70 (no real gain over the plain cutoff, more complex)
+1512dc6	1.7156	-1.5680	0.3276	-0.0713	23.09	discard	[r1:rsi] E41 sticky off above 80 until < 60
+1512dc6	1.3177	-1.5230	0.0752	-0.0677	24.00	discard	[r1:rsi] E41 sticky off above 75 until < 65
+1512dc6	1.4180	-1.4129	0.1954	-0.0677	22.55	discard	[r1:rsi] E41 sticky off above 75 until < 60
+1512dc6	0.7584	-0.4248	0.3019	-0.2478	30.78	discard	[r1:rsi] E35 breadth with member RSI cut 45, hysteresis 0.7/0.5 (fragile to the inner cut)
+1512dc6	0.6065	-0.1222	0.3306	-0.2586	38.85	discard	[r1:rsi] E35 breadth(cut 45) 0.6/0.5
+1512dc6	0.6244	-0.2570	0.2852	-0.3098	37.08	discard	[r1:rsi] E35 breadth(cut 45) 0.6/0.4
+1512dc6	0.8446	-0.4119	0.3587	-0.2662	39.34	discard	[r1:rsi] E35 breadth(cut 45) 0.5/0.4
+1512dc6	1.0905	-1.6249	0.3625	-0.0653	12.98	discard	[r1:rsi] E35 breadth(cut 55) 0.7/0.5 (gate fail: 28% of days invested)
+1512dc6	1.6225	-1.9445	0.3320	-0.0544	15.90	discard	[r1:rsi] E35 breadth(cut 55) 0.6/0.5
+1512dc6	1.6223	-1.4303	0.4527	-0.0455	13.52	discard	[r1:rsi] E35 breadth(cut 55) 0.6/0.4
+1512dc6	1.3897	-1.2305	0.2739	-0.0690	20.61	discard	[r1:rsi] E35 breadth(cut 55) 0.5/0.4
+1512dc6	1.1940	-0.7014	0.5173	-0.1027	16.82	discard	[r1:rsi] E35 breadth of EMA3-smoothed member RSI, 0.7/0.5
+1512dc6	1.2962	-0.6469	0.5272	-0.1040	19.75	discard	[r1:rsi] E35 breadth of smoothed member RSI, 0.65/0.5
+1512dc6	1.3674	-0.7375	0.5306	-0.1059	21.05	discard	[r1:rsi] E35 breadth of smoothed member RSI, 0.6/0.5
+1512dc6	1.4786	-1.1002	0.5619	-0.0806	14.95	discard	[r1:rsi] E35 breadth of smoothed member RSI, 0.7/0.55
+a1edb7e	1.8771	-1.5995	0.4268	-0.0695	25.45	keep	[r1:rsi] (lens best) KEEP v3 (run.py, lookahead ok): also stand aside while Nifty RSI14 > 80, on v2. E43 robustness: the cutoff improves all 10 regime settings (mean 1.568 -> 1.821; 76/78/82 also all improve); dropping the best IS day gives 1.827 (v2: 1.563), top-5 days dropped 1.644 (v2: 1.379); rolling 6-month Sharpe gain +0.25 mean, positive in 61% of windows
+1512dc6	2.0950	-0.7791	0.9456	-0.0678	20.42	discard	[r1:rsi] E44 breadth hysteresis 0.7/0.5 in place of the index-RSI hysteresis, with the idx RSI<=80 cutoff: higher IS but declined, see E44b/E44d (fragile inner cut; gain over v3 positive in only 40% of rolling 6m windows, mean +0.03, concentrated in 2020; regimes agree on 92% of days)
+1512dc6	2.0178	-1.7544	0.4308	-0.0677	26.97	discard	[r1:rsi] E44 v3 regime AND breadth > 0.5 (second regime filter stacked; declined on simplicity)
+1512dc6	2.0942	-0.9326	0.9000	-0.0678	20.77	discard	[r1:rsi] E44a breadth hysteresis grid with the idx<=80 cutoff (23 cells): plateau on 0.7-0.75 x off 0.5-0.6 = 1.99-2.10, drops to 1.65 at off 0.45 and 1.75 at on 0.6; best cell 0.7/0.55 shown
+1512dc6	0.9010	-0.4560	0.3669	-0.2490	34.43	discard	[r1:rsi] E44b breadth member RSI cut 45, 0.7/0.5 & idx<=80
+1512dc6	1.4883	-0.5325	0.6440	-0.0977	25.70	discard	[r1:rsi] E44b breadth member RSI cut 48, 0.7/0.5 & idx<=80: -0.6 versus cut 50, the inner parameter is fragile
+1512dc6	1.9251	-1.4044	0.6864	-0.0649	17.86	discard	[r1:rsi] E44b breadth member RSI cut 52, 0.7/0.5 & idx<=80
+1512dc6	1.5559	-1.6211	0.6235	-0.0367	15.66	discard	[r1:rsi] E44b breadth member RSI cut 55, 0.7/0.5 & idx<=80 (gate fail: 25% of days invested)
+1512dc6	1.0361	-0.3459	0.4578	-0.0678	33.50	discard	[r1:rsi] E44c overbought cut expressed in breadth terms: breadth 0.7/0.5 & breadth<=0.85
+1512dc6	1.6925	-0.7352	0.7374	-0.0678	27.79	discard	[r1:rsi] E44c breadth 0.7/0.5 & breadth<=0.9
+1512dc6	1.8103	-0.8543	0.7786	-0.0715	25.85	discard	[r1:rsi] E44c breadth 0.7/0.5 & breadth<=0.95
+1512dc6	2.0773	-0.6078	0.9809	-0.0678	23.46	discard	[r1:rsi] E44c breadth 0.7/0.5 & idx RSI<=76
+1512dc6	2.1106	-0.7659	0.9593	-0.0678	20.56	discard	[r1:rsi] E44c breadth 0.7/0.5 & idx RSI<=78: highest IS seen in the round, declined with the rest of the breadth family (fragility, time-concentration)
+1512dc6	1.9555	-0.7791	0.8935	-0.0678	19.67	discard	[r1:rsi] E44c breadth 0.7/0.5 & idx RSI<=82
+1512dc6	1.8615	-0.7462	0.8579	-0.0678	17.83	discard	[r1:rsi] E44c breadth 0.7/0.5 & idx RSI<=85
+1512dc6	0.7268	-0.5661	0.2506	-0.2228	39.26	discard	[r1:sizing] E1 inverse realized-vol(60) weights normalised to gross 1.0 across held names (baseline otherwise)
+1512dc6	0.7472	-0.6643	0.2063	-0.2167	33.80	discard	[r1:sizing] E2 portfolio vol target: gross scaled by min(1, 15% / Nifty realized vol20)
+1512dc6	0.7725	-0.4713	0.3018	-0.2277	43.23	discard	[r1:sizing] E3 max_names 30 with equal weights
+1512dc6	0.7159	-0.6127	0.2280	-0.2485	41.25	discard	[r1:sizing] E4 partial cash: 0.5 gross instead of 0 while Nifty < EMA200, held set not reset
+1512dc6	0.8164	-0.2867	0.4001	-0.2127	22.46	discard	[r1:sizing] (lens keep) E5 fixed slot weights 1/20 per held name, idle slots in cash (no 1/n renormalisation)
+1512dc6	1.0250	-0.4294	0.4857	-0.1074	16.21	discard	[r1:sizing] (lens keep) E6 fixed slot weights 1/40, max 40 names (exposure proportional to names in confluence)
+1512dc6	0.9913	-0.4937	0.4129	-0.0904	14.38	discard	[r1:sizing] E7 vol-capped slots: slot 1/40 scaled down by 25%/vol60 for high-vol names
+1512dc6	1.0777	-0.4960	0.4813	-0.1141	16.76	discard	[r1:sizing] (lens keep) E8 slot 1/40 with the binary Nifty > EMA200 regime switch removed (stock filters + slot sizing only)
+1512dc6	1.1421	-0.7920	0.4622	-0.0685	17.52	discard	[r1:sizing] (lens keep) E9 E8 + exposure scaled by min(1, breadth/0.9), breadth = fraction of members with close > EMA50
+1512dc6	1.2143	-0.9624	0.4280	-0.0750	19.39	discard	[r1:sizing] (lens keep) E10 E8 + exposure scaled by min(1, breadth/0.8), breadth = fraction of members with RSI14 > 50
+1512dc6	1.1924	-0.7205	0.5055	-0.0744	15.18	discard	[r1:sizing] E11 E10 with the breadth series smoothed by EMA(5)
+1512dc6	1.0875	-0.9247	0.3490	-0.1283	28.69	discard	[r1:sizing] E12 E10 + idle slot cash parked in NIFTYBEES while Nifty > EMA200
+1512dc6	1.2878	-1.2874	0.3976	-0.0496	20.58	discard	[r1:sizing] (lens keep) E13 E10 with the breadth factor squared (convex response)
+1512dc6	1.3796	-1.7507	0.3504	-0.0435	21.23	discard	[r1:sizing] (lens keep) E14 linear breadth ramp: 0 exposure at RSI-breadth 0.5, full at 0.8 (40 slots)
+1512dc6	1.4658	-1.4667	0.5248	-0.0438	20.68	discard	[r1:sizing] E15 binary step: full exposure iff RSI-breadth > 0.7 (40 slots); higher IS but rejected as a threshold spike (0.6: 1.19, 0.65: 1.25, 0.75: 1.36, 0.8: 1.11) and invested only 40% of days; simplicity/robustness criterion
+1512dc6	1.4579	-1.6904	0.3790	-0.0561	26.43	discard	[r1:sizing] (lens best) E16 FINAL: breadth ramp 0.5->0.8 with the baseline's 20 slots (1/20 each), no index regime; clean rewrite
+1512dc6	1.4773	-1.7831	0.3569	-0.0510	25.78	discard	[r1:sizing] E17 same as E16 with 25 slots; +0.02 on a flat hill (20: 1.458, 25: 1.477, 30: 1.423, 35: 1.423) not worth moving a baseline parameter
+1512dc6	1.4683	-1.5186	0.4639	-0.0548	26.53	discard	[r1:sizing] E18 E16 with the exposure scale quantised to 0.25 steps; +0.01 for an extra rule
+1512dc6	1.2298	-1.5894	0.2906	-0.0561	25.59	discard	[r1:sizing] E19 E16 with the binary Nifty > EMA200 regime switch re-added on top of the breadth ramp
+1512dc6	1.2882	-1.3135	0.2660	-0.1161	31.02	discard	[r1:regime] (lens best; researcher hit the spend limit before reporting, candidate file evaluated by the lead) regime lens candidate
+fcd5fcc	0.7689	-0.4908	0.3022	-0.2241	37.38	discard	[harness] baseline re-measured after calendar repair (7 missing regular sessions restored, index bars rebuilt); reference only
+fcd5fcc	1.8761	-1.6006	0.4247	-0.0695	25.43	keep	[harness] incumbent (round-1 rsi lens) re-measured after calendar repair: h1 1.9678, h2 1.8888, drop5 1.6429; this is the bar for round 2
