@@ -62,8 +62,20 @@ Rules (textbook confluence):
              min(1, lam x score_i) of its weight, lam set so the model vol lands on the cap; the score is
              today's beta / idiosyncratic variance for a fresh cohort (its mean-variance weight, so the trim
              cuts the names with the most idiosyncratic risk per unit of market exposure first) and today's
-             ladder height (VWAP20/VWAP50 - 1)+ x rung for a stand-aside re-entry cohort (the score its
-             weights were bought on). NIFTYBEES carries no idiosyncratic risk and is not trimmed.
+             ladder height x RSI lead for a stand-aside re-entry cohort (the score its weights were bought
+             on). NIFTYBEES carries no idiosyncratic risk and is not trimmed. A held name whose EMA20 has run
+             more than ema_spread above its EMA50 (stretched past the band it was bought in) counts at
+             stretch_score (half) of its score, so the trims cut it first.
+  re-rank  : on the first day the budget may trim (day vol_cap_delay + 1 of a cohort, when the switch-on
+             thrust is over), the riding book is re-ranked by that same score of today and the bottom
+             rerank_drop (a third, rounded down) of its held stock names are sold before the budget is
+             applied: the cohort was bought on formation-day estimates, and three days later the names its
+             own weighting likes least are the ones least worth carrying (a ranking by the formation-day
+             score, or by the score's change since formation, does not do this). Done once per cohort; the
+             proceeds stay in cash.
+  exhaust  : once the names sold by the exit rules and the re-rank make up more than 1 - exhaust (60 %) of
+             the cohort's formation stock weight, the stock remainder is sold (the NIFTYBEES slot rides on):
+             the cohort is spent. Budget trims do not count (they would fire it far too often).
   sizing   : a cohort bought at a FRESH regime start (not the re-entry after an RSI>80 stand-aside) is
              scaled by the BANK NIFTY's variance ratio, min(1, (vol_long_n-day vol / vol_n-day vol)^size_power):
              when the market's most liquid, most leveraged sector has just become more volatile than its
@@ -91,7 +103,7 @@ PARAMS = dict(
     w_corr_n=15, beta_shrink=1.0 / 3.0, w_cap=0.4, rung_power=20.0,
     regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
     size_index="BANKNIFTY", size_power=2.0, whipsaw_days=3, whipsaw_size=0.5, vol_cap=0.10, vol_cap_delay=2,
-    exhaust=0.4, gross=1.0,
+    rerank_drop=1.0 / 3.0, stretch_score=0.5, exhaust=0.4, gross=1.0,
 )
 
 
@@ -145,6 +157,7 @@ def compute_target_weights(md) -> pd.DataFrame:
     r_peak = r.rolling(p["rsi_peak_n"], min_periods=p["rsi_peak_n"]).max()   # NaN (warm-up) compares False
     r_idx = ema(rsi(md.index_close[["NIFTY50"]], p["rsi_n"]), p["rsi_smooth"])["NIFTY50"]   # same RSI, on the index
     trend = (ef > es) & (ef < es * (1.0 + p["ema_spread"]))         # up, but not stretched
+    stretched_v = (ef > es * (1.0 + p["ema_spread"])).values          # a held name past the cap (NaN -> False)
     vol = realized_vol(c, p["vol_n"])
     vol_rank = (vol / realized_vol(c, p["vol_long_n"])).where(stock).rank(axis=1, pct=True)   # NaN -> no entry
     entry = (eligible & trend & (c > vw) & (r < p["rsi_hi"]) & (r_peak < p["rsi_peak"]) & (vol_rank < p["vol_calm_q"]))
@@ -166,6 +179,8 @@ def compute_target_weights(md) -> pd.DataFrame:
                                      & ~ladder_break)
     hold[ETF_TICKER] = True                                 # a parked index slot rides until the regime switches off
     e = md.tickers.index(ETF_TICKER)
+    nontrad_v = (stock & ~md.tradable).values               # held members without a fresh bar (cannot be traded)
+    stock_col = np.arange(len(md.tickers)) != e
 
     dates = md.calendar
     N = len(md.tickers)
@@ -222,9 +237,17 @@ def compute_target_weights(md) -> pd.DataFrame:
                 held[w0 > 0] = False                        # it is spent, sell the stock remainder (NIFTYBEES rides on)
             wg = w * g_v[t]
             w = np.where(held, wg, 0.0) / (wg.sum() + 1.0 - w.sum())
+            sc = np.where(stretched_v[t], score_v[t] * p["stretch_score"], score_v[t])   # past the EMA band cap: cut first
+            if t - t_form == p["vol_cap_delay"] + 1:        # the first day the budget may trim: re-rank the book
+                ix_h = np.flatnonzero(held & (w > 0) & stock_col)
+                k = int(np.floor(p["rerank_drop"] * len(ix_h)))
+                if len(ix_h) >= 3 and k > 0:                # sell the bottom third by today's own score
+                    drop = ix_h[np.argsort(sc[ix_h], kind="stable")[:k]]
+                    drop = drop[~nontrad_v[t, drop]]        # a name with no fresh bar cannot be sold today
+                    held[drop] = False; w[drop] = 0.0
             mv = np.sqrt((w @ b_v[t]) ** 2 * nv_v[t] ** 2 + w ** 2 @ s2_v[t])   # the riding book's model vol
             if mv > p["vol_cap"] and t - t_form > p["vol_cap_delay"]:   # the first days of the up-leg run untrimmed
-                w = budget_trim(w, b_v[t], s2_v[t], nv_v[t], p["vol_cap"], score_v[t])   # trim (never add) to budget
+                w = budget_trim(w, b_v[t], s2_v[t], nv_v[t], p["vol_cap"], sc)   # trim (never add) to budget
         if regime_v[t]:
             last_on = t
         W[t] = w
