@@ -1488,3 +1488,1075 @@ v4-2	whipsaw	0.4581	0.6567	1.1352	0.4581	0.8346	0.8997	5.5	discard	plateau (unti
 v4-2	whipsaw	0.4189	0.599	1.0874	0.4189	0.7861	0.8545	6.35	discard	plateau (untied) vwap_n=25
 v4-2	whipsaw	0.1529	0.5861	1.1423	0.1529	0.7454	0.8035	4.43	discard	plateau (candidate.py) MIDLINE=45.0
 v4-2	whipsaw	0.3484	0.736	0.9901	0.3484	0.7578	0.7669	6.77	discard	plateau (candidate.py) MIDLINE=55.0
+v4-3	clean	0.7528	0.7756	1.1051	0.7528	0.9222	0.9761	9.67	reference	R2 pullbackcombo as merged (reference)
+v4-3	clean	0.1995	0.7467	1.1242	0.1995	0.7907	0.8077	3.33	reference	R0 ema timer (reference)
+v4-3	clean	0.7528	0.7756	1.1051	0.7528	0.9222	0.9761	9.67	discard	R2 with ~reclaimed entry test deleted (sliver kept): identical weights -> dead code
+v4-3	clean	0.7556	0.8659	1.0928	0.7556	0.9364	0.9691	9.6	discard	c1: R2 -reclaimed -sliver (core=NIFTYBEES), ramp .5->.7
+v4-3	clean	0.7452	0.8938	1.2326	0.7452	1.0107	1.0581	11.27	discard	c1 + cut 0.6 (hard cut)
+v4-3	clean	0.6138	0.6138	1.0233	0.98	0.9042	0.9985	14.39	discard	c1 + cut 0.5
+v4-3	clean	0.6913	0.6913	1.0203	0.7792	0.8672	0.9293	13.43	discard	c1 + cut 0.55
+v4-3	clean	0.676	0.7914	1.1916	0.676	0.9542	1.0129	9.22	discard	c1 + cut 0.65
+v4-3	clean	0.5187	1.0174	1.057	0.5187	0.8968	0.8722	6.37	discard	c1 + cut 0.7
+v4-3	clean	0.6974	0.6974	1.0355	0.9185	0.9133	0.9869	15.31	discard	c1 + cut 0.48
+v4-3	clean	0.6229	1.1477	0.9448	0.6229	0.8903	0.8286	5.87	discard	c1 + cut 0.72
+v4-3	clean	0.6772	0.9074	1.2605	0.6772	1.0117	1.0543	10.35	discard	c2(cut .6) cut .6 sleeve_share .7
+v4-3	clean	0.8026	0.8544	1.1856	0.8026	0.9922	1.0459	12.18	discard	c2(cut .6) cut .6 sleeve_share .9
+v4-3	clean	0.6027	0.9009	1.2701	0.6027	0.9975	1.0364	9.4	discard	c2(cut .6) cut .6 sleeve_share .6
+v4-3	clean	0.2046	0.6357	1.19	0.2046	0.7911	0.8467	22.38	discard	c2(cut .6) cut .6 fill-core s=.8
+v4-3	clean	0.2036	0.6036	1.1942	0.2036	0.7836	0.8474	27.12	discard	c2(cut .6) cut .6 fill-core s=1.0
+v4-3	clean	0.2049	0.6665	1.1813	0.2049	0.7959	0.8428	17.63	discard	c2(cut .6) cut .6 fill-core s=.6
+v4-3	clean	0.6937	0.8297	1.0866	0.6937	0.9092	0.9442	9.86	plateau	c1_ramp neighbour fast=16
+v4-3	clean	0.6969	0.8345	1.116	0.6969	0.9263	0.9647	9.52	plateau	c1_ramp neighbour fast=24
+v4-3	clean	0.7437	0.7937	1.1057	0.7437	0.924	0.9735	9.81	plateau	c1_ramp neighbour slow=40
+v4-3	clean	0.7083	0.8071	1.1319	0.7083	0.9312	0.9791	9.65	plateau	c1_ramp neighbour slow=60
+v4-3	clean	0.6242	0.8729	1.1576	0.6242	0.9394	0.9684	8.44	plateau	c1_ramp neighbour sleeve_share=0.64
+v4-3	clean	0.7865	0.7865	0.9684	0.8648	0.8833	0.9242	10.72	plateau	c1_ramp neighbour sleeve_share=0.96
+v4-3	clean	0.6289	0.7681	1.1228	0.6289	0.9006	0.9497	8.82	plateau	c1_ramp neighbour trend_n=80
+v4-3	clean	0.8065	0.8813	1.0616	0.8065	0.9363	0.9657	10.41	plateau	c1_ramp neighbour trend_n=120
+v4-3	clean	0.6872	0.6872	1.0338	0.821	0.884	0.9517	9.71	plateau	c1_ramp neighbour breadth_from=0.4
+v4-3	clean	0.7696	0.8542	1.2017	0.7696	0.9947	1.0469	8.54	plateau	c1_ramp neighbour breadth_from=0.6
+v4-3	clean	0.6987	0.6987	1.0596	0.852	0.9083	0.9801	13.44	plateau	c1_ramp neighbour breadth_full=0.56
+v4-3	clean	0.6979	0.8956	1.1512	0.6979	0.9592	0.9888	6.66	plateau	c1_ramp neighbour breadth_full=0.84
+v4-3	clean	0.6458	0.6458	0.8198	0.9583	0.8084	0.8653	10.49	plateau	c1_ramp neighbour rsi_n=2
+v4-3	clean	0.6077	1.2122	1.2375	0.6077	1.052	1.0188	7.21	plateau	c1_ramp neighbour rsi_n=4
+v4-3	clean	0.628	0.9657	1.1184	0.628	0.9414	0.9456	8.47	plateau	c1_ramp neighbour rsi_max=16.0
+v4-3	clean	0.8329	0.9442	1.0565	0.8329	0.9566	0.9716	10.18	plateau	c1_ramp neighbour rsi_max=24.0
+v4-3	clean	0.6341	0.6341	1.073	0.7049	0.8634	0.9401	11.0	plateau	c1_ramp neighbour vwap_n=8
+v4-3	clean	0.645	0.645	1.0223	0.8929	0.8862	0.9671	7.97	plateau	c1_ramp neighbour vwap_n=12
+v4-3	clean	0.7575	0.856	1.0918	0.7575	0.9344	0.969	9.65	plateau	c1_ramp neighbour max_hold=16
+v4-3	clean	0.6776	0.8599	1.0705	0.6776	0.904	0.9285	9.56	plateau	c1_ramp neighbour max_hold=24
+v4-3	clean	0.8217	0.9064	1.0853	0.8217	0.9595	0.9862	9.86	plateau	c1_ramp neighbour slots=10
+v4-3	clean	0.7376	0.766	1.0843	0.7376	0.9059	0.9579	9.24	plateau	c1_ramp neighbour slots=14
+v4-3	clean	0.6907	0.8623	1.227	0.6907	0.9869	1.0362	11.53	plateau	c2_cut neighbour fast=16
+v4-3	clean	0.693	0.8655	1.2525	0.693	1.0015	1.054	11.19	plateau	c2_cut neighbour fast=24
+v4-3	clean	0.7349	0.8312	1.2439	0.7349	1.0001	1.0619	11.48	plateau	c2_cut neighbour slow=40
+v4-3	clean	0.7032	0.8412	1.2661	0.7032	1.0058	1.0665	11.32	plateau	c2_cut neighbour slow=60
+v4-3	clean	0.633	0.9054	1.2683	0.633	1.0048	1.0451	9.78	plateau	c2_cut neighbour sleeve_share=0.64
+v4-3	clean	0.8178	0.8178	1.1488	0.8307	0.9727	1.0309	12.72	plateau	c2_cut neighbour sleeve_share=0.96
+v4-3	clean	0.6788	0.8946	1.2202	0.6788	0.9914	1.0318	9.98	plateau	c2_cut neighbour trend_n=80
+v4-3	clean	0.7209	0.888	1.2105	0.7209	0.9907	1.0332	12.15	plateau	c2_cut neighbour trend_n=120
+v4-3	clean	0.6974	0.6974	1.0355	0.9185	0.9133	0.9869	15.31	plateau	c2_cut neighbour breadth_cut=0.48
+v4-3	clean	0.6229	1.1477	0.9448	0.6229	0.8903	0.8286	5.87	plateau	c2_cut neighbour breadth_cut=0.72
+v4-3	clean	0.7102	0.7102	0.9645	1.015	0.9071	0.9751	13.15	plateau	c2_cut neighbour rsi_n=2
+v4-3	clean	0.6678	1.3584	1.3632	0.6678	1.1595	1.1191	7.81	plateau	c2_cut neighbour rsi_n=4
+v4-3	clean	0.6621	1.1263	1.2563	0.6621	1.052	1.0472	9.51	plateau	c2_cut neighbour rsi_max=16.0
+v4-3	clean	0.8276	0.9932	1.1535	0.8276	1.0131	1.0326	12.49	plateau	c2_cut neighbour rsi_max=24.0
+v4-3	clean	0.7234	0.8796	1.1032	0.7234	0.9343	0.9662	12.74	plateau	c2_cut neighbour vwap_n=8
+v4-3	clean	0.6075	0.7639	0.994	0.6075	0.8291	0.8574	9.46	plateau	c2_cut neighbour vwap_n=12
+v4-3	clean	0.7531	0.8664	1.259	0.7531	1.0199	1.0776	11.29	plateau	c2_cut neighbour max_hold=16
+v4-3	clean	0.6585	0.8808	1.22	0.6585	0.9797	1.0213	11.26	plateau	c2_cut neighbour max_hold=24
+v4-3	clean	0.7534	1.0063	1.2455	0.7534	1.0427	1.0676	11.87	plateau	c2_cut neighbour slots=10
+v4-3	clean	0.7268	0.9097	1.2159	0.7268	1.0011	1.0414	10.61	plateau	c2_cut neighbour slots=14
+v4-3	clean	0.5612	0.8978	1.1876	0.5612	0.9438	0.9678	9.54	joint	c1_ramp joint+-0.2 draw 0: fast=20,slow=59,sleeve_share=0.6861,trend_n=118,breadth_from=0.4624,breadth_full=0.6785,rsi_n=3,rsi_max=19.2736,vwap_n=10,max_hold=16,slots=13
+v4-3	clean	0.8554	1.0711	1.0324	0.8554	0.9696	0.961	12.55	joint	c1_ramp joint+-0.2 draw 1: fast=20,slow=47,sleeve_share=0.8923,trend_n=92,breadth_from=0.4907,breadth_full=0.5975,rsi_n=3,rsi_max=17.6276,vwap_n=9,max_hold=22,slots=11
+v4-3	clean	0.847	0.9136	0.847	0.9775	0.8835	0.8899	14.17	joint	c1_ramp joint+-0.2 draw 2: fast=20,slow=60,sleeve_share=0.9477,trend_n=109,breadth_from=0.5082,breadth_full=0.6375,rsi_n=3,rsi_max=23.7594,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.3799	0.3799	0.9466	0.9153	0.7926	0.9282	9.55	joint	c1_ramp joint+-0.2 draw 3: fast=22,slow=52,sleeve_share=0.9335,trend_n=82,breadth_from=0.5057,breadth_full=0.6886,rsi_n=2,rsi_max=21.1306,vwap_n=11,max_hold=21,slots=11
+v4-3	clean	0.7212	0.8646	1.0132	0.7212	0.8874	0.9052	9.32	joint	c1_ramp joint+-0.2 draw 4: fast=23,slow=50,sleeve_share=0.8035,trend_n=110,breadth_from=0.4296,breadth_full=0.7895,rsi_n=3,rsi_max=22.2968,vwap_n=9,max_hold=22,slots=11
+v4-3	clean	0.3859	0.3859	0.7339	0.8638	0.6832	0.7814	13.15	joint	c1_ramp joint+-0.2 draw 5: fast=17,slow=57,sleeve_share=0.9156,trend_n=115,breadth_from=0.4944,breadth_full=0.6367,rsi_n=2,rsi_max=21.1658,vwap_n=11,max_hold=23,slots=11
+v4-3	clean	0.7522	0.8081	1.0447	0.7522	0.898	0.9361	11.12	joint	c1_ramp joint+-0.2 draw 6: fast=18,slow=53,sleeve_share=0.8976,trend_n=119,breadth_from=0.4301,breadth_full=0.695,rsi_n=3,rsi_max=19.3817,vwap_n=10,max_hold=16,slots=13
+v4-3	clean	0.5891	0.5891	0.9415	0.7908	0.8069	0.8824	10.72	joint	c1_ramp joint+-0.2 draw 7: fast=23,slow=57,sleeve_share=0.9234,trend_n=106,breadth_from=0.4491,breadth_full=0.7752,rsi_n=3,rsi_max=22.6502,vwap_n=8,max_hold=23,slots=10
+v4-3	clean	0.2981	0.2981	1.0161	0.8369	0.7882	0.9455	14.98	joint	c1_ramp joint+-0.2 draw 8: fast=19,slow=46,sleeve_share=0.8612,trend_n=87,breadth_from=0.4793,breadth_full=0.5616,rsi_n=3,rsi_max=19.3695,vwap_n=8,max_hold=21,slots=11
+v4-3	clean	0.7449	1.0303	1.1401	0.7449	0.9941	0.9962	8.01	joint	c1_ramp joint+-0.2 draw 9: fast=22,slow=53,sleeve_share=0.778,trend_n=115,breadth_from=0.5264,breadth_full=0.7869,rsi_n=3,rsi_max=20.3494,vwap_n=9,max_hold=24,slots=11
+v4-3	clean	0.6589	0.7089	1.1411	0.6589	0.9012	0.968	11.0	joint	c1_ramp joint+-0.2 draw 10: fast=18,slow=41,sleeve_share=0.7225,trend_n=111,breadth_from=0.5396,breadth_full=0.596,rsi_n=3,rsi_max=19.3674,vwap_n=11,max_hold=20,slots=12
+v4-3	clean	0.7147	0.8604	1.0785	0.7147	0.9179	0.9465	11.93	joint	c1_ramp joint+-0.2 draw 11: fast=23,slow=55,sleeve_share=0.7568,trend_n=98,breadth_from=0.4735,breadth_full=0.5907,rsi_n=3,rsi_max=18.2705,vwap_n=9,max_hold=19,slots=12
+v4-3	clean	0.5555	0.6138	0.9791	0.5555	0.7745	0.8311	8.73	joint	c1_ramp joint+-0.2 draw 12: fast=24,slow=55,sleeve_share=0.8932,trend_n=110,breadth_from=0.5194,breadth_full=0.817,rsi_n=3,rsi_max=20.0029,vwap_n=8,max_hold=20,slots=11
+v4-3	clean	0.694	0.7108	0.873	0.694	0.7751	0.803	9.21	joint	c1_ramp joint+-0.2 draw 13: fast=17,slow=50,sleeve_share=0.8912,trend_n=92,breadth_from=0.5538,breadth_full=0.7072,rsi_n=3,rsi_max=23.7197,vwap_n=10,max_hold=18,slots=14
+v4-3	clean	0.2414	0.7219	1.2336	0.2414	0.8399	0.8829	6.71	joint	c1_ramp joint+-0.2 draw 14: fast=17,slow=55,sleeve_share=0.7001,trend_n=96,breadth_from=0.4464,breadth_full=0.7955,rsi_n=3,rsi_max=23.7975,vwap_n=11,max_hold=22,slots=12
+v4-3	clean	0.8618	0.9913	0.9188	0.8618	0.8894	0.8741	6.32	joint	c1_ramp joint+-0.2 draw 15: fast=18,slow=48,sleeve_share=0.9411,trend_n=88,breadth_from=0.5976,breadth_full=0.7723,rsi_n=3,rsi_max=21.1321,vwap_n=10,max_hold=19,slots=12
+v4-3	clean	0.592	0.592	0.8722	0.6849	0.7437	0.7992	12.23	joint	c1_ramp joint+-0.2 draw 16: fast=16,slow=50,sleeve_share=0.9509,trend_n=91,breadth_from=0.5496,breadth_full=0.684,rsi_n=3,rsi_max=23.24,vwap_n=8,max_hold=18,slots=14
+v4-3	clean	0.5665	0.978	1.0838	0.5665	0.9086	0.9011	9.72	joint	c1_ramp joint+-0.2 draw 17: fast=18,slow=57,sleeve_share=0.8338,trend_n=112,breadth_from=0.5261,breadth_full=0.6616,rsi_n=3,rsi_max=16.2119,vwap_n=10,max_hold=19,slots=12
+v4-3	clean	0.7129	0.7522	1.0217	0.7129	0.8652	0.9082	8.28	joint	c1_ramp joint+-0.2 draw 18: fast=17,slow=44,sleeve_share=0.8199,trend_n=96,breadth_from=0.5583,breadth_full=0.7294,rsi_n=3,rsi_max=21.8589,vwap_n=10,max_hold=18,slots=13
+v4-3	clean	0.7653	1.1438	1.0076	0.7653	0.9474	0.9157	9.2	joint	c1_ramp joint+-0.2 draw 19: fast=18,slow=42,sleeve_share=0.9481,trend_n=102,breadth_from=0.5548,breadth_full=0.7082,rsi_n=3,rsi_max=16.2711,vwap_n=9,max_hold=21,slots=12
+v4-3	clean	0.4803	0.602	1.1996	0.4803	0.8634	0.9518	8.55	joint	c1_ramp joint+-0.2 draw 20: fast=17,slow=59,sleeve_share=0.6894,trend_n=100,breadth_from=0.4288,breadth_full=0.7609,rsi_n=3,rsi_max=17.0731,vwap_n=8,max_hold=17,slots=11
+v4-3	clean	0.7722	0.7746	0.7722	0.9143	0.7986	0.8215	11.46	joint	c1_ramp joint+-0.2 draw 21: fast=20,slow=49,sleeve_share=0.9463,trend_n=118,breadth_from=0.5593,breadth_full=0.748,rsi_n=3,rsi_max=23.51,vwap_n=8,max_hold=17,slots=11
+v4-3	clean	0.7559	0.8245	1.105	0.7559	0.9329	0.9765	11.6	joint	c1_ramp joint+-0.2 draw 22: fast=17,slow=52,sleeve_share=0.7233,trend_n=91,breadth_from=0.4577,breadth_full=0.5874,rsi_n=3,rsi_max=21.2054,vwap_n=10,max_hold=16,slots=12
+v4-3	clean	0.7959	0.8147	0.976	0.7959	0.8781	0.906	8.97	joint	c1_ramp joint+-0.2 draw 23: fast=21,slow=43,sleeve_share=0.7634,trend_n=81,breadth_from=0.4164,breadth_full=0.6206,rsi_n=3,rsi_max=19.7059,vwap_n=12,max_hold=19,slots=10
+v4-3	clean	0.6938	1.1054	1.0977	0.6938	0.9749	0.9507	10.3	joint	c1_ramp joint+-0.2 draw 24: fast=23,slow=41,sleeve_share=0.6698,trend_n=119,breadth_from=0.5507,breadth_full=0.6546,rsi_n=3,rsi_max=19.0938,vwap_n=9,max_hold=23,slots=12
+v4-3	clean	0.7193	0.7193	1.0193	0.8748	0.8976	0.9601	9.59	joint	c1_ramp joint+-0.2 draw 25: fast=17,slow=59,sleeve_share=0.8391,trend_n=85,breadth_from=0.4226,breadth_full=0.6905,rsi_n=3,rsi_max=21.054,vwap_n=10,max_hold=16,slots=13
+v4-3	clean	0.156	0.156	0.7896	0.6411	0.596	0.7319	14.62	joint	c1_ramp joint+-0.2 draw 26: fast=22,slow=58,sleeve_share=0.8545,trend_n=108,breadth_from=0.4327,breadth_full=0.5667,rsi_n=2,rsi_max=23.7157,vwap_n=11,max_hold=24,slots=11
+v4-3	clean	0.5274	0.9355	1.1161	0.5274	0.9093	0.9091	7.94	joint	c1_ramp joint+-0.2 draw 27: fast=22,slow=41,sleeve_share=0.6932,trend_n=91,breadth_from=0.5101,breadth_full=0.7161,rsi_n=3,rsi_max=19.3957,vwap_n=10,max_hold=24,slots=12
+v4-3	clean	0.5481	0.8038	1.0381	0.5481	0.8425	0.86	10.92	joint	c1_ramp joint+-0.2 draw 28: fast=23,slow=41,sleeve_share=0.7634,trend_n=102,breadth_from=0.5241,breadth_full=0.63,rsi_n=3,rsi_max=23.576,vwap_n=11,max_hold=21,slots=10
+v4-3	clean	0.0025	0.0025	0.6303	0.7494	0.4994	0.665	12.73	joint	c1_ramp joint+-0.2 draw 29: fast=16,slow=44,sleeve_share=0.6841,trend_n=119,breadth_from=0.4005,breadth_full=0.6624,rsi_n=2,rsi_max=21.1201,vwap_n=8,max_hold=17,slots=10
+v4-3	clean	0.5678	1.0154	1.1413	0.5678	0.9454	0.9393	6.94	joint	c1_ramp joint+-0.2 draw 30: fast=18,slow=52,sleeve_share=0.8977,trend_n=91,breadth_from=0.4566,breadth_full=0.7909,rsi_n=3,rsi_max=17.0145,vwap_n=11,max_hold=23,slots=10
+v4-3	clean	0.5669	0.9241	1.1115	0.5669	0.914	0.9213	7.58	joint	c1_ramp joint+-0.2 draw 31: fast=21,slow=44,sleeve_share=0.7179,trend_n=100,breadth_from=0.5044,breadth_full=0.6941,rsi_n=3,rsi_max=17.7053,vwap_n=11,max_hold=18,slots=14
+v4-3	clean	0.5413	1.006	1.1205	0.5413	0.9333	0.918	6.79	joint	c1_ramp joint+-0.2 draw 32: fast=20,slow=46,sleeve_share=0.6958,trend_n=99,breadth_from=0.4753,breadth_full=0.7345,rsi_n=3,rsi_max=16.2957,vwap_n=11,max_hold=16,slots=14
+v4-3	clean	0.5298	0.7311	0.9953	0.5298	0.802	0.8328	8.52	joint	c1_ramp joint+-0.2 draw 33: fast=23,slow=58,sleeve_share=0.8526,trend_n=86,breadth_from=0.4884,breadth_full=0.683,rsi_n=3,rsi_max=19.0491,vwap_n=11,max_hold=18,slots=11
+v4-3	clean	0.4423	1.0493	1.2546	0.4423	0.9768	0.9585	6.54	joint	c1_ramp joint+-0.2 draw 34: fast=20,slow=49,sleeve_share=0.6792,trend_n=119,breadth_from=0.5383,breadth_full=0.7932,rsi_n=3,rsi_max=23.5592,vwap_n=11,max_hold=24,slots=11
+v4-3	clean	0.6338	0.8464	0.9197	0.6338	0.8094	0.8147	8.02	joint	c1_ramp joint+-0.2 draw 35: fast=20,slow=48,sleeve_share=0.8364,trend_n=90,breadth_from=0.4201,breadth_full=0.6935,rsi_n=3,rsi_max=19.0721,vwap_n=12,max_hold=19,slots=11
+v4-3	clean	0.5291	1.0792	1.2802	0.5291	1.0306	1.0238	4.39	joint	c1_ramp joint+-0.2 draw 36: fast=23,slow=49,sleeve_share=0.7274,trend_n=91,breadth_from=0.5894,breadth_full=0.8293,rsi_n=3,rsi_max=18.2301,vwap_n=11,max_hold=18,slots=11
+v4-3	clean	0.5818	0.5818	0.8799	0.7199	0.7571	0.8174	10.55	joint	c1_ramp joint+-0.2 draw 37: fast=20,slow=48,sleeve_share=0.7523,trend_n=119,breadth_from=0.434,breadth_full=0.7319,rsi_n=2,rsi_max=16.7337,vwap_n=9,max_hold=24,slots=13
+v4-3	clean	0.7948	0.8645	1.1379	0.7948	0.9681	1.0119	9.0	joint	c1_ramp joint+-0.2 draw 38: fast=23,slow=41,sleeve_share=0.8581,trend_n=98,breadth_from=0.4833,breadth_full=0.7583,rsi_n=3,rsi_max=20.1077,vwap_n=9,max_hold=19,slots=12
+v4-3	clean	0.6834	0.9877	1.1729	0.6834	0.9782	0.9909	8.87	joint	c1_ramp joint+-0.2 draw 39: fast=17,slow=46,sleeve_share=0.7745,trend_n=99,breadth_from=0.56,breadth_full=0.74,rsi_n=3,rsi_max=22.9589,vwap_n=9,max_hold=17,slots=11
+v4-3	clean	0.5994	0.9481	0.9579	0.5994	0.8541	0.8288	7.57	joint	c1_ramp joint+-0.2 draw 40: fast=17,slow=51,sleeve_share=0.8236,trend_n=85,breadth_from=0.5432,breadth_full=0.7158,rsi_n=3,rsi_max=23.3399,vwap_n=11,max_hold=18,slots=10
+v4-3	clean	0.2707	1.3286	1.3443	0.2707	1.0583	1.0004	5.41	joint	c1_ramp joint+-0.2 draw 41: fast=23,slow=43,sleeve_share=0.8823,trend_n=93,breadth_from=0.4722,breadth_full=0.715,rsi_n=4,rsi_max=16.0165,vwap_n=9,max_hold=22,slots=11
+v4-3	clean	0.5358	0.9453	1.2132	0.5358	0.9669	0.9801	6.06	joint	c1_ramp joint+-0.2 draw 42: fast=18,slow=59,sleeve_share=0.7245,trend_n=109,breadth_from=0.5928,breadth_full=0.7736,rsi_n=3,rsi_max=21.7857,vwap_n=11,max_hold=18,slots=13
+v4-3	clean	0.7156	0.7156	0.8473	0.7548	0.7834	0.8109	12.03	joint	c1_ramp joint+-0.2 draw 43: fast=22,slow=58,sleeve_share=0.9299,trend_n=116,breadth_from=0.4195,breadth_full=0.6654,rsi_n=3,rsi_max=23.1335,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.6063	0.8365	1.2213	0.6063	0.9583	1.0048	8.92	joint	c1_ramp joint+-0.2 draw 44: fast=18,slow=56,sleeve_share=0.6465,trend_n=87,breadth_from=0.4622,breadth_full=0.709,rsi_n=3,rsi_max=23.0611,vwap_n=9,max_hold=20,slots=13
+v4-3	clean	0.5167	0.6898	1.0247	0.5167	0.8019	0.8429	8.89	joint	c1_ramp joint+-0.2 draw 45: fast=23,slow=57,sleeve_share=0.6834,trend_n=112,breadth_from=0.5351,breadth_full=0.678,rsi_n=2,rsi_max=17.3439,vwap_n=11,max_hold=17,slots=11
+v4-3	clean	0.6446	0.8629	1.1418	0.6446	0.9348	0.9676	8.31	joint	c1_ramp joint+-0.2 draw 46: fast=18,slow=55,sleeve_share=0.7549,trend_n=83,breadth_from=0.4741,breadth_full=0.6515,rsi_n=3,rsi_max=18.561,vwap_n=11,max_hold=20,slots=14
+v4-3	clean	0.7742	0.8636	1.1769	0.7742	0.9831	1.0304	11.92	joint	c1_ramp joint+-0.2 draw 47: fast=22,slow=48,sleeve_share=0.7952,trend_n=99,breadth_from=0.5743,breadth_full=0.5987,rsi_n=3,rsi_max=20.2793,vwap_n=10,max_hold=21,slots=12
+v4-3	clean	0.511	0.6953	0.9024	0.511	0.7423	0.7624	10.44	joint	c1_ramp joint+-0.2 draw 48: fast=19,slow=54,sleeve_share=0.7454,trend_n=104,breadth_from=0.5457,breadth_full=0.5966,rsi_n=3,rsi_max=23.5576,vwap_n=12,max_hold=24,slots=10
+v4-3	clean	0.7195	0.7763	0.7195	0.7687	0.74	0.7351	8.59	joint	c1_ramp joint+-0.2 draw 49: fast=23,slow=59,sleeve_share=0.9286,trend_n=109,breadth_from=0.5351,breadth_full=0.7615,rsi_n=3,rsi_max=22.3074,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.509	0.7793	1.1483	0.509	0.8832	0.9228	9.07	joint	c1_ramp joint+-0.2 draw 50: fast=23,slow=55,sleeve_share=0.6967,trend_n=113,breadth_from=0.4601,breadth_full=0.738,rsi_n=3,rsi_max=17.7133,vwap_n=9,max_hold=17,slots=10
+v4-3	clean	0.6583	0.6583	1.0228	0.8574	0.8808	0.9561	10.85	joint	c1_ramp joint+-0.2 draw 51: fast=17,slow=42,sleeve_share=0.9069,trend_n=101,breadth_from=0.4257,breadth_full=0.707,rsi_n=3,rsi_max=19.9727,vwap_n=9,max_hold=19,slots=14
+v4-3	clean	0.7044	0.981	0.8889	0.7044	0.8404	0.8144	8.67	joint	c1_ramp joint+-0.2 draw 52: fast=19,slow=50,sleeve_share=0.9377,trend_n=89,breadth_from=0.5451,breadth_full=0.6955,rsi_n=3,rsi_max=18.8774,vwap_n=10,max_hold=19,slots=14
+v4-3	clean	0.768	0.898	0.7686	0.768	0.787	0.7635	6.84	joint	c1_ramp joint+-0.2 draw 53: fast=23,slow=53,sleeve_share=0.9539,trend_n=109,breadth_from=0.5661,breadth_full=0.8105,rsi_n=3,rsi_max=23.8934,vwap_n=10,max_hold=20,slots=10
+v4-3	clean	0.5661	1.1184	1.0992	0.5661	0.9442	0.913	8.66	joint	c1_ramp joint+-0.2 draw 54: fast=23,slow=47,sleeve_share=0.8606,trend_n=89,breadth_from=0.4703,breadth_full=0.6676,rsi_n=3,rsi_max=16.2805,vwap_n=11,max_hold=24,slots=11
+v4-3	clean	0.4894	0.7522	1.0429	0.4894	0.8212	0.8486	7.47	joint	c1_ramp joint+-0.2 draw 55: fast=17,slow=47,sleeve_share=0.6665,trend_n=106,breadth_from=0.4737,breadth_full=0.7175,rsi_n=3,rsi_max=22.8926,vwap_n=12,max_hold=23,slots=12
+v4-3	clean	0.3614	0.5522	1.0821	0.3614	0.7609	0.8351	8.3	joint	c1_ramp joint+-0.2 draw 56: fast=20,slow=41,sleeve_share=0.6728,trend_n=101,breadth_from=0.5712,breadth_full=0.6811,rsi_n=2,rsi_max=17.6984,vwap_n=11,max_hold=17,slots=11
+v4-3	clean	0.7156	0.7156	0.9571	0.7892	0.8434	0.8895	8.43	joint	c1_ramp joint+-0.2 draw 57: fast=18,slow=52,sleeve_share=0.9076,trend_n=89,breadth_from=0.5199,breadth_full=0.7084,rsi_n=3,rsi_max=20.6434,vwap_n=11,max_hold=18,slots=12
+v4-3	clean	0.6088	0.6291	1.0257	0.6088	0.8136	0.8769	13.71	joint	c1_ramp joint+-0.2 draw 58: fast=17,slow=50,sleeve_share=0.8931,trend_n=120,breadth_from=0.4951,breadth_full=0.643,rsi_n=3,rsi_max=18.974,vwap_n=8,max_hold=20,slots=13
+v4-3	clean	0.6075	0.7424	1.14	0.6075	0.8989	0.9549	8.18	joint	c1_ramp joint+-0.2 draw 59: fast=23,slow=60,sleeve_share=0.7577,trend_n=90,breadth_from=0.4222,breadth_full=0.6821,rsi_n=3,rsi_max=17.8772,vwap_n=11,max_hold=22,slots=11
+v4-3	clean	0.6736	0.6736	0.9358	0.721	0.8068	0.8546	14.39	joint	c2_cut joint+-0.2 draw 0: fast=20,slow=59,sleeve_share=0.6861,trend_n=118,breadth_cut=0.5548,rsi_n=3,rsi_max=22.6216,vwap_n=10,max_hold=20,slots=10
+v4-3	clean	0.4804	0.8864	1.0276	0.4804	0.8377	0.8361	12.36	joint	c2_cut joint+-0.2 draw 1: fast=22,slow=51,sleeve_share=0.7455,trend_n=112,breadth_cut=0.5528,rsi_n=3,rsi_max=17.0723,vwap_n=10,max_hold=18,slots=11
+v4-3	clean	0.7553	1.093	1.1236	0.7553	1.0018	0.9889	7.82	joint	c2_cut joint+-0.2 draw 2: fast=22,slow=46,sleeve_share=0.7953,trend_n=119,breadth_cut=0.7108,rsi_n=3,rsi_max=20.3298,vwap_n=9,max_hold=17,slots=14
+v4-3	clean	0.636	1.3805	1.4662	0.636	1.2209	1.1854	6.71	joint	c2_cut joint+-0.2 draw 3: fast=20,slow=42,sleeve_share=0.8395,trend_n=111,breadth_cut=0.6271,rsi_n=4,rsi_max=16.3167,vwap_n=10,max_hold=20,slots=10
+v4-3	clean	0.5547	0.9562	0.8424	0.5547	0.7808	0.7385	6.39	joint	c2_cut joint+-0.2 draw 4: fast=21,slow=57,sleeve_share=0.8297,trend_n=90,breadth_cut=0.6816,rsi_n=3,rsi_max=20.0871,vwap_n=11,max_hold=17,slots=14
+v4-3	clean	0.3745	0.3745	0.8734	0.8575	0.7388	0.8631	15.85	joint	c2_cut joint+-0.2 draw 5: fast=21,slow=56,sleeve_share=0.7013,trend_n=112,breadth_cut=0.5259,rsi_n=2,rsi_max=22.8418,vwap_n=11,max_hold=23,slots=12
+v4-3	clean	0.4132	1.022	0.9843	0.4132	0.8354	0.7893	6.53	joint	c2_cut joint+-0.2 draw 6: fast=18,slow=40,sleeve_share=0.8466,trend_n=109,breadth_cut=0.6805,rsi_n=3,rsi_max=17.7217,vwap_n=11,max_hold=22,slots=14
+v4-3	clean	0.662	0.662	0.688	0.7268	0.6701	0.6793	11.23	joint	c2_cut joint+-0.2 draw 7: fast=17,slow=50,sleeve_share=0.9263,trend_n=97,breadth_cut=0.6215,rsi_n=2,rsi_max=21.3877,vwap_n=12,max_hold=23,slots=14
+v4-3	clean	0.8834	0.8883	0.8834	1.0077	0.8929	0.902	10.36	joint	c2_cut joint+-0.2 draw 8: fast=21,slow=45,sleeve_share=0.8859,trend_n=88,breadth_cut=0.6795,rsi_n=2,rsi_max=22.6039,vwap_n=9,max_hold=19,slots=11
+v4-3	clean	0.6353	1.0516	1.1372	0.6353	0.969	0.9614	9.29	joint	c2_cut joint+-0.2 draw 9: fast=22,slow=44,sleeve_share=0.7668,trend_n=80,breadth_cut=0.543,rsi_n=3,rsi_max=16.8474,vwap_n=11,max_hold=19,slots=13
+v4-3	clean	0.9548	1.0703	1.2047	0.9548	1.0861	1.1093	10.97	joint	c2_cut joint+-0.2 draw 10: fast=21,slow=49,sleeve_share=0.9175,trend_n=105,breadth_cut=0.6745,rsi_n=3,rsi_max=20.3494,vwap_n=9,max_hold=24,slots=11
+v4-3	clean	0.5805	0.8884	1.1465	0.5805	0.9259	0.9513	9.21	joint	c2_cut joint+-0.2 draw 11: fast=18,slow=41,sleeve_share=0.7225,trend_n=111,breadth_cut=0.6475,rsi_n=3,rsi_max=19.0099,vwap_n=10,max_hold=21,slots=12
+v4-3	clean	0.712	1.1191	1.1014	0.712	0.9795	0.9615	11.95	joint	c2_cut joint+-0.2 draw 12: fast=21,slow=57,sleeve_share=0.8725,trend_n=95,breadth_cut=0.5876,rsi_n=3,rsi_max=16.8779,vwap_n=9,max_hold=18,slots=11
+v4-3	clean	0.7116	0.9825	0.8319	0.7116	0.8227	0.7794	8.6	joint	c2_cut joint+-0.2 draw 13: fast=19,slow=52,sleeve_share=0.9509,trend_n=111,breadth_cut=0.6699,rsi_n=3,rsi_max=20.7759,vwap_n=12,max_hold=22,slots=12
+v4-3	clean	0.6186	0.8821	1.1031	0.6186	0.9165	0.9345	9.03	joint	c2_cut joint+-0.2 draw 14: fast=17,slow=50,sleeve_share=0.7081,trend_n=85,breadth_cut=0.6015,rsi_n=3,rsi_max=18.3601,vwap_n=11,max_hold=20,slots=10
+v4-3	clean	0.6314	0.9496	1.0425	0.6314	0.8976	0.8952	12.17	joint	c2_cut joint+-0.2 draw 15: fast=24,slow=48,sleeve_share=0.7345,trend_n=114,breadth_cut=0.5099,rsi_n=3,rsi_max=17.5026,vwap_n=10,max_hold=18,slots=14
+v4-3	clean	0.5332	0.6291	0.9391	0.5332	0.7536	0.7985	9.15	joint	c2_cut joint+-0.2 draw 16: fast=19,slow=59,sleeve_share=0.8401,trend_n=108,breadth_cut=0.6052,rsi_n=3,rsi_max=19.1645,vwap_n=12,max_hold=18,slots=14
+v4-3	clean	0.7748	0.9862	1.2484	0.7748	1.0452	1.0773	11.06	joint	c2_cut joint+-0.2 draw 17: fast=22,slow=47,sleeve_share=0.8453,trend_n=95,breadth_cut=0.5716,rsi_n=3,rsi_max=16.1338,vwap_n=10,max_hold=24,slots=11
+v4-3	clean	0.4533	0.4533	0.9563	0.7966	0.7825	0.8939	17.26	joint	c2_cut joint+-0.2 draw 18: fast=22,slow=49,sleeve_share=0.707,trend_n=116,breadth_cut=0.484,rsi_n=3,rsi_max=23.9922,vwap_n=9,max_hold=23,slots=13
+v4-3	clean	0.7366	0.799	0.9266	0.7366	0.834	0.854	15.09	joint	c2_cut joint+-0.2 draw 19: fast=22,slow=53,sleeve_share=0.7561,trend_n=110,breadth_cut=0.4864,rsi_n=3,rsi_max=18.9748,vwap_n=10,max_hold=17,slots=11
+v4-3	clean	0.6602	0.9028	1.0577	0.6602	0.8998	0.9162	9.28	joint	c2_cut joint+-0.2 draw 20: fast=20,slow=48,sleeve_share=0.8933,trend_n=104,breadth_cut=0.6867,rsi_n=3,rsi_max=20.8146,vwap_n=9,max_hold=22,slots=11
+v4-3	clean	0.7966	1.1094	1.1388	0.7966	1.0188	1.0129	11.0	joint	c2_cut joint+-0.2 draw 21: fast=17,slow=59,sleeve_share=0.8128,trend_n=111,breadth_cut=0.607,rsi_n=3,rsi_max=16.2711,vwap_n=9,max_hold=21,slots=12
+v4-3	clean	0.7493	0.7493	1.1601	0.7785	0.9503	1.02	13.85	joint	c2_cut joint+-0.2 draw 22: fast=17,slow=59,sleeve_share=0.6894,trend_n=100,breadth_cut=0.5146,rsi_n=3,rsi_max=18.2105,vwap_n=9,max_hold=16,slots=10
+v4-3	clean	0.8147	1.1662	0.9711	0.8147	0.9658	0.9058	7.48	joint	c2_cut joint+-0.2 draw 23: fast=18,slow=51,sleeve_share=0.7843,trend_n=118,breadth_cut=0.709,rsi_n=3,rsi_max=21.3727,vwap_n=11,max_hold=24,slots=10
+v4-3	clean	0.5514	0.5514	1.1442	0.5862	0.849	0.9482	12.63	joint	c2_cut joint+-0.2 draw 24: fast=17,slow=47,sleeve_share=0.6699,trend_n=104,breadth_cut=0.5425,rsi_n=3,rsi_max=18.3066,vwap_n=8,max_hold=22,slots=13
+v4-3	clean	0.3809	0.3809	1.0509	0.7663	0.8064	0.9448	13.76	joint	c2_cut joint+-0.2 draw 25: fast=21,slow=41,sleeve_share=0.7774,trend_n=107,breadth_cut=0.5175,rsi_n=3,rsi_max=16.1587,vwap_n=8,max_hold=18,slots=12
+v4-3	clean	0.6354	0.9898	0.6912	0.6354	0.7352	0.6554	6.49	joint	c2_cut joint+-0.2 draw 26: fast=20,slow=58,sleeve_share=0.7413,trend_n=81,breadth_cut=0.6783,rsi_n=2,rsi_max=16.7439,vwap_n=12,max_hold=22,slots=11
+v4-3	clean	0.617	0.6927	0.7515	0.617	0.6943	0.6998	15.69	joint	c2_cut joint+-0.2 draw 27: fast=17,slow=48,sleeve_share=0.7485,trend_n=115,breadth_cut=0.5805,rsi_n=2,rsi_max=23.4144,vwap_n=10,max_hold=17,slots=10
+v4-3	clean	0.515	0.515	0.9011	1.1251	0.8621	0.972	15.27	joint	c2_cut joint+-0.2 draw 28: fast=20,slow=42,sleeve_share=0.8422,trend_n=105,breadth_cut=0.4877,rsi_n=3,rsi_max=22.2944,vwap_n=12,max_hold=21,slots=13
+v4-3	clean	0.4925	1.0569	1.3574	0.4925	1.0535	1.0609	7.26	joint	c2_cut joint+-0.2 draw 29: fast=17,slow=40,sleeve_share=0.661,trend_n=119,breadth_cut=0.635,rsi_n=4,rsi_max=18.7951,vwap_n=11,max_hold=17,slots=10
+v4-3	clean	0.7633	1.0341	1.021	0.7633	0.9376	0.9239	14.4	joint	c2_cut joint+-0.2 draw 30: fast=18,slow=51,sleeve_share=0.8184,trend_n=100,breadth_cut=0.5819,rsi_n=3,rsi_max=23.7333,vwap_n=10,max_hold=23,slots=10
+v4-3	clean	0.5517	1.2701	1.1739	0.5517	1.0117	0.9573	9.65	joint	c2_cut joint+-0.2 draw 31: fast=19,slow=51,sleeve_share=0.8385,trend_n=90,breadth_cut=0.5758,rsi_n=4,rsi_max=21.1908,vwap_n=10,max_hold=17,slots=10
+v4-3	clean	0.2239	0.2239	0.8169	1.3287	0.8085	1.0013	20.14	joint	c2_cut joint+-0.2 draw 32: fast=18,slow=43,sleeve_share=0.9548,trend_n=80,breadth_cut=0.5678,rsi_n=2,rsi_max=21.1201,vwap_n=8,max_hold=17,slots=10
+v4-3	clean	0.7946	0.7946	1.0747	0.8889	0.9431	1.0004	15.19	joint	c2_cut joint+-0.2 draw 33: fast=18,slow=52,sleeve_share=0.8977,trend_n=91,breadth_cut=0.548,rsi_n=3,rsi_max=21.9676,vwap_n=9,max_hold=22,slots=14
+v4-3	clean	0.3738	0.8682	1.2162	0.3738	0.9054	0.9259	9.93	joint	c2_cut joint+-0.2 draw 34: fast=17,slow=53,sleeve_share=0.703,trend_n=90,breadth_cut=0.5986,rsi_n=3,rsi_max=19.8323,vwap_n=10,max_hold=18,slots=13
+v4-3	clean	0.7293	0.7293	1.0636	0.7778	0.8977	0.9573	13.82	joint	c2_cut joint+-0.2 draw 35: fast=18,slow=58,sleeve_share=0.8048,trend_n=92,breadth_cut=0.5219,rsi_n=3,rsi_max=19.0104,vwap_n=10,max_hold=20,slots=10
+v4-3	clean	0.588	1.0642	1.0886	0.588	0.943	0.9135	6.77	joint	c2_cut joint+-0.2 draw 36: fast=23,slow=41,sleeve_share=0.9048,trend_n=113,breadth_cut=0.7018,rsi_n=3,rsi_max=17.285,vwap_n=10,max_hold=20,slots=13
+v4-3	clean	0.4477	1.0739	1.0646	0.4477	0.9054	0.8604	7.03	joint	c2_cut joint+-0.2 draw 37: fast=19,slow=54,sleeve_share=0.7053,trend_n=94,breadth_cut=0.6104,rsi_n=3,rsi_max=16.9802,vwap_n=12,max_hold=22,slots=14
+v4-3	clean	0.6664	0.6664	0.8542	0.9309	0.8228	0.8779	17.3	joint	c2_cut joint+-0.2 draw 38: fast=19,slow=59,sleeve_share=0.9,trend_n=119,breadth_cut=0.5274,rsi_n=3,rsi_max=19.0868,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.7143	0.8606	1.0965	0.7143	0.9254	0.9538	14.51	joint	c2_cut joint+-0.2 draw 39: fast=20,slow=53,sleeve_share=0.7629,trend_n=119,breadth_cut=0.5774,rsi_n=3,rsi_max=22.5112,vwap_n=10,max_hold=18,slots=11
+v4-3	clean	0.765	1.0799	1.0549	0.765	0.9634	0.9434	8.81	joint	c2_cut joint+-0.2 draw 40: fast=24,slow=59,sleeve_share=0.8468,trend_n=91,breadth_cut=0.6507,rsi_n=3,rsi_max=18.5767,vwap_n=10,max_hold=19,slots=11
+v4-3	clean	0.602	0.602	1.012	1.0035	0.9045	1.0042	15.21	joint	c2_cut joint+-0.2 draw 41: fast=24,slow=43,sleeve_share=0.8364,trend_n=82,breadth_cut=0.502,rsi_n=3,rsi_max=23.9335,vwap_n=11,max_hold=23,slots=10
+v4-3	clean	0.7093	0.7471	0.9623	0.7093	0.8328	0.868	13.45	joint	c2_cut joint+-0.2 draw 42: fast=21,slow=49,sleeve_share=0.7733,trend_n=108,breadth_cut=0.554,rsi_n=3,rsi_max=18.0858,vwap_n=10,max_hold=20,slots=10
+v4-3	clean	0.6074	0.8803	1.0643	0.6074	0.8819	0.8977	13.13	joint	c2_cut joint+-0.2 draw 43: fast=18,slow=48,sleeve_share=0.7913,trend_n=112,breadth_cut=0.6343,rsi_n=3,rsi_max=22.9589,vwap_n=9,max_hold=17,slots=11
+v4-3	clean	0.6264	1.1402	0.6264	0.6266	0.7323	0.614	6.9	joint	c2_cut joint+-0.2 draw 44: fast=17,slow=51,sleeve_share=0.8236,trend_n=85,breadth_cut=0.6519,rsi_n=3,rsi_max=19.3855,vwap_n=12,max_hold=23,slots=11
+v4-3	clean	0.7134	0.7134	1.0543	0.8193	0.8998	0.9647	11.31	joint	c2_cut joint+-0.2 draw 45: fast=17,slow=58,sleeve_share=0.6903,trend_n=110,breadth_cut=0.555,rsi_n=3,rsi_max=20.4298,vwap_n=12,max_hold=16,slots=10
+v4-3	clean	0.7154	0.7154	0.9827	0.8967	0.8864	0.9465	14.17	joint	c2_cut joint+-0.2 draw 46: fast=22,slow=48,sleeve_share=0.7321,trend_n=119,breadth_cut=0.5434,rsi_n=3,rsi_max=23.7138,vwap_n=11,max_hold=22,slots=13
+v4-3	clean	0.664	0.9709	0.8998	0.664	0.8294	0.8117	10.8	joint	c2_cut joint+-0.2 draw 47: fast=22,slow=45,sleeve_share=0.8405,trend_n=112,breadth_cut=0.6932,rsi_n=3,rsi_max=23.2312,vwap_n=8,max_hold=19,slots=12
+v4-3	clean	0.7954	1.0539	1.2066	0.7954	1.0464	1.058	9.65	joint	c2_cut joint+-0.2 draw 48: fast=23,slow=48,sleeve_share=0.7248,trend_n=81,breadth_cut=0.5493,rsi_n=3,rsi_max=16.1614,vwap_n=9,max_hold=18,slots=12
+v4-3	clean	0.277	1.0785	1.4075	0.277	1.0386	1.0364	7.33	joint	c2_cut joint+-0.2 draw 49: fast=19,slow=58,sleeve_share=0.7064,trend_n=102,breadth_cut=0.6667,rsi_n=4,rsi_max=22.9878,vwap_n=9,max_hold=22,slots=13
+v4-3	clean	0.482	0.482	1.0227	0.5824	0.7659	0.8615	13.25	joint	c2_cut joint+-0.2 draw 50: fast=19,slow=41,sleeve_share=0.6938,trend_n=110,breadth_cut=0.5002,rsi_n=3,rsi_max=18.0417,vwap_n=11,max_hold=19,slots=10
+v4-3	clean	0.5855	0.7951	0.9262	0.5855	0.7979	0.8043	9.72	joint	c2_cut joint+-0.2 draw 51: fast=19,slow=47,sleeve_share=0.8694,trend_n=93,breadth_cut=0.6465,rsi_n=3,rsi_max=23.1019,vwap_n=11,max_hold=19,slots=12
+v4-3	clean	0.6442	0.781	1.2386	0.6442	0.9655	1.0305	10.05	joint	c2_cut joint+-0.2 draw 52: fast=20,slow=57,sleeve_share=0.6842,trend_n=97,breadth_cut=0.6084,rsi_n=3,rsi_max=20.7842,vwap_n=10,max_hold=19,slots=13
+v4-3	clean	0.5714	0.8937	0.9987	0.5714	0.8539	0.8496	8.59	joint	c2_cut joint+-0.2 draw 53: fast=19,slow=52,sleeve_share=0.8731,trend_n=85,breadth_cut=0.5583,rsi_n=4,rsi_max=23.7282,vwap_n=12,max_hold=16,slots=14
+v4-3	clean	0.7057	0.7821	1.061	0.7057	0.891	0.9321	10.82	joint	c2_cut joint+-0.2 draw 54: fast=23,slow=58,sleeve_share=0.8688,trend_n=107,breadth_cut=0.6527,rsi_n=3,rsi_max=22.3074,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.6078	0.6078	1.0348	0.6621	0.8256	0.8994	13.92	joint	c2_cut joint+-0.2 draw 55: fast=23,slow=55,sleeve_share=0.6967,trend_n=113,breadth_cut=0.5521,rsi_n=3,rsi_max=18.8492,vwap_n=9,max_hold=17,slots=10
+v4-3	clean	0.5615	0.842	1.2112	0.5615	0.9412	0.9832	11.46	joint	c2_cut joint+-0.2 draw 56: fast=17,slow=41,sleeve_share=0.6688,trend_n=113,breadth_cut=0.6043,rsi_n=3,rsi_max=20.2,vwap_n=10,max_hold=20,slots=11
+v4-3	clean	0.4748	1.1836	1.0923	0.4748	0.9452	0.8812	6.58	joint	c2_cut joint+-0.2 draw 57: fast=19,slow=57,sleeve_share=0.7628,trend_n=100,breadth_cut=0.7033,rsi_n=3,rsi_max=21.8041,vwap_n=10,max_hold=22,slots=11
+v4-3	clean	0.4546	1.2246	1.1137	0.4546	0.9678	0.8909	8.96	joint	c2_cut joint+-0.2 draw 58: fast=20,slow=47,sleeve_share=0.9172,trend_n=117,breadth_cut=0.6316,rsi_n=4,rsi_max=21.8564,vwap_n=11,max_hold=23,slots=11
+v4-3	clean	0.6371	1.2659	1.1757	0.6371	1.0355	0.9906	8.75	joint	c2_cut joint+-0.2 draw 59: fast=24,slow=48,sleeve_share=0.7991,trend_n=87,breadth_cut=0.6772,rsi_n=3,rsi_max=21.5148,vwap_n=9,max_hold=19,slots=11
+v4-3	clean	0.791	0.791	1.1212	0.8462	0.9568	1.0178	10.47	discard	c2 ablation: core removed (sleeve 0.8 only)
+v4-3	clean	0.1952	0.7421	1.1209	0.1952	0.7868	0.8041	0.84	discard	c2 ablation: sleeve removed (core 0.2 only)
+v4-3	clean	0.3683	0.9888	0.393	0.3683	0.48	0.3787	15.12	discard	c2 ablation: no index filter (NIFTY>EMA100)
+v4-3	clean	0.0147	0.0147	0.2661	0.6376	0.2754	0.3783	18.19	discard	c2 ablation: no stock trend filter (close>EMA100)
+v4-3	clean	-0.3445	-0.3445	0.3219	0.5934	0.222	0.4147	22.94	discard	c2 ablation: no breadth trigger
+v4-3	clean	0.5935	0.5935	0.99	0.7353	0.8188	0.8943	14.59	discard	c2 ablation: breadth over all members
+v4-3	clean	0.7641	0.7641	0.8937	0.9407	0.8639	0.9033	13.64	discard	c2 ablation: no RSI(3)<20 filter
+v4-3	clean	0.0481	0.6298	1.2101	0.0481	0.7461	0.7884	8.58	discard	c2 ablation: no VWAP-reclaim exit (time stop only)
+v4-3	clean	0.5402	0.9091	1.204	0.5402	0.9473	0.9717	11.24	discard	c2 ablation: no time stop
+v4-3	clean	0.7416	0.9737	1.2259	0.7416	1.0232	1.0514	11.23	discard	c2 ablation: rank by RSI(3) instead of VWAP depth
+v4-3	clean	0.795	0.8804	1.1753	0.795	0.9916	1.0366	11.46	discard	c2 ablation: random ranking seed 0
+v4-3	clean	0.779	0.7921	1.1523	0.779	0.9567	1.0162	11.28	discard	c2 ablation: random ranking seed 1
+v4-3	clean	0.7614	0.8532	1.1798	0.7614	0.9795	1.0284	11.36	discard	c2 ablation: random ranking seed 2
+v4-3	clean	0.6293	0.7527	1.2085	0.6293	0.9367	1.0014	11.31	discard	c2 ablation: random ranking seed 3
+v4-3	clean	0.7584	0.9165	1.1097	0.7584	0.9573	0.981	11.28	discard	c2 ablation: random ranking seed 4
+v4-3	clean	0.7505	0.9423	1.1746	0.7505	0.9929	1.0205	11.28	discard	c2 ablation: random ranking seed 5
+v4-3	clean	0.6668	0.7826	1.2147	0.6668	0.956	1.0177	11.31	discard	c2 ablation: random ranking seed 6
+v4-3	clean	0.6813	0.9169	1.2133	0.6813	0.9902	1.0232	11.28	discard	c2 ablation: random ranking seed 7
+v4-3	clean	0.7333	0.8913	1.1525	0.7333	0.9667	1.0006	11.24	discard	c2 ablation: random ranking seed 8
+v4-3	clean	0.7548	0.9065	1.2977	0.7548	1.0491	1.1033	11.34	discard	c2 ablation: random ranking seed 9
+v4-3	clean	0.7883	0.7883	0.8432	0.7983	0.8069	0.8202	13.68	discard	c2 (c) below-VWAP filter, rank RSI(3), no RSI threshold
+v4-3	clean	0.7892	0.7892	0.8467	0.8177	0.8139	0.8291	13.72	discard	c2 (d) no filter, rank RSI(3)
+v4-3	clean	0.7611	0.7611	0.8937	0.9407	0.8633	0.9033	13.62	discard	c2 (e) below-VWAP filter, rank VWAP depth (no RSI)
+v4-3	clean	0.7463	1.1011	1.2265	0.7463	1.0534	1.0545	9.48	discard	c2 (b) RSI<20 filter, rank RSI, rsi_max 16
+v4-3	clean	0.8089	0.8089	1.0669	0.8623	0.9385	0.9881	12.6	discard	c2 (b) RSI<20 filter, rank RSI, rsi_max 24
+v4-3	clean	0.7383	0.7383	0.9135	0.903	0.8572	0.9014	13.21	discard	c2 (b) RSI<20 filter, rank RSI, rsi_max 30
+v4-3	clean	0.691	0.691	0.9385	0.9491	0.8705	0.933	13.39	discard	c2 (b) RSI rank, rsi_n 2
+v4-3	clean	0.6691	1.4354	1.3521	0.6691	1.1717	1.1121	7.79	discard	c2 (b) RSI rank, rsi_n 4
+v4-3	clean	0.6568	1.3567	1.2617	0.6568	1.1047	1.0485	6.93	discard	c2 rsi-rank grid rsi_n=3 rsi_max=12.0
+v4-3	clean	0.6967	1.3593	1.2667	0.6967	1.1158	1.0634	8.25	discard	c2 rsi-rank grid rsi_n=3 rsi_max=14.0
+v4-3	clean	0.7463	1.1011	1.2265	0.7463	1.0534	1.0545	9.48	discard	c2 rsi-rank grid rsi_n=3 rsi_max=16.0
+v4-3	clean	0.7335	1.2333	1.2569	0.7335	1.0909	1.0692	10.44	discard	c2 rsi-rank grid rsi_n=3 rsi_max=18.0
+v4-3	clean	0.7416	0.9737	1.2259	0.7416	1.0232	1.0514	11.23	discard	c2 rsi-rank grid rsi_n=3 rsi_max=20.0
+v4-3	clean	0.8246	0.8695	1.1214	0.8246	0.9692	1.0108	12.12	discard	c2 rsi-rank grid rsi_n=3 rsi_max=22.0
+v4-3	clean	0.1129	1.1984	1.3585	0.1129	1.0051	0.9578	2.56	discard	c2 rsi-rank grid rsi_n=4 rsi_max=12.0
+v4-3	clean	0.1291	1.3419	1.2653	0.1291	0.9843	0.9087	3.98	discard	c2 rsi-rank grid rsi_n=4 rsi_max=14.0
+v4-3	clean	0.3859	1.3614	1.2641	0.3859	1.0501	0.978	5.34	discard	c2 rsi-rank grid rsi_n=4 rsi_max=16.0
+v4-3	clean	0.5107	1.402	1.2544	0.5107	1.0799	1.0017	6.65	discard	c2 rsi-rank grid rsi_n=4 rsi_max=18.0
+v4-3	clean	0.6691	1.4354	1.3521	0.6691	1.1717	1.1121	7.79	discard	c2 rsi-rank grid rsi_n=4 rsi_max=20.0
+v4-3	clean	0.5289	1.301	1.3274	0.5289	1.1006	1.05	8.74	discard	c2 rsi-rank grid rsi_n=4 rsi_max=22.0
+v4-3	clean	0.1309	0.8205	1.2762	0.1309	0.8697	0.8898	1.19	discard	c2 rsi-rank grid rsi_n=5 rsi_max=12.0
+v4-3	clean	0.0278	0.8165	1.3891	0.0278	0.8964	0.927	1.47	discard	c2 rsi-rank grid rsi_n=5 rsi_max=14.0
+v4-3	clean	0.1357	1.0769	1.294	0.1357	0.9498	0.92	2.23	discard	c2 rsi-rank grid rsi_n=5 rsi_max=16.0
+v4-3	clean	0.1895	1.4243	1.3907	0.1895	1.0814	1.0012	3.16	discard	c2 rsi-rank grid rsi_n=5 rsi_max=18.0
+v4-3	clean	0.1854	1.5274	1.3665	0.1854	1.0996	0.99	4.52	discard	c2 rsi-rank grid rsi_n=5 rsi_max=20.0
+v4-3	clean	0.4004	1.574	1.32	0.4004	1.127	1.0161	5.96	discard	c2 rsi-rank grid rsi_n=5 rsi_max=22.0
+v4-3	clean	0.7503	0.8419	1.1935	0.7503	0.9813	1.0337	11.21	discard	c2 pro-rata (no ranking: all eligible bought, weight min(1/K, capacity/n))
+v4-3	clean	0.7301	1.1635	1.2053	0.7301	1.0499	1.0344	10.41	discard	c2 pro-rata rsi_max 18
+v4-3	clean	0.7314	1.0812	1.2231	0.7314	1.0434	1.0476	9.44	discard	c2 pro-rata rsi_max 16
+v4-3	clean	0.6974	0.9713	1.1548	0.6974	0.9778	0.9914	9.82	discard	c2 pro-rata slots 16
+v4-3	clean	0.7305	0.7305	1.1636	0.8822	0.9751	1.0579	12.49	discard	c2 pro-rata slots 8
+v4-3	clean	0.8398	1.1099	1.1513	0.8398	1.0365	1.0354	10.35	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 0: fast=21,slow=58,sleeve_share=0.8882,trend_n=89,breadth_cut=0.552,rsi_n=3,rsi_max=16.0421,vwap_n=11,max_hold=22,slots=12
+v4-3	clean	0.447	0.7291	0.9865	0.447	0.78	0.8025	10.41	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 1: fast=18,slow=46,sleeve_share=0.7216,trend_n=98,breadth_cut=0.6011,rsi_n=3,rsi_max=23.964,vwap_n=11,max_hold=21,slots=14
+v4-3	clean	0.549	0.549	1.0992	1.0278	0.9392	1.0623	12.46	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 2: fast=18,slow=43,sleeve_share=0.836,trend_n=82,breadth_cut=0.4886,rsi_n=3,rsi_max=19.7296,vwap_n=12,max_hold=21,slots=12
+v4-3	clean	0.5202	1.1511	1.0451	0.5202	0.9141	0.8637	9.37	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 3: fast=20,slow=45,sleeve_share=0.6438,trend_n=88,breadth_cut=0.6461,rsi_n=3,rsi_max=18.9563,vwap_n=8,max_hold=23,slots=10
+v4-3	clean	0.6551	1.0227	1.2661	0.6551	1.0372	1.0544	8.99	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 4: fast=18,slow=58,sleeve_share=0.8031,trend_n=114,breadth_cut=0.6335,rsi_n=3,rsi_max=16.732,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.6072	0.8081	1.0696	0.6072	0.874	0.9036	12.46	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 5: fast=19,slow=52,sleeve_share=0.659,trend_n=96,breadth_cut=0.5575,rsi_n=3,rsi_max=22.5307,vwap_n=10,max_hold=24,slots=12
+v4-3	clean	0.6764	0.8024	1.113	0.6764	0.9123	0.9589	13.19	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 6: fast=21,slow=53,sleeve_share=0.8565,trend_n=86,breadth_cut=0.5857,rsi_n=3,rsi_max=19.22,vwap_n=8,max_hold=24,slots=11
+v4-3	clean	0.4772	0.4772	0.8022	1.1346	0.8117	0.919	16.75	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 7: fast=21,slow=46,sleeve_share=0.9197,trend_n=106,breadth_cut=0.5116,rsi_n=3,rsi_max=23.5596,vwap_n=12,max_hold=21,slots=10
+v4-3	clean	0.6986	1.1267	1.0506	0.6986	0.9598	0.9226	6.89	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 8: fast=18,slow=59,sleeve_share=0.8167,trend_n=87,breadth_cut=0.6922,rsi_n=3,rsi_max=20.5576,vwap_n=10,max_hold=19,slots=11
+v4-3	clean	0.649	0.9401	1.0452	0.649	0.8998	0.9034	12.56	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 9: fast=16,slow=58,sleeve_share=0.7897,trend_n=102,breadth_cut=0.5573,rsi_n=3,rsi_max=16.2016,vwap_n=9,max_hold=16,slots=10
+v4-3	clean	0.6701	0.9472	1.075	0.6701	0.9292	0.931	6.65	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 10: fast=24,slow=53,sleeve_share=0.777,trend_n=101,breadth_cut=0.6895,rsi_n=3,rsi_max=20.7223,vwap_n=11,max_hold=19,slots=12
+v4-3	clean	0.5574	0.5574	0.9231	0.689	0.7649	0.8355	15.97	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 11: fast=22,slow=58,sleeve_share=0.6883,trend_n=117,breadth_cut=0.4812,rsi_n=3,rsi_max=22.4842,vwap_n=9,max_hold=19,slots=14
+v4-3	clean	0.6344	1.0847	1.1537	0.6344	0.9796	0.9709	10.27	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 12: fast=16,slow=53,sleeve_share=0.8938,trend_n=101,breadth_cut=0.6542,rsi_n=3,rsi_max=17.5882,vwap_n=9,max_hold=17,slots=11
+v4-3	clean	0.4223	1.101	0.8652	0.4223	0.7936	0.7145	5.85	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 13: fast=24,slow=51,sleeve_share=0.7488,trend_n=91,breadth_cut=0.7085,rsi_n=3,rsi_max=23.8432,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.234	1.3043	1.3238	0.234	1.0329	0.9701	6.14	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 14: fast=22,slow=52,sleeve_share=0.7765,trend_n=115,breadth_cut=0.5788,rsi_n=4,rsi_max=16.5497,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.5482	1.2995	1.3989	0.5482	1.1415	1.1088	8.06	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 15: fast=18,slow=56,sleeve_share=0.8565,trend_n=109,breadth_cut=0.6311,rsi_n=4,rsi_max=18.6615,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.6783	0.8728	0.9375	0.6783	0.8371	0.8377	9.19	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 16: fast=18,slow=58,sleeve_share=0.9089,trend_n=84,breadth_cut=0.6249,rsi_n=3,rsi_max=20.7575,vwap_n=11,max_hold=18,slots=14
+v4-3	clean	0.5208	0.5208	0.8371	0.835	0.754	0.8326	15.43	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 17: fast=20,slow=53,sleeve_share=0.8433,trend_n=87,breadth_cut=0.4948,rsi_n=3,rsi_max=22.1122,vwap_n=11,max_hold=22,slots=10
+v4-3	clean	0.765	0.765	0.8618	0.8661	0.8268	0.8592	11.24	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 18: fast=23,slow=56,sleeve_share=0.9209,trend_n=101,breadth_cut=0.6998,rsi_n=2,rsi_max=16.2423,vwap_n=8,max_hold=18,slots=11
+v4-3	clean	0.4604	0.6406	1.1393	0.4604	0.8359	0.9027	11.18	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 19: fast=18,slow=51,sleeve_share=0.6525,trend_n=104,breadth_cut=0.5198,rsi_n=3,rsi_max=16.1686,vwap_n=9,max_hold=24,slots=12
+v4-3	clean	0.6387	0.7142	0.644	0.6387	0.6443	0.626	10.28	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 20: fast=22,slow=53,sleeve_share=0.8354,trend_n=88,breadth_cut=0.6179,rsi_n=2,rsi_max=22.4133,vwap_n=12,max_hold=23,slots=10
+v4-3	clean	0.4392	1.0287	0.9839	0.4392	0.85	0.7977	7.23	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 21: fast=19,slow=46,sleeve_share=0.6761,trend_n=105,breadth_cut=0.6714,rsi_n=3,rsi_max=22.9025,vwap_n=11,max_hold=17,slots=13
+v4-3	clean	0.6287	0.9192	0.9383	0.6287	0.8409	0.8256	9.87	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 22: fast=23,slow=44,sleeve_share=0.8236,trend_n=106,breadth_cut=0.6262,rsi_n=3,rsi_max=21.2895,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.2476	0.2476	0.7531	1.0453	0.7087	0.8589	22.9	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 23: fast=19,slow=54,sleeve_share=0.9175,trend_n=116,breadth_cut=0.5188,rsi_n=2,rsi_max=21.2065,vwap_n=9,max_hold=21,slots=14
+v4-3	clean	0.6411	0.7357	1.0875	0.6411	0.8743	0.9255	12.88	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 24: fast=19,slow=45,sleeve_share=0.7861,trend_n=106,breadth_cut=0.5043,rsi_n=3,rsi_max=17.0698,vwap_n=11,max_hold=23,slots=11
+v4-3	clean	0.4373	1.036	1.1934	0.4373	0.9456	0.932	9.59	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 25: fast=19,slow=51,sleeve_share=0.7088,trend_n=90,breadth_cut=0.5592,rsi_n=3,rsi_max=16.6523,vwap_n=11,max_hold=21,slots=11
+v4-3	clean	0.3702	0.3702	1.0013	0.7719	0.7779	0.9143	17.3	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 26: fast=17,slow=55,sleeve_share=0.6819,trend_n=85,breadth_cut=0.5114,rsi_n=2,rsi_max=23.2511,vwap_n=9,max_hold=18,slots=14
+v4-3	clean	0.6622	1.0748	1.1256	0.6622	0.9759	0.961	10.25	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 27: fast=21,slow=44,sleeve_share=0.7791,trend_n=115,breadth_cut=0.5701,rsi_n=3,rsi_max=16.7745,vwap_n=11,max_hold=22,slots=14
+v4-3	clean	0.2242	1.0966	1.2356	0.2242	0.9456	0.9085	7.32	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 28: fast=21,slow=47,sleeve_share=0.6605,trend_n=101,breadth_cut=0.6618,rsi_n=3,rsi_max=18.1299,vwap_n=10,max_hold=22,slots=14
+v4-3	clean	0.3634	1.06	0.9765	0.3634	0.8342	0.7657	8.19	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 29: fast=17,slow=44,sleeve_share=0.8959,trend_n=106,breadth_cut=0.653,rsi_n=4,rsi_max=23.5134,vwap_n=11,max_hold=22,slots=11
+v4-3	clean	0.6052	0.9888	1.0736	0.6052	0.9175	0.9115	9.14	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 30: fast=21,slow=44,sleeve_share=0.883,trend_n=110,breadth_cut=0.6531,rsi_n=3,rsi_max=19.0254,vwap_n=10,max_hold=16,slots=14
+v4-3	clean	0.6481	0.9732	1.0691	0.6481	0.9185	0.9164	14.71	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 31: fast=20,slow=48,sleeve_share=0.8154,trend_n=109,breadth_cut=0.5716,rsi_n=3,rsi_max=23.3557,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.8342	1.1505	0.8342	0.8455	0.9094	0.8308	6.57	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 32: fast=24,slow=43,sleeve_share=0.8681,trend_n=113,breadth_cut=0.7009,rsi_n=3,rsi_max=16.7345,vwap_n=12,max_hold=17,slots=10
+v4-3	clean	0.8193	1.1035	0.8673	0.8193	0.8641	0.8385	9.3	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 33: fast=21,slow=49,sleeve_share=0.8801,trend_n=88,breadth_cut=0.6995,rsi_n=3,rsi_max=22.1529,vwap_n=8,max_hold=20,slots=10
+v4-3	clean	0.7239	0.7239	1.0055	0.8366	0.8813	0.9379	12.17	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 34: fast=19,slow=46,sleeve_share=0.8703,trend_n=98,breadth_cut=0.4936,rsi_n=4,rsi_max=23.1096,vwap_n=12,max_hold=18,slots=11
+v4-3	clean	0.6795	0.6915	1.0243	0.6795	0.8436	0.8976	13.74	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 35: fast=18,slow=42,sleeve_share=0.6506,trend_n=100,breadth_cut=0.5096,rsi_n=3,rsi_max=22.8838,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.2736	1.0909	1.1544	0.2736	0.9142	0.8671	8.86	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 36: fast=18,slow=51,sleeve_share=0.7305,trend_n=101,breadth_cut=0.6308,rsi_n=3,rsi_max=19.1648,vwap_n=11,max_hold=23,slots=10
+v4-3	clean	0.6633	1.412	1.134	0.6633	1.0505	0.9672	8.7	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 37: fast=17,slow=42,sleeve_share=0.9535,trend_n=118,breadth_cut=0.5354,rsi_n=4,rsi_max=17.6625,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.7011	0.7011	0.9821	0.8787	0.8752	0.9366	13.19	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 38: fast=16,slow=46,sleeve_share=0.832,trend_n=83,breadth_cut=0.5368,rsi_n=3,rsi_max=23.0469,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.8011	0.8011	1.0599	0.8302	0.9237	0.9727	16.91	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 39: fast=22,slow=57,sleeve_share=0.8581,trend_n=109,breadth_cut=0.5524,rsi_n=3,rsi_max=22.0522,vwap_n=9,max_hold=23,slots=12
+v4-3	clean	0.4839	0.7914	1.2842	0.4839	0.9495	1.0063	8.64	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 40: fast=19,slow=59,sleeve_share=0.6896,trend_n=101,breadth_cut=0.502,rsi_n=4,rsi_max=20.603,vwap_n=11,max_hold=18,slots=13
+v4-3	clean	0.8805	1.0081	0.9866	0.8805	0.9435	0.9423	16.42	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 41: fast=22,slow=53,sleeve_share=0.9442,trend_n=97,breadth_cut=0.5796,rsi_n=3,rsi_max=22.6804,vwap_n=9,max_hold=21,slots=11
+v4-3	clean	0.4969	1.0485	1.308	0.4969	1.0244	1.0256	9.41	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 42: fast=20,slow=55,sleeve_share=0.6609,trend_n=109,breadth_cut=0.4837,rsi_n=4,rsi_max=19.7494,vwap_n=10,max_hold=22,slots=12
+v4-3	clean	0.8238	1.1443	0.8238	0.8422	0.8893	0.8146	6.53	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 43: fast=22,slow=42,sleeve_share=0.8201,trend_n=102,breadth_cut=0.7037,rsi_n=2,rsi_max=19.6226,vwap_n=11,max_hold=20,slots=10
+v4-3	clean	0.7599	0.7599	0.9937	0.8302	0.8844	0.93	13.84	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 44: fast=21,slow=44,sleeve_share=0.7026,trend_n=115,breadth_cut=0.5275,rsi_n=3,rsi_max=22.0023,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	0.8711	0.8711	1.1993	0.9281	1.0337	1.0949	11.72	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 45: fast=20,slow=52,sleeve_share=0.9021,trend_n=107,breadth_cut=0.634,rsi_n=3,rsi_max=20.4666,vwap_n=10,max_hold=22,slots=11
+v4-3	clean	0.5475	0.9037	0.9846	0.5475	0.8441	0.8328	7.12	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 46: fast=20,slow=55,sleeve_share=0.8012,trend_n=94,breadth_cut=0.6784,rsi_n=3,rsi_max=22.7578,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	0.6321	0.7929	1.0952	0.6321	0.8874	0.9265	13.43	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 47: fast=16,slow=48,sleeve_share=0.9153,trend_n=103,breadth_cut=0.6139,rsi_n=3,rsi_max=21.4214,vwap_n=10,max_hold=19,slots=10
+v4-3	clean	0.6424	0.7872	1.0218	0.6424	0.8549	0.8843	12.57	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 48: fast=18,slow=46,sleeve_share=0.7778,trend_n=120,breadth_cut=0.5646,rsi_n=3,rsi_max=18.973,vwap_n=10,max_hold=24,slots=14
+v4-3	clean	0.8305	0.8456	0.8305	1.2506	0.9335	0.9698	14.06	joint	J abl c2 (vwap rank, rsi_max 20) joint+-0.2 draw 49: fast=19,slow=45,sleeve_share=0.923,trend_n=100,breadth_cut=0.6445,rsi_n=2,rsi_max=22.9325,vwap_n=9,max_hold=20,slots=11
+v4-3	clean	0.6872	1.1357	1.1968	0.6872	1.0284	1.0152	9.18	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 0: fast=21,slow=58,sleeve_share=0.8882,trend_n=89,breadth_cut=0.552,rsi_n=3,rsi_max=14.4379,vwap_n=11,max_hold=22,slots=12
+v4-3	clean	0.4566	0.8914	0.9491	0.4566	0.8017	0.7813	9.78	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 1: fast=18,slow=46,sleeve_share=0.7216,trend_n=98,breadth_cut=0.6011,rsi_n=3,rsi_max=21.5676,vwap_n=11,max_hold=21,slots=14
+v4-3	clean	0.891	0.9137	0.9728	0.891	0.9163	0.9337	11.37	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 2: fast=18,slow=43,sleeve_share=0.836,trend_n=82,breadth_cut=0.4886,rsi_n=3,rsi_max=17.7567,vwap_n=12,max_hold=21,slots=12
+v4-3	clean	0.4921	1.2189	1.0837	0.4921	0.9447	0.8811	8.81	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 3: fast=20,slow=45,sleeve_share=0.6438,trend_n=88,breadth_cut=0.6461,rsi_n=3,rsi_max=17.0607,vwap_n=8,max_hold=23,slots=10
+v4-3	clean	0.6363	1.0811	1.282	0.6363	1.0527	1.0599	8.13	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 4: fast=18,slow=58,sleeve_share=0.8031,trend_n=114,breadth_cut=0.6335,rsi_n=3,rsi_max=15.0588,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.6844	0.7076	1.1059	0.6844	0.8908	0.9547	11.63	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 5: fast=19,slow=52,sleeve_share=0.659,trend_n=96,breadth_cut=0.5575,rsi_n=3,rsi_max=20.2776,vwap_n=10,max_hold=24,slots=12
+v4-3	clean	0.7639	1.0708	0.9669	0.7639	0.9072	0.884	12.04	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 6: fast=21,slow=53,sleeve_share=0.8565,trend_n=86,breadth_cut=0.5857,rsi_n=3,rsi_max=17.298,vwap_n=8,max_hold=24,slots=11
+v4-3	clean	0.2025	0.2025	0.8688	1.176	0.7901	0.9701	15.96	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 7: fast=21,slow=46,sleeve_share=0.9197,trend_n=106,breadth_cut=0.5116,rsi_n=3,rsi_max=21.2036,vwap_n=12,max_hold=21,slots=10
+v4-3	clean	0.7777	1.295	1.0979	0.7777	1.0424	0.9779	6.48	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 8: fast=18,slow=59,sleeve_share=0.8167,trend_n=87,breadth_cut=0.6922,rsi_n=3,rsi_max=18.5018,vwap_n=10,max_hold=19,slots=11
+v4-3	clean	0.6594	0.9379	1.1602	0.6594	0.9619	0.9833	11.5	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 9: fast=16,slow=58,sleeve_share=0.7897,trend_n=102,breadth_cut=0.5573,rsi_n=3,rsi_max=14.5814,vwap_n=9,max_hold=16,slots=10
+v4-3	clean	0.7249	0.9161	1.0245	0.7249	0.9082	0.9136	6.1	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 10: fast=24,slow=53,sleeve_share=0.777,trend_n=101,breadth_cut=0.6895,rsi_n=3,rsi_max=18.6501,vwap_n=11,max_hold=19,slots=12
+v4-3	clean	0.646	0.646	0.9386	0.7292	0.8035	0.8589	14.64	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 11: fast=22,slow=58,sleeve_share=0.6883,trend_n=117,breadth_cut=0.4812,rsi_n=3,rsi_max=20.2358,vwap_n=9,max_hold=19,slots=14
+v4-3	clean	0.729	1.1538	1.216	0.729	1.0522	1.0432	9.47	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 12: fast=16,slow=53,sleeve_share=0.8938,trend_n=101,breadth_cut=0.6542,rsi_n=3,rsi_max=15.8294,vwap_n=9,max_hold=17,slots=11
+v4-3	clean	0.4673	1.0752	0.8492	0.4673	0.7954	0.7172	5.54	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 13: fast=24,slow=51,sleeve_share=0.7488,trend_n=91,breadth_cut=0.7085,rsi_n=3,rsi_max=21.4588,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.2101	1.2201	1.3476	0.2101	1.0312	0.9865	4.97	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 14: fast=22,slow=52,sleeve_share=0.7765,trend_n=115,breadth_cut=0.5788,rsi_n=4,rsi_max=14.8948,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.6862	1.5161	1.3967	0.6862	1.224	1.1539	6.93	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 15: fast=18,slow=56,sleeve_share=0.8565,trend_n=109,breadth_cut=0.6311,rsi_n=4,rsi_max=16.7953,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.7994	1.0967	0.9039	0.7994	0.8949	0.849	8.27	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 16: fast=18,slow=58,sleeve_share=0.9089,trend_n=84,breadth_cut=0.6249,rsi_n=3,rsi_max=18.6817,vwap_n=11,max_hold=18,slots=14
+v4-3	clean	0.584	0.584	1.0662	0.861	0.8874	0.9876	14.62	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 17: fast=20,slow=53,sleeve_share=0.8433,trend_n=87,breadth_cut=0.4948,rsi_n=3,rsi_max=19.901,vwap_n=11,max_hold=22,slots=10
+v4-3	clean	0.6	0.6	0.8577	0.7629	0.7627	0.8196	11.03	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 18: fast=23,slow=56,sleeve_share=0.9209,trend_n=101,breadth_cut=0.6998,rsi_n=2,rsi_max=14.6181,vwap_n=8,max_hold=18,slots=11
+v4-3	clean	0.4674	0.7445	1.2261	0.4674	0.9052	0.9623	10.05	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 19: fast=18,slow=51,sleeve_share=0.6525,trend_n=104,breadth_cut=0.5198,rsi_n=3,rsi_max=14.5517,vwap_n=9,max_hold=24,slots=12
+v4-3	clean	0.637	0.6538	0.6717	0.637	0.6445	0.645	10.34	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 20: fast=22,slow=53,sleeve_share=0.8354,trend_n=88,breadth_cut=0.6179,rsi_n=2,rsi_max=20.172,vwap_n=12,max_hold=23,slots=10
+v4-3	clean	0.521	0.8439	0.9699	0.521	0.8176	0.8138	6.95	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 21: fast=19,slow=46,sleeve_share=0.6761,trend_n=105,breadth_cut=0.6714,rsi_n=3,rsi_max=20.6122,vwap_n=11,max_hold=17,slots=13
+v4-3	clean	0.5881	0.9946	0.937	0.5881	0.8473	0.8128	9.08	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 22: fast=23,slow=44,sleeve_share=0.8236,trend_n=106,breadth_cut=0.6262,rsi_n=3,rsi_max=19.1606,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.3077	0.3077	0.802	1.0379	0.7413	0.8859	22.37	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 23: fast=19,slow=54,sleeve_share=0.9175,trend_n=116,breadth_cut=0.5188,rsi_n=2,rsi_max=19.0858,vwap_n=9,max_hold=21,slots=14
+v4-3	clean	0.732	0.732	1.1202	0.7724	0.9245	0.9915	11.66	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 24: fast=19,slow=45,sleeve_share=0.7861,trend_n=106,breadth_cut=0.5043,rsi_n=3,rsi_max=15.3628,vwap_n=11,max_hold=23,slots=11
+v4-3	clean	0.3487	1.0406	1.2527	0.3487	0.9524	0.938	8.76	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 25: fast=19,slow=51,sleeve_share=0.7088,trend_n=90,breadth_cut=0.5592,rsi_n=3,rsi_max=14.987,vwap_n=11,max_hold=21,slots=11
+v4-3	clean	0.3248	0.3248	0.9899	0.7284	0.7498	0.8919	17.03	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 26: fast=17,slow=55,sleeve_share=0.6819,trend_n=85,breadth_cut=0.5114,rsi_n=2,rsi_max=20.926,vwap_n=9,max_hold=18,slots=14
+v4-3	clean	0.597	1.0449	1.1718	0.597	0.9767	0.9709	9.33	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 27: fast=21,slow=44,sleeve_share=0.7791,trend_n=115,breadth_cut=0.5701,rsi_n=3,rsi_max=15.097,vwap_n=11,max_hold=22,slots=14
+v4-3	clean	0.2519	1.0343	1.1172	0.2519	0.8759	0.8347	6.69	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 28: fast=21,slow=47,sleeve_share=0.6605,trend_n=101,breadth_cut=0.6618,rsi_n=3,rsi_max=16.3169,vwap_n=10,max_hold=22,slots=14
+v4-3	clean	0.449	1.3123	1.0627	0.449	0.9434	0.8484	7.17	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 29: fast=17,slow=44,sleeve_share=0.8959,trend_n=106,breadth_cut=0.653,rsi_n=4,rsi_max=21.1621,vwap_n=11,max_hold=22,slots=11
+v4-3	clean	0.585	1.0004	0.9884	0.585	0.873	0.8471	8.44	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 30: fast=21,slow=44,sleeve_share=0.883,trend_n=110,breadth_cut=0.6531,rsi_n=3,rsi_max=17.1229,vwap_n=10,max_hold=16,slots=14
+v4-3	clean	0.6178	0.7476	1.0295	0.6178	0.8427	0.8807	13.71	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 31: fast=20,slow=48,sleeve_share=0.8154,trend_n=109,breadth_cut=0.5716,rsi_n=3,rsi_max=21.0201,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.7883	1.0557	0.8586	0.7883	0.8814	0.8261	6.16	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 32: fast=24,slow=43,sleeve_share=0.8681,trend_n=113,breadth_cut=0.7009,rsi_n=3,rsi_max=15.061,vwap_n=12,max_hold=17,slots=10
+v4-3	clean	0.7598	1.0615	0.9049	0.7598	0.8679	0.8451	8.69	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 33: fast=21,slow=49,sleeve_share=0.8801,trend_n=88,breadth_cut=0.6995,rsi_n=3,rsi_max=19.9376,vwap_n=8,max_hold=20,slots=10
+v4-3	clean	0.7327	0.7327	1.0176	0.9509	0.9178	0.9831	10.75	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 34: fast=19,slow=46,sleeve_share=0.8703,trend_n=98,breadth_cut=0.4936,rsi_n=4,rsi_max=20.7986,vwap_n=12,max_hold=18,slots=11
+v4-3	clean	0.6181	0.6181	1.0487	0.7709	0.863	0.9452	12.89	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 35: fast=18,slow=42,sleeve_share=0.6506,trend_n=100,breadth_cut=0.5096,rsi_n=3,rsi_max=20.5954,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.4086	0.9854	1.264	0.4086	0.9771	0.9821	8.4	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 36: fast=18,slow=51,sleeve_share=0.7305,trend_n=101,breadth_cut=0.6308,rsi_n=3,rsi_max=17.2483,vwap_n=11,max_hold=23,slots=10
+v4-3	clean	0.6478	1.1702	1.2681	0.6478	1.0679	1.0559	7.1	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 37: fast=17,slow=42,sleeve_share=0.9535,trend_n=118,breadth_cut=0.5354,rsi_n=4,rsi_max=15.8963,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.7972	0.7972	0.9768	0.8743	0.8904	0.9301	12.17	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 38: fast=16,slow=46,sleeve_share=0.832,trend_n=83,breadth_cut=0.5368,rsi_n=3,rsi_max=20.7422,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.775	0.775	1.0067	0.8095	0.8855	0.9299	15.43	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 39: fast=22,slow=57,sleeve_share=0.8581,trend_n=109,breadth_cut=0.5524,rsi_n=3,rsi_max=19.847,vwap_n=9,max_hold=23,slots=12
+v4-3	clean	0.5473	0.8986	1.2548	0.5473	0.9749	1.0068	7.48	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 40: fast=19,slow=59,sleeve_share=0.6896,trend_n=101,breadth_cut=0.502,rsi_n=4,rsi_max=18.5427,vwap_n=11,max_hold=18,slots=13
+v4-3	clean	0.7516	0.7516	0.9188	1.0667	0.9003	0.9553	15.26	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 41: fast=22,slow=53,sleeve_share=0.9442,trend_n=97,breadth_cut=0.5796,rsi_n=3,rsi_max=20.4124,vwap_n=9,max_hold=21,slots=11
+v4-3	clean	0.439	1.1658	1.3312	0.439	1.0522	1.0234	8.11	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 42: fast=20,slow=55,sleeve_share=0.6609,trend_n=109,breadth_cut=0.4837,rsi_n=4,rsi_max=17.7744,vwap_n=10,max_hold=22,slots=12
+v4-3	clean	0.7872	0.7872	0.7932	1.0137	0.8262	0.8434	6.5	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 43: fast=22,slow=42,sleeve_share=0.8201,trend_n=102,breadth_cut=0.7037,rsi_n=2,rsi_max=17.6603,vwap_n=11,max_hold=20,slots=10
+v4-3	clean	0.7092	0.8049	1.0033	0.7092	0.8683	0.8946	12.66	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 44: fast=21,slow=44,sleeve_share=0.7026,trend_n=115,breadth_cut=0.5275,rsi_n=3,rsi_max=19.8021,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	1.0417	1.0484	1.1368	1.0417	1.065	1.0883	10.96	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 45: fast=20,slow=52,sleeve_share=0.9021,trend_n=107,breadth_cut=0.634,rsi_n=3,rsi_max=18.4199,vwap_n=10,max_hold=22,slots=11
+v4-3	clean	0.581	0.8461	0.9657	0.581	0.8289	0.8302	6.72	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 46: fast=20,slow=55,sleeve_share=0.8012,trend_n=94,breadth_cut=0.6784,rsi_n=3,rsi_max=20.482,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	0.6514	0.6717	1.1867	0.6514	0.9133	0.9942	12.62	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 47: fast=16,slow=48,sleeve_share=0.9153,trend_n=103,breadth_cut=0.6139,rsi_n=3,rsi_max=19.2792,vwap_n=10,max_hold=19,slots=10
+v4-3	clean	0.4839	0.9474	1.0479	0.4839	0.8618	0.8478	11.58	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 48: fast=18,slow=46,sleeve_share=0.7778,trend_n=120,breadth_cut=0.5646,rsi_n=3,rsi_max=17.0757,vwap_n=10,max_hold=24,slots=14
+v4-3	clean	0.5885	0.5885	0.8457	1.1674	0.8567	0.9466	14.22	joint	J abl c2 rsi-rank rsi_max 18 joint+-0.2 draw 49: fast=19,slow=45,sleeve_share=0.923,trend_n=100,breadth_cut=0.6445,rsi_n=2,rsi_max=20.6392,vwap_n=9,max_hold=20,slots=11
+v4-3	clean	0.9015	1.1083	1.0892	0.9015	1.0202	1.0136	10.25	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 0: fast=21,slow=58,sleeve_share=0.8882,trend_n=89,breadth_cut=0.552,rsi_n=3,rsi_max=16.0421,vwap_n=11,max_hold=22,slots=12
+v4-3	clean	0.5076	0.75	0.9092	0.5076	0.7603	0.7696	10.36	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 1: fast=18,slow=46,sleeve_share=0.7216,trend_n=98,breadth_cut=0.6011,rsi_n=3,rsi_max=23.964,vwap_n=11,max_hold=21,slots=14
+v4-3	clean	0.5105	0.5105	0.9815	0.9124	0.8404	0.9459	12.29	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 2: fast=18,slow=43,sleeve_share=0.836,trend_n=82,breadth_cut=0.4886,rsi_n=3,rsi_max=19.7296,vwap_n=12,max_hold=21,slots=12
+v4-3	clean	0.4599	1.0937	0.9864	0.4599	0.8592	0.8041	9.28	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 3: fast=20,slow=45,sleeve_share=0.6438,trend_n=88,breadth_cut=0.6461,rsi_n=3,rsi_max=18.9563,vwap_n=8,max_hold=23,slots=10
+v4-3	clean	0.6515	1.0476	1.2214	0.6515	1.0187	1.0233	8.91	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 4: fast=18,slow=58,sleeve_share=0.8031,trend_n=114,breadth_cut=0.6335,rsi_n=3,rsi_max=16.732,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.5993	0.754	1.0211	0.5993	0.8361	0.8695	12.37	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 5: fast=19,slow=52,sleeve_share=0.659,trend_n=96,breadth_cut=0.5575,rsi_n=3,rsi_max=22.5307,vwap_n=10,max_hold=24,slots=12
+v4-3	clean	0.5798	0.7688	0.9899	0.5798	0.8192	0.8463	12.97	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 6: fast=21,slow=53,sleeve_share=0.8565,trend_n=86,breadth_cut=0.5857,rsi_n=3,rsi_max=19.22,vwap_n=8,max_hold=24,slots=11
+v4-3	clean	0.3563	0.3563	0.7328	1.155	0.7494	0.8755	16.8	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 7: fast=21,slow=46,sleeve_share=0.9197,trend_n=106,breadth_cut=0.5116,rsi_n=3,rsi_max=23.5596,vwap_n=12,max_hold=21,slots=10
+v4-3	clean	0.6805	1.0939	0.9624	0.6805	0.9057	0.8563	6.85	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 8: fast=18,slow=59,sleeve_share=0.8167,trend_n=87,breadth_cut=0.6922,rsi_n=3,rsi_max=20.5576,vwap_n=10,max_hold=19,slots=11
+v4-3	clean	0.6895	0.92	0.9896	0.6895	0.8772	0.8795	12.56	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 9: fast=16,slow=58,sleeve_share=0.7897,trend_n=102,breadth_cut=0.5573,rsi_n=3,rsi_max=16.2016,vwap_n=9,max_hold=16,slots=10
+v4-3	clean	0.5824	0.8004	1.0033	0.5824	0.8385	0.8561	6.61	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 10: fast=24,slow=53,sleeve_share=0.777,trend_n=101,breadth_cut=0.6895,rsi_n=3,rsi_max=20.7223,vwap_n=11,max_hold=19,slots=12
+v4-3	clean	0.4898	0.4898	0.8666	0.6683	0.715	0.7915	15.69	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 11: fast=22,slow=58,sleeve_share=0.6883,trend_n=117,breadth_cut=0.4812,rsi_n=3,rsi_max=22.4842,vwap_n=9,max_hold=19,slots=14
+v4-3	clean	0.6218	1.0284	1.0463	0.6218	0.9106	0.8955	10.26	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 12: fast=16,slow=53,sleeve_share=0.8938,trend_n=101,breadth_cut=0.6542,rsi_n=3,rsi_max=17.5882,vwap_n=9,max_hold=17,slots=11
+v4-3	clean	0.4018	1.0408	0.7841	0.4018	0.7375	0.6534	5.84	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 13: fast=24,slow=51,sleeve_share=0.7488,trend_n=91,breadth_cut=0.7085,rsi_n=3,rsi_max=23.8432,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.2456	1.2797	1.3381	0.2456	1.0386	0.9826	6.14	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 14: fast=22,slow=52,sleeve_share=0.7765,trend_n=115,breadth_cut=0.5788,rsi_n=4,rsi_max=16.5497,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.5627	1.2935	1.344	0.5627	1.1157	1.0768	8.03	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 15: fast=18,slow=56,sleeve_share=0.8565,trend_n=109,breadth_cut=0.6311,rsi_n=4,rsi_max=18.6615,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.6611	0.8417	0.8651	0.6611	0.7897	0.7832	9.12	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 16: fast=18,slow=58,sleeve_share=0.9089,trend_n=84,breadth_cut=0.6249,rsi_n=3,rsi_max=20.7575,vwap_n=11,max_hold=18,slots=14
+v4-3	clean	0.5468	0.5468	0.8257	0.7418	0.7288	0.7913	15.43	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 17: fast=20,slow=53,sleeve_share=0.8433,trend_n=87,breadth_cut=0.4948,rsi_n=3,rsi_max=22.1122,vwap_n=11,max_hold=22,slots=10
+v4-3	clean	0.6883	0.7013	0.8088	0.6883	0.739	0.7619	11.39	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 18: fast=23,slow=56,sleeve_share=0.9209,trend_n=101,breadth_cut=0.6998,rsi_n=2,rsi_max=16.2423,vwap_n=8,max_hold=18,slots=11
+v4-3	clean	0.495	0.6248	1.0921	0.495	0.8173	0.8831	11.06	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 19: fast=18,slow=51,sleeve_share=0.6525,trend_n=104,breadth_cut=0.5198,rsi_n=3,rsi_max=16.1686,vwap_n=9,max_hold=24,slots=12
+v4-3	clean	0.4196	0.6208	0.7434	0.4196	0.6255	0.6315	10.8	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 20: fast=22,slow=53,sleeve_share=0.8354,trend_n=88,breadth_cut=0.6179,rsi_n=2,rsi_max=22.4133,vwap_n=12,max_hold=23,slots=10
+v4-3	clean	0.4819	0.8376	0.9124	0.4819	0.7789	0.7636	7.21	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 21: fast=19,slow=46,sleeve_share=0.6761,trend_n=105,breadth_cut=0.6714,rsi_n=3,rsi_max=22.9025,vwap_n=11,max_hold=17,slots=13
+v4-3	clean	0.6439	0.8119	0.8915	0.6439	0.7958	0.7974	9.78	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 22: fast=23,slow=44,sleeve_share=0.8236,trend_n=106,breadth_cut=0.6262,rsi_n=3,rsi_max=21.2895,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.0113	0.0113	0.6653	0.8259	0.5415	0.7215	22.7	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 23: fast=19,slow=54,sleeve_share=0.9175,trend_n=116,breadth_cut=0.5188,rsi_n=2,rsi_max=21.2065,vwap_n=9,max_hold=21,slots=14
+v4-3	clean	0.6812	0.6812	0.9826	0.746	0.8382	0.8937	12.75	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 24: fast=19,slow=45,sleeve_share=0.7861,trend_n=106,breadth_cut=0.5043,rsi_n=3,rsi_max=17.0698,vwap_n=11,max_hold=23,slots=11
+v4-3	clean	0.4104	1.0089	1.0943	0.4104	0.8845	0.86	9.48	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 25: fast=19,slow=51,sleeve_share=0.7088,trend_n=90,breadth_cut=0.5592,rsi_n=3,rsi_max=16.6523,vwap_n=11,max_hold=21,slots=11
+v4-3	clean	0.2288	0.2288	0.9201	0.5573	0.6456	0.7864	17.32	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 26: fast=17,slow=55,sleeve_share=0.6819,trend_n=85,breadth_cut=0.5114,rsi_n=2,rsi_max=23.2511,vwap_n=9,max_hold=18,slots=14
+v4-3	clean	0.6344	1.029	1.072	0.6344	0.9311	0.9168	10.13	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 27: fast=21,slow=44,sleeve_share=0.7791,trend_n=115,breadth_cut=0.5701,rsi_n=3,rsi_max=16.7745,vwap_n=11,max_hold=22,slots=14
+v4-3	clean	0.2298	1.1071	1.1692	0.2298	0.9143	0.8632	7.26	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 28: fast=21,slow=47,sleeve_share=0.6605,trend_n=101,breadth_cut=0.6618,rsi_n=3,rsi_max=18.1299,vwap_n=10,max_hold=22,slots=14
+v4-3	clean	0.3888	1.0214	0.9347	0.3888	0.8139	0.749	8.13	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 29: fast=17,slow=44,sleeve_share=0.8959,trend_n=106,breadth_cut=0.653,rsi_n=4,rsi_max=23.5134,vwap_n=11,max_hold=22,slots=11
+v4-3	clean	0.6265	0.9718	1.0318	0.6265	0.8987	0.8888	9.14	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 30: fast=21,slow=44,sleeve_share=0.883,trend_n=110,breadth_cut=0.6531,rsi_n=3,rsi_max=19.0254,vwap_n=10,max_hold=16,slots=14
+v4-3	clean	0.6794	0.7798	0.9386	0.6794	0.8201	0.8424	14.54	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 31: fast=20,slow=48,sleeve_share=0.8154,trend_n=109,breadth_cut=0.5716,rsi_n=3,rsi_max=23.3557,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.7735	1.1017	0.7735	0.8348	0.8623	0.7805	6.55	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 32: fast=24,slow=43,sleeve_share=0.8681,trend_n=113,breadth_cut=0.7009,rsi_n=3,rsi_max=16.7345,vwap_n=12,max_hold=17,slots=10
+v4-3	clean	0.6539	0.9662	0.7408	0.6539	0.737	0.7028	9.25	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 33: fast=21,slow=49,sleeve_share=0.8801,trend_n=88,breadth_cut=0.6995,rsi_n=3,rsi_max=22.1529,vwap_n=8,max_hold=20,slots=10
+v4-3	clean	0.706	0.706	0.9421	0.8497	0.8479	0.8994	12.09	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 34: fast=19,slow=46,sleeve_share=0.8703,trend_n=98,breadth_cut=0.4936,rsi_n=4,rsi_max=23.1096,vwap_n=12,max_hold=18,slots=11
+v4-3	clean	0.5832	0.5832	0.9713	0.6874	0.7948	0.8662	13.6	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 35: fast=18,slow=42,sleeve_share=0.6506,trend_n=100,breadth_cut=0.5096,rsi_n=3,rsi_max=22.8838,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.233	0.897	1.0792	0.233	0.8237	0.8083	8.77	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 36: fast=18,slow=51,sleeve_share=0.7305,trend_n=101,breadth_cut=0.6308,rsi_n=3,rsi_max=19.1648,vwap_n=11,max_hold=23,slots=10
+v4-3	clean	0.6633	1.3628	1.1303	0.6633	1.0369	0.9646	8.67	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 37: fast=17,slow=42,sleeve_share=0.9535,trend_n=118,breadth_cut=0.5354,rsi_n=4,rsi_max=17.6625,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.7245	0.7245	0.859	0.8309	0.8053	0.8395	13.04	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 38: fast=16,slow=46,sleeve_share=0.832,trend_n=83,breadth_cut=0.5368,rsi_n=3,rsi_max=23.0469,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.7472	0.7472	0.8883	0.7896	0.8147	0.8464	16.65	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 39: fast=22,slow=57,sleeve_share=0.8581,trend_n=109,breadth_cut=0.5524,rsi_n=3,rsi_max=22.0522,vwap_n=9,max_hold=23,slots=12
+v4-3	clean	0.548	0.7893	1.2459	0.548	0.9459	1.002	8.61	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 40: fast=19,slow=59,sleeve_share=0.6896,trend_n=101,breadth_cut=0.502,rsi_n=4,rsi_max=20.603,vwap_n=11,max_hold=18,slots=13
+v4-3	clean	0.7936	0.8566	0.7936	0.918	0.8239	0.8271	16.3	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 41: fast=22,slow=53,sleeve_share=0.9442,trend_n=97,breadth_cut=0.5796,rsi_n=3,rsi_max=22.6804,vwap_n=9,max_hold=21,slots=11
+v4-3	clean	0.5597	1.0316	1.2539	0.5597	1.0097	1.0118	9.33	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 42: fast=20,slow=55,sleeve_share=0.6609,trend_n=109,breadth_cut=0.4837,rsi_n=4,rsi_max=19.7494,vwap_n=10,max_hold=22,slots=12
+v4-3	clean	0.6231	0.9458	0.789	0.6231	0.7708	0.7227	6.79	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 43: fast=22,slow=42,sleeve_share=0.8201,trend_n=102,breadth_cut=0.7037,rsi_n=2,rsi_max=19.6226,vwap_n=11,max_hold=20,slots=10
+v4-3	clean	0.7026	0.7026	0.9252	0.7582	0.8183	0.8605	13.62	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 44: fast=21,slow=44,sleeve_share=0.7026,trend_n=115,breadth_cut=0.5275,rsi_n=3,rsi_max=22.0023,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	0.7747	0.7747	1.0883	0.9036	0.9498	1.0121	11.67	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 45: fast=20,slow=52,sleeve_share=0.9021,trend_n=107,breadth_cut=0.634,rsi_n=3,rsi_max=20.4666,vwap_n=10,max_hold=22,slots=11
+v4-3	clean	0.5363	0.8578	0.8609	0.5363	0.7689	0.7456	7.04	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 46: fast=20,slow=55,sleeve_share=0.8012,trend_n=94,breadth_cut=0.6784,rsi_n=3,rsi_max=22.7578,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	0.6582	0.6582	1.0538	0.7592	0.8719	0.9445	13.46	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 47: fast=16,slow=48,sleeve_share=0.9153,trend_n=103,breadth_cut=0.6139,rsi_n=3,rsi_max=21.4214,vwap_n=10,max_hold=19,slots=10
+v4-3	clean	0.6377	0.806	1.0228	0.6377	0.8589	0.8832	12.49	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 48: fast=18,slow=46,sleeve_share=0.7778,trend_n=120,breadth_cut=0.5646,rsi_n=3,rsi_max=18.973,vwap_n=10,max_hold=24,slots=14
+v4-3	clean	0.5595	0.5595	0.7677	1.1864	0.8131	0.8974	14.44	joint	J abl c2 pro-rata rsi_max 20 joint+-0.2 draw 49: fast=19,slow=45,sleeve_share=0.923,trend_n=100,breadth_cut=0.6445,rsi_n=2,rsi_max=22.9325,vwap_n=9,max_hold=20,slots=11
+v4-3	clean	0.6917	1.0904	1.2314	0.6917	1.0378	1.0399	9.19	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 0: fast=21,slow=58,sleeve_share=0.8882,trend_n=89,breadth_cut=0.552,rsi_n=3,rsi_max=14.4379,vwap_n=11,max_hold=22,slots=12
+v4-3	clean	0.4454	0.8649	0.9356	0.4454	0.7874	0.7689	9.73	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 1: fast=18,slow=46,sleeve_share=0.7216,trend_n=98,breadth_cut=0.6011,rsi_n=3,rsi_max=21.5676,vwap_n=11,max_hold=21,slots=14
+v4-3	clean	0.8656	0.8656	0.9494	0.9265	0.9033	0.9292	11.28	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 2: fast=18,slow=43,sleeve_share=0.836,trend_n=82,breadth_cut=0.4886,rsi_n=3,rsi_max=17.7567,vwap_n=12,max_hold=21,slots=12
+v4-3	clean	0.4201	1.2	1.0383	0.4201	0.8988	0.8282	8.74	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 3: fast=20,slow=45,sleeve_share=0.6438,trend_n=88,breadth_cut=0.6461,rsi_n=3,rsi_max=17.0607,vwap_n=8,max_hold=23,slots=10
+v4-3	clean	0.5577	1.049	1.2896	0.5577	1.031	1.0404	8.11	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 4: fast=18,slow=58,sleeve_share=0.8031,trend_n=114,breadth_cut=0.6335,rsi_n=3,rsi_max=15.0588,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.6296	0.6599	1.0818	0.6296	0.8543	0.921	11.53	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 5: fast=19,slow=52,sleeve_share=0.659,trend_n=96,breadth_cut=0.5575,rsi_n=3,rsi_max=20.2776,vwap_n=10,max_hold=24,slots=12
+v4-3	clean	0.6127	1.0154	0.9833	0.6127	0.8715	0.8516	11.97	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 6: fast=21,slow=53,sleeve_share=0.8565,trend_n=86,breadth_cut=0.5857,rsi_n=3,rsi_max=17.298,vwap_n=8,max_hold=24,slots=11
+v4-3	clean	0.3505	0.3505	0.7992	1.2023	0.7911	0.9293	15.89	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 7: fast=21,slow=46,sleeve_share=0.9197,trend_n=106,breadth_cut=0.5116,rsi_n=3,rsi_max=21.2036,vwap_n=12,max_hold=21,slots=10
+v4-3	clean	0.7574	1.2966	1.018	0.7574	0.9968	0.917	6.5	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 8: fast=18,slow=59,sleeve_share=0.8167,trend_n=87,breadth_cut=0.6922,rsi_n=3,rsi_max=18.5018,vwap_n=10,max_hold=19,slots=11
+v4-3	clean	0.6343	0.9144	1.1266	0.6343	0.9327	0.9537	11.43	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 9: fast=16,slow=58,sleeve_share=0.7897,trend_n=102,breadth_cut=0.5573,rsi_n=3,rsi_max=14.5814,vwap_n=9,max_hold=16,slots=10
+v4-3	clean	0.6486	0.9932	1.0424	0.6486	0.9176	0.9024	6.16	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 10: fast=24,slow=53,sleeve_share=0.777,trend_n=101,breadth_cut=0.6895,rsi_n=3,rsi_max=18.6501,vwap_n=11,max_hold=19,slots=12
+v4-3	clean	0.5879	0.5879	0.9331	0.6807	0.7747	0.8393	14.38	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 11: fast=22,slow=58,sleeve_share=0.6883,trend_n=117,breadth_cut=0.4812,rsi_n=3,rsi_max=20.2358,vwap_n=9,max_hold=19,slots=14
+v4-3	clean	0.7091	1.1128	1.1519	0.7091	1.0039	0.9941	9.44	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 12: fast=16,slow=53,sleeve_share=0.8938,trend_n=101,breadth_cut=0.6542,rsi_n=3,rsi_max=15.8294,vwap_n=9,max_hold=17,slots=11
+v4-3	clean	0.3969	1.1048	0.8473	0.3969	0.7861	0.6951	5.56	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 13: fast=24,slow=51,sleeve_share=0.7488,trend_n=91,breadth_cut=0.7085,rsi_n=3,rsi_max=21.4588,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.2101	1.2201	1.3489	0.2101	1.0317	0.9868	4.97	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 14: fast=22,slow=52,sleeve_share=0.7765,trend_n=115,breadth_cut=0.5788,rsi_n=4,rsi_max=14.8948,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.7726	1.4741	1.3649	0.7726	1.2185	1.1584	6.91	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 15: fast=18,slow=56,sleeve_share=0.8565,trend_n=109,breadth_cut=0.6311,rsi_n=4,rsi_max=16.7953,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.7872	1.0809	0.9148	0.7872	0.8951	0.8536	8.23	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 16: fast=18,slow=58,sleeve_share=0.9089,trend_n=84,breadth_cut=0.6249,rsi_n=3,rsi_max=18.6817,vwap_n=11,max_hold=18,slots=14
+v4-3	clean	0.5208	0.5208	0.934	0.8251	0.797	0.8889	14.47	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 17: fast=20,slow=53,sleeve_share=0.8433,trend_n=87,breadth_cut=0.4948,rsi_n=3,rsi_max=19.901,vwap_n=11,max_hold=22,slots=10
+v4-3	clean	0.5003	0.7873	0.7995	0.5003	0.7003	0.6888	11.07	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 18: fast=23,slow=56,sleeve_share=0.9209,trend_n=101,breadth_cut=0.6998,rsi_n=2,rsi_max=14.6181,vwap_n=8,max_hold=18,slots=11
+v4-3	clean	0.4557	0.7361	1.2058	0.4557	0.8908	0.9459	9.99	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 19: fast=18,slow=51,sleeve_share=0.6525,trend_n=104,breadth_cut=0.5198,rsi_n=3,rsi_max=14.5517,vwap_n=9,max_hold=24,slots=12
+v4-3	clean	0.4991	0.5697	0.7063	0.4991	0.6105	0.6274	10.68	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 20: fast=22,slow=53,sleeve_share=0.8354,trend_n=88,breadth_cut=0.6179,rsi_n=2,rsi_max=20.172,vwap_n=12,max_hold=23,slots=10
+v4-3	clean	0.4681	0.8559	0.9742	0.4681	0.8106	0.8004	6.95	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 21: fast=19,slow=46,sleeve_share=0.6761,trend_n=105,breadth_cut=0.6714,rsi_n=3,rsi_max=20.6122,vwap_n=11,max_hold=17,slots=13
+v4-3	clean	0.522	1.0064	0.8945	0.522	0.8123	0.7645	9.03	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 22: fast=23,slow=44,sleeve_share=0.8236,trend_n=106,breadth_cut=0.6262,rsi_n=3,rsi_max=19.1606,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.1617	0.1617	0.7019	0.8555	0.6069	0.7553	22.21	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 23: fast=19,slow=54,sleeve_share=0.9175,trend_n=116,breadth_cut=0.5188,rsi_n=2,rsi_max=19.0858,vwap_n=9,max_hold=21,slots=14
+v4-3	clean	0.6927	0.6927	1.0894	0.8683	0.9257	1.0047	11.65	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 24: fast=19,slow=45,sleeve_share=0.7861,trend_n=106,breadth_cut=0.5043,rsi_n=3,rsi_max=15.3628,vwap_n=11,max_hold=23,slots=11
+v4-3	clean	0.4107	1.0312	1.1856	0.4107	0.9351	0.9182	8.7	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 25: fast=19,slow=51,sleeve_share=0.7088,trend_n=90,breadth_cut=0.5592,rsi_n=3,rsi_max=14.987,vwap_n=11,max_hold=21,slots=11
+v4-3	clean	0.2606	0.2606	0.9266	0.6086	0.6714	0.8087	16.86	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 26: fast=17,slow=55,sleeve_share=0.6819,trend_n=85,breadth_cut=0.5114,rsi_n=2,rsi_max=20.926,vwap_n=9,max_hold=18,slots=14
+v4-3	clean	0.6032	0.991	1.1703	0.6032	0.9657	0.9722	9.27	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 27: fast=21,slow=44,sleeve_share=0.7791,trend_n=115,breadth_cut=0.5701,rsi_n=3,rsi_max=15.097,vwap_n=11,max_hold=22,slots=14
+v4-3	clean	0.2244	1.0122	1.1191	0.2244	0.8656	0.8278	6.67	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 28: fast=21,slow=47,sleeve_share=0.6605,trend_n=101,breadth_cut=0.6618,rsi_n=3,rsi_max=16.3169,vwap_n=10,max_hold=22,slots=14
+v4-3	clean	0.5021	1.2955	1.0057	0.5021	0.9239	0.8287	7.17	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 29: fast=17,slow=44,sleeve_share=0.8959,trend_n=106,breadth_cut=0.653,rsi_n=4,rsi_max=21.1621,vwap_n=11,max_hold=22,slots=11
+v4-3	clean	0.584	1.0129	1.0266	0.584	0.8959	0.873	8.45	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 30: fast=21,slow=44,sleeve_share=0.883,trend_n=110,breadth_cut=0.6531,rsi_n=3,rsi_max=17.1229,vwap_n=10,max_hold=16,slots=14
+v4-3	clean	0.6034	0.7356	0.982	0.6034	0.813	0.8454	13.56	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 31: fast=20,slow=48,sleeve_share=0.8154,trend_n=109,breadth_cut=0.5716,rsi_n=3,rsi_max=21.0201,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.742	1.0373	0.9208	0.742	0.8953	0.8507	6.13	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 32: fast=24,slow=43,sleeve_share=0.8681,trend_n=113,breadth_cut=0.7009,rsi_n=3,rsi_max=15.061,vwap_n=12,max_hold=17,slots=10
+v4-3	clean	0.6287	0.9885	0.7916	0.6287	0.7624	0.7277	8.63	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 33: fast=21,slow=49,sleeve_share=0.8801,trend_n=88,breadth_cut=0.6995,rsi_n=3,rsi_max=19.9376,vwap_n=8,max_hold=20,slots=10
+v4-3	clean	0.758	0.758	0.9471	0.9411	0.8853	0.9341	10.74	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 34: fast=19,slow=46,sleeve_share=0.8703,trend_n=98,breadth_cut=0.4936,rsi_n=4,rsi_max=20.7986,vwap_n=12,max_hold=18,slots=11
+v4-3	clean	0.5676	0.5676	1.0039	0.6909	0.8086	0.8891	12.7	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 35: fast=18,slow=42,sleeve_share=0.6506,trend_n=100,breadth_cut=0.5096,rsi_n=3,rsi_max=20.5954,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.3269	0.9634	1.1366	0.3269	0.8901	0.8746	8.39	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 36: fast=18,slow=51,sleeve_share=0.7305,trend_n=101,breadth_cut=0.6308,rsi_n=3,rsi_max=17.2483,vwap_n=11,max_hold=23,slots=10
+v4-3	clean	0.6478	1.1702	1.2606	0.6478	1.0641	1.0506	7.1	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 37: fast=17,slow=42,sleeve_share=0.9535,trend_n=118,breadth_cut=0.5354,rsi_n=4,rsi_max=15.8963,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.7102	0.7102	0.9461	0.8081	0.8401	0.8885	12.03	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 38: fast=16,slow=46,sleeve_share=0.832,trend_n=83,breadth_cut=0.5368,rsi_n=3,rsi_max=20.7422,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.6837	0.7603	0.9214	0.6837	0.8067	0.8325	15.28	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 39: fast=22,slow=57,sleeve_share=0.8581,trend_n=109,breadth_cut=0.5524,rsi_n=3,rsi_max=19.847,vwap_n=9,max_hold=23,slots=12
+v4-3	clean	0.5502	0.8969	1.251	0.5502	0.9736	1.0057	7.47	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 40: fast=19,slow=59,sleeve_share=0.6896,trend_n=101,breadth_cut=0.502,rsi_n=4,rsi_max=18.5427,vwap_n=11,max_hold=18,slots=13
+v4-3	clean	0.7819	0.7819	0.859	0.9456	0.8458	0.876	15.15	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 41: fast=22,slow=53,sleeve_share=0.9442,trend_n=97,breadth_cut=0.5796,rsi_n=3,rsi_max=20.4124,vwap_n=9,max_hold=21,slots=11
+v4-3	clean	0.4822	1.153	1.3043	0.4822	1.0465	1.0204	8.07	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 42: fast=20,slow=55,sleeve_share=0.6609,trend_n=109,breadth_cut=0.4837,rsi_n=4,rsi_max=17.7744,vwap_n=10,max_hold=22,slots=12
+v4-3	clean	0.6011	0.997	0.7971	0.6011	0.7822	0.7215	6.75	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 43: fast=22,slow=42,sleeve_share=0.8201,trend_n=102,breadth_cut=0.7037,rsi_n=2,rsi_max=17.6603,vwap_n=11,max_hold=20,slots=10
+v4-3	clean	0.754	0.7835	1.0056	0.754	0.8759	0.9113	12.58	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 44: fast=21,slow=44,sleeve_share=0.7026,trend_n=115,breadth_cut=0.5275,rsi_n=3,rsi_max=19.8021,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	0.9197	1.0615	1.1158	0.9197	1.0286	1.036	10.94	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 45: fast=20,slow=52,sleeve_share=0.9021,trend_n=107,breadth_cut=0.634,rsi_n=3,rsi_max=18.4199,vwap_n=10,max_hold=22,slots=11
+v4-3	clean	0.4886	0.8454	0.977	0.4886	0.8145	0.8107	6.75	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 46: fast=20,slow=55,sleeve_share=0.8012,trend_n=94,breadth_cut=0.6784,rsi_n=3,rsi_max=20.482,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	0.6907	0.6907	1.0744	0.6908	0.8721	0.9354	12.53	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 47: fast=16,slow=48,sleeve_share=0.9153,trend_n=103,breadth_cut=0.6139,rsi_n=3,rsi_max=19.2792,vwap_n=10,max_hold=19,slots=10
+v4-3	clean	0.4792	0.8841	1.0558	0.4792	0.8511	0.852	11.46	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 48: fast=18,slow=46,sleeve_share=0.7778,trend_n=120,breadth_cut=0.5646,rsi_n=3,rsi_max=17.0757,vwap_n=10,max_hold=24,slots=14
+v4-3	clean	0.5205	0.5205	0.7537	1.1716	0.7933	0.8833	14.32	joint	J abl c2 pro-rata rsi_max 18 joint+-0.2 draw 49: fast=19,slow=45,sleeve_share=0.923,trend_n=100,breadth_cut=0.6445,rsi_n=2,rsi_max=20.6392,vwap_n=9,max_hold=20,slots=11
+v4-3	clean	0.2781	0.2781	0.8608	0.8239	0.6982	0.8382	16.32	discard	trigger = NIFTYBEES close < its VWAP10 (no breadth param), vwap rank
+v4-3	clean	0.2791	0.2791	0.7923	0.9273	0.6904	0.8282	16.28	discard	trigger = NIFTYBEES < VWAP10, rsi rank
+v4-3	clean	0.3739	0.3739	0.7769	0.603	0.6263	0.7101	13.17	discard	trigger = NIFTYBEES < VWAP10, rsi_max 16
+v4-3	clean	0.8226	0.8226	1.0671	0.875	0.9436	0.991	11.82	discard	breadth cut 0.5 (majority), rsi rank, rsi_max 16
+v4-3	clean	0.8264	1.306	1.131	0.8264	1.0662	1.0175	8.69	discard	breadth cut 0.5 (majority), rsi rank, rsi_max 12
+v4-3	clean	0.6511	1.1626	1.0179	0.6511	0.9376	0.8865	7.43	discard	rsi-rank grid breadth_cut=0.45 rsi_max=10.0
+v4-3	clean	0.7314	0.9698	0.9838	0.7314	0.9008	0.8893	9.66	discard	rsi-rank grid breadth_cut=0.45 rsi_max=12.0
+v4-3	clean	0.7163	0.9557	1.0358	0.7163	0.9214	0.9187	11.51	discard	rsi-rank grid breadth_cut=0.45 rsi_max=14.0
+v4-3	clean	0.4498	0.4498	0.9846	0.7914	0.7949	0.9097	13.32	discard	rsi-rank grid breadth_cut=0.45 rsi_max=16.0
+v4-3	clean	0.5961	0.5961	0.9272	0.8807	0.8247	0.9025	15.06	discard	rsi-rank grid breadth_cut=0.45 rsi_max=18.0
+v4-3	clean	0.4016	0.4016	0.9204	0.9991	0.8053	0.9383	16.57	discard	rsi-rank grid breadth_cut=0.45 rsi_max=20.0
+v4-3	clean	0.6488	1.2831	1.0877	0.6488	0.9982	0.933	6.75	discard	rsi-rank grid breadth_cut=0.5 rsi_max=10.0
+v4-3	clean	0.8326	1.2499	1.1397	0.8326	1.062	1.0255	10.38	discard	rsi-rank grid breadth_cut=0.5 rsi_max=14.0
+v4-3	clean	0.7855	0.7855	1.032	0.9227	0.9308	0.9849	13.22	discard	rsi-rank grid breadth_cut=0.5 rsi_max=18.0
+v4-3	clean	0.575	0.575	0.9909	1.0752	0.9039	1.0093	14.41	discard	rsi-rank grid breadth_cut=0.5 rsi_max=20.0
+v4-3	clean	0.6508	1.3345	1.1272	0.6508	1.0299	0.9607	6.45	discard	rsi-rank grid breadth_cut=0.55 rsi_max=10.0
+v4-3	clean	0.7521	1.3487	1.1592	0.7521	1.0696	1.0125	8.22	discard	rsi-rank grid breadth_cut=0.55 rsi_max=12.0
+v4-3	clean	0.7367	1.2719	1.1586	0.7367	1.0518	1.0069	9.79	discard	rsi-rank grid breadth_cut=0.55 rsi_max=14.0
+v4-3	clean	0.8219	0.8845	1.0517	0.8219	0.9353	0.9635	11.13	discard	rsi-rank grid breadth_cut=0.55 rsi_max=16.0
+v4-3	clean	0.7861	0.8301	1.0467	0.7861	0.912	0.9489	12.37	discard	rsi-rank grid breadth_cut=0.55 rsi_max=18.0
+v4-3	clean	0.6359	0.6359	0.9912	0.8539	0.8598	0.9349	13.44	discard	rsi-rank grid breadth_cut=0.55 rsi_max=20.0
+v4-3	clean	0.5749	1.0841	1.0611	0.5749	0.9335	0.8934	7.97	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 0: sleeve_share=0.84,trend_n=116,breadth_cut=0.6662,rsi_n=3,rsi_max=18.4013,vwap_n=11,max_hold=16,slots=14
+v4-3	clean	0.7107	0.7107	0.927	0.8329	0.8366	0.8851	13.23	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 1: sleeve_share=0.8951,trend_n=99,breadth_cut=0.5527,rsi_n=3,rsi_max=18.039,vwap_n=10,max_hold=20,slots=12
+v4-3	clean	0.7672	1.4953	1.233	0.7672	1.1471	1.0657	8.58	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 2: sleeve_share=0.9586,trend_n=112,breadth_cut=0.6293,rsi_n=4,rsi_max=17.7225,vwap_n=9,max_hold=21,slots=10
+v4-3	clean	0.5016	1.1359	1.2406	0.5016	1.0117	0.9866	8.24	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 3: sleeve_share=0.6514,trend_n=101,breadth_cut=0.5919,rsi_n=4,rsi_max=21.0338,vwap_n=10,max_hold=20,slots=11
+v4-3	clean	0.5493	1.1212	1.0845	0.5493	0.9361	0.8998	9.22	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 4: sleeve_share=0.6438,trend_n=88,breadth_cut=0.6461,rsi_n=3,rsi_max=18.9563,vwap_n=8,max_hold=23,slots=10
+v4-3	clean	0.7368	0.8881	1.0105	0.7368	0.897	0.9084	10.81	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 5: sleeve_share=0.7256,trend_n=115,breadth_cut=0.6023,rsi_n=3,rsi_max=21.1177,vwap_n=11,max_hold=17,slots=12
+v4-3	clean	0.5746	0.9043	0.9791	0.5746	0.8425	0.8334	12.46	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 6: sleeve_share=0.8025,trend_n=115,breadth_cut=0.5667,rsi_n=3,rsi_max=16.474,vwap_n=10,max_hold=19,slots=10
+v4-3	clean	0.8304	1.4716	0.8304	0.934	0.9834	0.8387	6.3	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 7: sleeve_share=0.9012,trend_n=95,breadth_cut=0.7149,rsi_n=3,rsi_max=20.8405,vwap_n=11,max_hold=21,slots=10
+v4-3	clean	0.816	0.9836	1.082	0.816	0.9721	0.9822	14.03	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 8: sleeve_share=0.7809,trend_n=90,breadth_cut=0.5766,rsi_n=3,rsi_max=23.7426,vwap_n=9,max_hold=21,slots=11
+v4-3	clean	0.4818	0.4818	0.8022	1.1597	0.8196	0.9279	16.72	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 9: sleeve_share=0.9197,trend_n=106,breadth_cut=0.5116,rsi_n=3,rsi_max=23.5596,vwap_n=12,max_hold=21,slots=10
+v4-3	clean	0.7094	0.8901	1.0228	0.7094	0.8991	0.9079	10.73	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 10: sleeve_share=0.7016,trend_n=117,breadth_cut=0.6126,rsi_n=3,rsi_max=23.0725,vwap_n=11,max_hold=21,slots=11
+v4-3	clean	0.7112	0.7112	1.0593	0.8371	0.9064	0.974	13.13	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 11: sleeve_share=0.7715,trend_n=90,breadth_cut=0.4891,rsi_n=3,rsi_max=19.7418,vwap_n=10,max_hold=19,slots=13
+v4-3	clean	0.6519	0.6519	1.0337	0.7204	0.8491	0.9169	13.48	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 12: sleeve_share=0.6481,trend_n=95,breadth_cut=0.4873,rsi_n=3,rsi_max=23.7372,vwap_n=11,max_hold=19,slots=12
+v4-3	clean	0.7923	1.0907	1.1545	0.7923	1.0241	1.0216	9.8	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 13: sleeve_share=0.9193,trend_n=94,breadth_cut=0.6217,rsi_n=3,rsi_max=18.8433,vwap_n=10,max_hold=22,slots=14
+v4-3	clean	0.6356	0.6356	0.9456	0.7582	0.8121	0.8734	15.97	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 14: sleeve_share=0.6883,trend_n=117,breadth_cut=0.4812,rsi_n=3,rsi_max=22.4842,vwap_n=9,max_hold=19,slots=14
+v4-3	clean	0.76	1.0143	1.2635	0.76	1.0563	1.0817	9.24	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 15: sleeve_share=0.6446,trend_n=105,breadth_cut=0.6703,rsi_n=3,rsi_max=21.8068,vwap_n=9,max_hold=18,slots=11
+v4-3	clean	0.5849	1.1817	1.1257	0.5849	0.9845	0.9417	6.26	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 16: sleeve_share=0.6974,trend_n=94,breadth_cut=0.7075,rsi_n=3,rsi_max=18.7205,vwap_n=9,max_hold=24,slots=12
+v4-3	clean	0.8365	0.8428	1.1439	0.8365	0.9769	1.0295	13.04	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 17: sleeve_share=0.9537,trend_n=101,breadth_cut=0.6051,rsi_n=3,rsi_max=21.9421,vwap_n=10,max_hold=19,slots=14
+v4-3	clean	0.5879	0.5879	1.0564	1.0364	0.9286	1.0391	13.78	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 18: sleeve_share=0.7717,trend_n=117,breadth_cut=0.4965,rsi_n=3,rsi_max=20.1561,vwap_n=12,max_hold=18,slots=13
+v4-3	clean	0.5875	1.3356	1.3673	0.5875	1.1431	1.1002	8.03	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 19: sleeve_share=0.8565,trend_n=109,breadth_cut=0.6311,rsi_n=4,rsi_max=18.6615,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.6739	0.9745	1.1422	0.6739	0.9716	0.9778	8.15	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 20: sleeve_share=0.7081,trend_n=117,breadth_cut=0.6816,rsi_n=3,rsi_max=20.8302,vwap_n=10,max_hold=21,slots=13
+v4-3	clean	0.8514	0.912	1.1541	0.8514	1.0029	1.0412	13.48	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 21: sleeve_share=0.7381,trend_n=118,breadth_cut=0.5918,rsi_n=3,rsi_max=21.0818,vwap_n=9,max_hold=16,slots=12
+v4-3	clean	0.5337	0.8389	0.85	0.5337	0.7578	0.7374	9.87	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 22: sleeve_share=0.8845,trend_n=113,breadth_cut=0.6552,rsi_n=3,rsi_max=23.3068,vwap_n=11,max_hold=23,slots=12
+v4-3	clean	0.2259	0.2259	0.9046	1.1024	0.795	0.9762	21.96	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 23: sleeve_share=0.933,trend_n=82,breadth_cut=0.4873,rsi_n=2,rsi_max=18.0221,vwap_n=9,max_hold=18,slots=12
+v4-3	clean	0.6145	0.7077	1.1169	0.6145	0.8793	0.9395	11.11	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 24: sleeve_share=0.6525,trend_n=104,breadth_cut=0.5198,rsi_n=3,rsi_max=16.1686,vwap_n=9,max_hold=24,slots=12
+v4-3	clean	0.7179	0.8634	0.9768	0.7179	0.8642	0.8799	12.93	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 25: sleeve_share=0.8997,trend_n=106,breadth_cut=0.6266,rsi_n=3,rsi_max=20.5952,vwap_n=8,max_hold=22,slots=14
+v4-3	clean	0.7046	1.1306	1.154	0.7046	1.0112	0.9936	10.74	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 26: sleeve_share=0.9133,trend_n=82,breadth_cut=0.5613,rsi_n=3,rsi_max=16.9017,vwap_n=11,max_hold=22,slots=11
+v4-3	clean	0.5207	0.5207	0.907	0.83	0.7879	0.8743	19.77	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 27: sleeve_share=0.9161,trend_n=112,breadth_cut=0.511,rsi_n=3,rsi_max=23.061,vwap_n=9,max_hold=21,slots=13
+v4-3	clean	0.6196	0.9322	0.8773	0.6196	0.8088	0.7797	8.53	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 28: sleeve_share=0.835,trend_n=84,breadth_cut=0.6387,rsi_n=3,rsi_max=22.5911,vwap_n=11,max_hold=19,slots=13
+v4-3	clean	0.2548	0.2548	0.7443	1.0561	0.7092	0.8573	22.9	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 29: sleeve_share=0.9175,trend_n=116,breadth_cut=0.5188,rsi_n=2,rsi_max=21.2065,vwap_n=9,max_hold=21,slots=14
+v4-3	clean	0.5793	1.2007	1.141	0.5793	0.9891	0.9429	9.19	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 30: sleeve_share=0.7614,trend_n=90,breadth_cut=0.5896,rsi_n=3,rsi_max=16.8088,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.873	0.873	1.1436	0.922	1.0022	1.0538	13.08	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 31: sleeve_share=0.9058,trend_n=95,breadth_cut=0.5692,rsi_n=3,rsi_max=17.7205,vwap_n=9,max_hold=19,slots=12
+v4-3	clean	0.5913	0.9526	1.1017	0.5913	0.9276	0.9253	8.39	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 32: sleeve_share=0.6661,trend_n=110,breadth_cut=0.619,rsi_n=3,rsi_max=16.6204,vwap_n=11,max_hold=17,slots=10
+v4-3	clean	0.6631	1.2609	0.9892	0.6631	0.9574	0.8707	5.58	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 33: sleeve_share=0.6818,trend_n=83,breadth_cut=0.6975,rsi_n=3,rsi_max=18.4513,vwap_n=11,max_hold=21,slots=10
+v4-3	clean	0.6778	1.0461	1.1521	0.6778	0.9875	0.9839	10.16	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 34: sleeve_share=0.7791,trend_n=115,breadth_cut=0.5701,rsi_n=3,rsi_max=16.7745,vwap_n=11,max_hold=22,slots=14
+v4-3	clean	0.2345	0.2345	0.9715	1.1235	0.8246	1.0157	17.93	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 35: sleeve_share=0.8557,trend_n=95,breadth_cut=0.4954,rsi_n=3,rsi_max=22.0597,vwap_n=9,max_hold=18,slots=12
+v4-3	clean	0.5663	0.5663	0.8774	0.9803	0.822	0.9072	16.31	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 36: sleeve_share=0.8795,trend_n=116,breadth_cut=0.5102,rsi_n=3,rsi_max=22.3963,vwap_n=11,max_hold=22,slots=14
+v4-3	clean	0.9514	1.0217	1.0666	0.9514	1.0011	1.0149	11.89	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 37: sleeve_share=0.9405,trend_n=114,breadth_cut=0.6665,rsi_n=3,rsi_max=21.1298,vwap_n=9,max_hold=22,slots=13
+v4-3	clean	0.8584	0.9182	1.1857	0.8584	1.0194	1.064	10.92	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 38: sleeve_share=0.8708,trend_n=98,breadth_cut=0.5708,rsi_n=3,rsi_max=16.2667,vwap_n=11,max_hold=20,slots=11
+v4-3	clean	0.7213	0.99	1.0602	0.7213	0.9372	0.9358	14.67	joint	J abl c2 (fast/slow fixed) joint+-0.2 draw 39: sleeve_share=0.8154,trend_n=109,breadth_cut=0.5716,rsi_n=3,rsi_max=23.3557,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.8578	0.8578	1.1298	0.9949	1.0141	1.0723	13.26	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 0: fast=21,slow=58,sleeve_share=0.8882,trend_n=89,vwap_n=9,max_hold=23,slots=10
+v4-3	clean	0.7442	0.8161	1.2288	0.7442	0.9924	1.0563	11.59	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 1: fast=23,slow=56,sleeve_share=0.7897,trend_n=92,vwap_n=9,max_hold=18,slots=12
+v4-3	clean	0.664	1.0094	1.0095	0.664	0.8974	0.8844	13.94	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 2: fast=20,slow=51,sleeve_share=0.9586,trend_n=112,vwap_n=10,max_hold=24,slots=11
+v4-3	clean	0.4509	0.9501	1.1941	0.4509	0.9373	0.9435	8.57	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 3: fast=17,slow=52,sleeve_share=0.6541,trend_n=81,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.5949	0.8795	1.171	0.5949	0.9409	0.973	11.82	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 4: fast=21,slow=50,sleeve_share=0.799,trend_n=90,vwap_n=8,max_hold=18,slots=13
+v4-3	clean	0.5976	0.844	1.1359	0.5976	0.9155	0.9459	10.88	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 5: fast=18,slow=47,sleeve_share=0.6412,trend_n=113,vwap_n=9,max_hold=18,slots=14
+v4-3	clean	0.6681	0.8769	1.0066	0.6681	0.8701	0.8841	14.14	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 6: fast=20,slow=57,sleeve_share=0.8447,trend_n=110,vwap_n=8,max_hold=20,slots=12
+v4-3	clean	0.6319	1.0064	1.2797	0.6319	1.0339	1.0547	10.98	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 7: fast=23,slow=47,sleeve_share=0.8314,trend_n=82,vwap_n=10,max_hold=19,slots=10
+v4-3	clean	0.6372	0.8461	1.1489	0.6372	0.9298	0.9675	12.38	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 8: fast=23,slow=48,sleeve_share=0.9532,trend_n=104,vwap_n=10,max_hold=21,slots=13
+v4-3	clean	0.6733	0.9046	1.1416	0.6733	0.948	0.9757	12.5	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 9: fast=17,slow=49,sleeve_share=0.7167,trend_n=96,vwap_n=8,max_hold=24,slots=11
+v4-3	clean	0.7817	0.8516	1.0322	0.7817	0.9082	0.9376	12.89	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 10: fast=21,slow=46,sleeve_share=0.9197,trend_n=106,vwap_n=9,max_hold=23,slots=14
+v4-3	clean	0.3893	0.9094	1.0769	0.3893	0.86	0.8507	8.34	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 11: fast=23,slow=51,sleeve_share=0.6865,trend_n=88,vwap_n=12,max_hold=20,slots=10
+v4-3	clean	0.776	0.9948	1.2348	0.776	1.0417	1.0691	12.03	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 12: fast=23,slow=53,sleeve_share=0.8223,trend_n=95,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.651	0.7949	1.0649	0.651	0.8839	0.9183	10.4	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 13: fast=23,slow=49,sleeve_share=0.8152,trend_n=93,vwap_n=11,max_hold=16,slots=11
+v4-3	clean	0.794	0.885	1.0117	0.794	0.9053	0.9276	12.23	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 14: fast=16,slow=42,sleeve_share=0.9495,trend_n=106,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.5942	0.8881	1.2381	0.5942	0.9764	1.0148	10.88	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 15: fast=19,slow=52,sleeve_share=0.8588,trend_n=94,vwap_n=10,max_hold=22,slots=14
+v4-3	clean	0.5627	0.8521	1.1567	0.5627	0.9236	0.9525	9.21	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 16: fast=17,slow=59,sleeve_share=0.6417,trend_n=110,vwap_n=11,max_hold=17,slots=12
+v4-3	clean	0.6584	1.0911	1.0861	0.6584	0.9538	0.9334	12.81	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 17: fast=23,slow=40,sleeve_share=0.8411,trend_n=112,vwap_n=10,max_hold=22,slots=11
+v4-3	clean	0.4777	0.959	1.0358	0.4777	0.8684	0.8474	9.18	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 18: fast=18,slow=47,sleeve_share=0.6974,trend_n=94,vwap_n=12,max_hold=21,slots=11
+v4-3	clean	0.6728	0.8166	1.2819	0.6728	0.9996	1.0649	11.26	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 19: fast=18,slow=59,sleeve_share=0.7822,trend_n=119,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.6204	0.9746	1.1502	0.6204	0.9533	0.9622	12.38	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 20: fast=22,slow=52,sleeve_share=0.7765,trend_n=115,vwap_n=10,max_hold=23,slots=10
+v4-3	clean	0.4947	0.8491	0.8734	0.4947	0.7628	0.7415	10.48	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 21: fast=19,slow=50,sleeve_share=0.9443,trend_n=90,vwap_n=11,max_hold=21,slots=13
+v4-3	clean	0.8242	0.8242	1.2029	0.8362	1.0036	1.0683	11.8	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 22: fast=21,slow=59,sleeve_share=0.7465,trend_n=96,vwap_n=9,max_hold=16,slots=11
+v4-3	clean	0.4292	0.8453	1.2314	0.4292	0.9221	0.955	9.79	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 23: fast=23,slow=57,sleeve_share=0.676,trend_n=104,vwap_n=10,max_hold=21,slots=13
+v4-3	clean	0.4688	0.7826	1.0557	0.4688	0.8339	0.8559	10.75	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 24: fast=18,slow=59,sleeve_share=0.7891,trend_n=105,vwap_n=11,max_hold=17,slots=10
+v4-3	clean	0.5763	0.8433	1.0074	0.5763	0.841	0.8557	14.08	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 25: fast=19,slow=55,sleeve_share=0.9009,trend_n=109,vwap_n=8,max_hold=23,slots=13
+v4-3	clean	0.6668	0.6668	1.0978	0.7752	0.8992	0.9775	13.44	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 26: fast=23,slow=50,sleeve_share=0.933,trend_n=82,vwap_n=8,max_hold=16,slots=11
+v4-3	clean	0.5874	0.8592	1.2225	0.5874	0.9627	1.0044	10.15	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 27: fast=18,slow=44,sleeve_share=0.8215,trend_n=82,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.4617	0.8909	0.8925	0.4617	0.7719	0.7447	11.02	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 28: fast=16,slow=46,sleeve_share=0.9403,trend_n=102,vwap_n=11,max_hold=21,slots=13
+v4-3	clean	0.3826	0.7562	1.0983	0.3826	0.8284	0.857	9.14	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 29: fast=18,slow=51,sleeve_share=0.6527,trend_n=112,vwap_n=12,max_hold=23,slots=10
+v4-3	clean	0.4295	0.8478	1.0083	0.4295	0.8159	0.8128	8.96	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 30: fast=19,slow=46,sleeve_share=0.6761,trend_n=105,vwap_n=11,max_hold=19,slots=14
+v4-3	clean	0.8207	1.0544	1.0379	0.8207	0.964	0.9541	13.64	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 31: fast=22,slow=43,sleeve_share=0.8854,trend_n=115,vwap_n=9,max_hold=21,slots=13
+v4-3	clean	0.4542	0.8498	0.9865	0.4542	0.8104	0.8048	11.03	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 32: fast=21,slow=42,sleeve_share=0.8516,trend_n=105,vwap_n=11,max_hold=22,slots=11
+v4-3	clean	0.7252	0.7252	1.089	0.8321	0.9198	0.9887	13.63	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 33: fast=22,slow=57,sleeve_share=0.9257,trend_n=86,vwap_n=8,max_hold=21,slots=11
+v4-3	clean	0.5365	0.9951	1.2461	0.5365	0.9881	0.9971	11.33	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 34: fast=21,slow=59,sleeve_share=0.7614,trend_n=90,vwap_n=10,max_hold=21,slots=10
+v4-3	clean	0.6675	0.8802	1.0947	0.6675	0.9165	0.942	12.65	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 35: fast=19,slow=43,sleeve_share=0.852,trend_n=113,vwap_n=10,max_hold=19,slots=12
+v4-3	clean	0.6092	0.7561	1.1679	0.6092	0.9149	0.9732	12.38	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 36: fast=18,slow=45,sleeve_share=0.7456,trend_n=98,vwap_n=8,max_hold=22,slots=12
+v4-3	clean	0.733	0.733	1.1627	0.9793	0.9989	1.088	12.95	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 37: fast=18,slow=42,sleeve_share=0.8842,trend_n=85,vwap_n=9,max_hold=17,slots=10
+v4-3	clean	0.6283	0.9428	1.1297	0.6283	0.9395	0.9525	11.44	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 38: fast=23,slow=45,sleeve_share=0.7381,trend_n=113,vwap_n=10,max_hold=17,slots=12
+v4-3	clean	0.5505	0.732	0.9951	0.5505	0.8101	0.8418	9.26	joint	J abl c2 (selectivity dials fixed) joint+-0.2 draw 39: fast=23,slow=48,sleeve_share=0.8675,trend_n=84,vwap_n=11,max_hold=22,slots=14
+v4-3	clean	0.6171	1.2923	1.3081	0.6171	1.1024	1.0646	8.27	discard	c2 rank=vwap rsi_max=14.0
+v4-3	clean	0.6621	1.1263	1.2563	0.6621	1.052	1.0472	9.51	discard	c2 rank=vwap rsi_max=16.0
+v4-3	clean	0.7239	1.1525	1.2305	0.7239	1.0586	1.0495	10.46	discard	c2 rank=vwap rsi_max=18.0
+v4-3	clean	0.7461	1.3086	1.2753	0.7461	1.1222	1.0858	8.23	discard	c2 rank=prorata rsi_max=14.0
+v4-3	clean	0.6503	1.2812	1.0921	0.6503	1.0012	0.9362	6.75	discard	pro-rata grid breadth_cut=0.5 rsi_max=10.0
+v4-3	clean	0.8206	1.2769	1.1635	0.8206	1.075	1.0372	8.65	discard	pro-rata grid breadth_cut=0.5 rsi_max=12.0
+v4-3	clean	0.8599	1.2044	1.1187	0.8599	1.0483	1.0205	10.3	discard	pro-rata grid breadth_cut=0.5 rsi_max=14.0
+v4-3	clean	0.8107	0.8107	1.0297	0.8281	0.9101	0.9509	11.7	discard	pro-rata grid breadth_cut=0.5 rsi_max=16.0
+v4-3	clean	0.6521	1.3317	1.1317	0.6521	1.0327	0.9639	6.45	discard	pro-rata grid breadth_cut=0.55 rsi_max=10.0
+v4-3	clean	0.7461	1.3186	1.1918	0.7461	1.0784	1.0324	8.18	discard	pro-rata grid breadth_cut=0.55 rsi_max=12.0
+v4-3	clean	0.7922	1.2183	1.1375	0.7922	1.0433	1.0108	9.71	discard	pro-rata grid breadth_cut=0.55 rsi_max=14.0
+v4-3	clean	0.7768	0.8705	1.0177	0.7768	0.9035	0.9262	11.0	discard	pro-rata grid breadth_cut=0.55 rsi_max=16.0
+v4-3	clean	0.4312	1.3466	1.1469	0.4312	0.9939	0.907	5.5	discard	pro-rata grid breadth_cut=0.6 rsi_max=10.0
+v4-3	clean	0.638	1.3254	1.2957	0.638	1.1105	1.0655	6.89	discard	pro-rata grid breadth_cut=0.6 rsi_max=12.0
+v4-3	clean	0.4529	1.2122	1.0661	0.4529	0.9313	0.8648	4.58	discard	pro-rata grid breadth_cut=0.65 rsi_max=10.0
+v4-3	clean	0.6323	1.2208	1.1819	0.6323	1.0326	0.9934	5.65	discard	pro-rata grid breadth_cut=0.65 rsi_max=12.0
+v4-3	clean	0.7004	1.1588	1.1583	0.7004	1.0241	0.9968	6.68	discard	pro-rata grid breadth_cut=0.65 rsi_max=14.0
+v4-3	clean	0.6423	0.8962	1.1163	0.6423	0.9311	0.9515	7.7	discard	pro-rata grid breadth_cut=0.65 rsi_max=16.0
+v4-3	clean	0.3976	1.2254	0.9161	0.3976	0.8439	0.743	3.67	discard	pro-rata grid breadth_cut=0.7 rsi_max=10.0
+v4-3	clean	0.5646	1.2862	1.0292	0.5646	0.9538	0.8682	4.33	discard	pro-rata grid breadth_cut=0.7 rsi_max=12.0
+v4-3	clean	0.5697	1.2974	1.0028	0.5697	0.9448	0.8512	4.96	discard	pro-rata grid breadth_cut=0.7 rsi_max=14.0
+v4-3	clean	0.4636	1.0494	0.9552	0.4636	0.8448	0.7864	5.48	discard	pro-rata grid breadth_cut=0.7 rsi_max=16.0
+v4-3	clean	0.6235	0.9416	1.2226	0.6235	0.9882	1.0145	4.65	discard	c2 rsiramp prorata max20 K12 (size factor (rsi_max-RSI)/rsi_max)
+v4-3	clean	0.7249	0.7597	1.1619	0.7249	0.9412	1.005	6.45	discard	c2 rsiramp prorata max30 K12 (size factor (rsi_max-RSI)/rsi_max)
+v4-3	clean	0.7431	0.9496	1.1855	0.7431	1.0013	1.0274	5.65	discard	c2 rsiramp prorata max20 K8 (size factor (rsi_max-RSI)/rsi_max)
+v4-3	clean	0.7131	0.8144	1.1376	0.7131	0.939	0.9856	7.06	discard	c2 rsiramp prorata max30 K8 (size factor (rsi_max-RSI)/rsi_max)
+v4-3	clean	0.6108	0.9695	1.328	0.6108	1.0394	1.0732	4.44	discard	c2 rsiramp rsi-rank max20 K12 (size factor (rsi_max-RSI)/rsi_max)
+v4-3	clean	0.6636	1.2277	1.2926	0.6636	1.0966	1.0705	7.68	discard	c2 prorata cut.6 max14.0 s0.7
+v4-3	clean	0.7057	1.271	1.2873	0.7057	1.112	1.0806	7.96	discard	c2 prorata cut.6 max14.0 s0.75
+v4-3	clean	0.7835	1.3371	1.2558	0.7835	1.126	1.0852	8.49	discard	c2 prorata cut.6 max14.0 s0.85
+v4-3	clean	0.817	1.3526	1.2281	0.817	1.122	1.078	8.75	discard	c2 prorata cut.6 max14.0 s0.9
+v4-3	clean	0.6782	1.2709	1.2666	0.6782	1.0914	1.057	8.48	plateau	C (prorata cut.6 rsi14) neighbour fast=16
+v4-3	clean	0.6819	1.2716	1.3018	0.6819	1.1114	1.0817	8.14	plateau	C (prorata cut.6 rsi14) neighbour fast=24
+v4-3	clean	0.7327	1.2295	1.2867	0.7327	1.107	1.0885	8.44	plateau	C (prorata cut.6 rsi14) neighbour slow=40
+v4-3	clean	0.6943	1.2421	1.3181	0.6943	1.1162	1.0968	8.27	plateau	C (prorata cut.6 rsi14) neighbour slow=60
+v4-3	clean	0.6121	1.1726	1.2919	0.6121	1.0731	1.0534	7.34	plateau	C (prorata cut.6 rsi14) neighbour sleeve_share=0.64
+v4-3	clean	0.8505	1.3493	1.1833	0.8505	1.1061	1.0599	9.06	plateau	C (prorata cut.6 rsi14) neighbour sleeve_share=0.96
+v4-3	clean	0.6475	1.3249	1.3481	0.6475	1.1402	1.1087	6.98	plateau	C (prorata cut.6 rsi14) neighbour trend_n=80
+v4-3	clean	0.6942	1.2015	1.3218	0.6942	1.1106	1.0973	9.11	plateau	C (prorata cut.6 rsi14) neighbour trend_n=120
+v4-3	clean	0.8445	1.1928	1.1178	0.8445	1.0464	1.015	10.8	plateau	C (prorata cut.6 rsi14) neighbour breadth_cut=0.48
+v4-3	clean	0.6106	1.3111	0.9489	0.6106	0.9309	0.8276	4.59	plateau	C (prorata cut.6 rsi14) neighbour breadth_cut=0.72
+v4-3	clean	0.6579	0.6579	0.9135	0.8469	0.8245	0.8827	12.58	plateau	C (prorata cut.6 rsi14) neighbour rsi_n=2
+v4-3	clean	0.1291	1.3419	1.2653	0.1291	0.9843	0.9087	3.98	plateau	C (prorata cut.6 rsi14) neighbour rsi_n=4
+v4-3	clean	0.4728	1.4283	1.3327	0.4728	1.1125	1.0404	6.4	plateau	C (prorata cut.6 rsi14) neighbour rsi_max=11.2
+v4-3	clean	0.628	1.1018	1.1704	0.628	0.9936	0.9789	9.82	plateau	C (prorata cut.6 rsi14) neighbour rsi_max=16.8
+v4-3	clean	0.8424	1.2935	1.1567	0.8424	1.0793	1.0383	8.99	plateau	C (prorata cut.6 rsi14) neighbour vwap_n=8
+v4-3	clean	0.6374	1.1436	1.0135	0.6374	0.9327	0.8794	7.03	plateau	C (prorata cut.6 rsi14) neighbour vwap_n=12
+v4-3	clean	0.7778	1.323	1.3114	0.7778	1.1522	1.1194	8.22	plateau	C (prorata cut.6 rsi14) neighbour max_hold=16
+v4-3	clean	0.7347	1.3162	1.2776	0.7347	1.1222	1.0836	8.23	plateau	C (prorata cut.6 rsi14) neighbour max_hold=24
+v4-3	clean	0.7879	1.2882	1.3062	0.7879	1.1443	1.1188	9.06	plateau	C (prorata cut.6 rsi14) neighbour slots=10
+v4-3	clean	0.6697	1.3025	1.2725	0.6697	1.1005	1.0605	7.47	plateau	C (prorata cut.6 rsi14) neighbour slots=14
+v4-3	clean	-0.0727	0.7271	0.9766	-0.0727	0.6674	0.6516	5.07	discard	c2 confirm (buy after 1st up close) vwap-rank
+v4-3	clean	-0.0064	0.7118	0.9755	-0.0064	0.6826	0.6798	5.21	discard	c2 confirm prorata
+v4-3	clean	0.7954	0.8144	1.2461	0.7954	1.0125	1.082	11.32	discard	c2 lowvol rank (min 10d vol first)
+v4-3	clean	0.673	0.673	1.063	0.8254	0.8966	0.9725	12.35	discard	c2 exit when stock closes < EMA100 (trend break)
+v4-3	clean	0.7466	0.8271	0.8987	0.7466	0.8244	0.8393	11.26	discard	c2 exit when NIFTY closes < EMA100 (index break)
+v4-3	clean	0.5333	0.5333	0.9075	0.828	0.7893	0.8716	12.37	discard	c2 both breaks
+v4-3	clean	0.8566	1.1255	1.1271	0.8566	1.0328	1.025	10.33	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 0: fast=21,slow=58,sleeve_share=0.8882,trend_n=89,breadth_cut=0.552,rsi_n=3,rsi_max=16.0421,vwap_n=11,max_hold=22,slots=12
+v4-3	clean	0.421	0.77	0.927	0.421	0.7528	0.7545	10.44	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 1: fast=18,slow=46,sleeve_share=0.7216,trend_n=98,breadth_cut=0.6011,rsi_n=3,rsi_max=23.964,vwap_n=11,max_hold=21,slots=14
+v4-3	clean	0.5847	0.5847	1.0038	0.933	0.8747	0.9684	12.38	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 2: fast=18,slow=43,sleeve_share=0.836,trend_n=82,breadth_cut=0.4886,rsi_n=3,rsi_max=19.7296,vwap_n=12,max_hold=21,slots=12
+v4-3	clean	0.5025	1.1343	1.0509	0.5025	0.9098	0.8608	9.37	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 3: fast=20,slow=45,sleeve_share=0.6438,trend_n=88,breadth_cut=0.6461,rsi_n=3,rsi_max=18.9563,vwap_n=8,max_hold=23,slots=10
+v4-3	clean	0.6581	1.051	1.1915	0.6581	1.0053	1.0055	8.92	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 4: fast=18,slow=58,sleeve_share=0.8031,trend_n=114,breadth_cut=0.6335,rsi_n=3,rsi_max=16.732,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.697	0.7651	1.0359	0.697	0.871	0.9118	12.52	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 5: fast=19,slow=52,sleeve_share=0.659,trend_n=96,breadth_cut=0.5575,rsi_n=3,rsi_max=22.5307,vwap_n=10,max_hold=24,slots=12
+v4-3	clean	0.741	0.8689	0.9716	0.741	0.866	0.8818	13.12	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 6: fast=21,slow=53,sleeve_share=0.8565,trend_n=86,breadth_cut=0.5857,rsi_n=3,rsi_max=19.22,vwap_n=8,max_hold=24,slots=11
+v4-3	clean	0.2734	0.2734	0.8063	1.0432	0.7396	0.8859	16.8	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 7: fast=21,slow=46,sleeve_share=0.9197,trend_n=106,breadth_cut=0.5116,rsi_n=3,rsi_max=23.5596,vwap_n=12,max_hold=21,slots=10
+v4-3	clean	0.8274	1.2052	1.0623	0.8274	1.0146	0.9681	6.87	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 8: fast=18,slow=59,sleeve_share=0.8167,trend_n=87,breadth_cut=0.6922,rsi_n=3,rsi_max=20.5576,vwap_n=10,max_hold=19,slots=11
+v4-3	clean	0.6937	0.9744	1.0222	0.6937	0.9053	0.9023	12.64	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 9: fast=16,slow=58,sleeve_share=0.7897,trend_n=102,breadth_cut=0.5573,rsi_n=3,rsi_max=16.2016,vwap_n=9,max_hold=16,slots=10
+v4-3	clean	0.7048	0.7759	0.9798	0.7048	0.8487	0.8774	6.56	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 10: fast=24,slow=53,sleeve_share=0.777,trend_n=101,breadth_cut=0.6895,rsi_n=3,rsi_max=20.7223,vwap_n=11,max_hold=19,slots=12
+v4-3	clean	0.5502	0.5502	0.8509	0.7764	0.7494	0.8173	16.04	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 11: fast=22,slow=58,sleeve_share=0.6883,trend_n=117,breadth_cut=0.4812,rsi_n=3,rsi_max=22.4842,vwap_n=9,max_hold=19,slots=14
+v4-3	clean	0.7578	1.1114	1.1543	0.7578	1.018	1.0109	10.26	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 12: fast=16,slow=53,sleeve_share=0.8938,trend_n=101,breadth_cut=0.6542,rsi_n=3,rsi_max=17.5882,vwap_n=9,max_hold=17,slots=11
+v4-3	clean	0.4567	1.042	0.8283	0.4567	0.7739	0.6997	5.81	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 13: fast=24,slow=51,sleeve_share=0.7488,trend_n=91,breadth_cut=0.7085,rsi_n=3,rsi_max=23.8432,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.234	1.264	1.3331	0.234	1.0301	0.9766	6.14	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 14: fast=22,slow=52,sleeve_share=0.7765,trend_n=115,breadth_cut=0.5788,rsi_n=4,rsi_max=16.5497,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.5501	1.298	1.3925	0.5501	1.1386	1.1057	8.04	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 15: fast=18,slow=56,sleeve_share=0.8565,trend_n=109,breadth_cut=0.6311,rsi_n=4,rsi_max=18.6615,vwap_n=10,max_hold=18,slots=10
+v4-3	clean	0.6946	0.8616	0.8639	0.6946	0.8002	0.7922	9.16	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 16: fast=18,slow=58,sleeve_share=0.9089,trend_n=84,breadth_cut=0.6249,rsi_n=3,rsi_max=20.7575,vwap_n=11,max_hold=18,slots=14
+v4-3	clean	0.5411	0.5411	0.9924	0.7657	0.8149	0.9065	15.56	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 17: fast=20,slow=53,sleeve_share=0.8433,trend_n=87,breadth_cut=0.4948,rsi_n=3,rsi_max=22.1122,vwap_n=11,max_hold=22,slots=10
+v4-3	clean	0.5594	0.5594	0.8746	0.7896	0.7699	0.8399	11.25	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 18: fast=23,slow=56,sleeve_share=0.9209,trend_n=101,breadth_cut=0.6998,rsi_n=2,rsi_max=16.2423,vwap_n=8,max_hold=18,slots=11
+v4-3	clean	0.476	0.6411	1.1159	0.476	0.8275	0.8916	11.16	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 19: fast=18,slow=51,sleeve_share=0.6525,trend_n=104,breadth_cut=0.5198,rsi_n=3,rsi_max=16.1686,vwap_n=9,max_hold=24,slots=12
+v4-3	clean	0.5853	0.6477	0.6776	0.5853	0.6344	0.6337	10.43	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 20: fast=22,slow=53,sleeve_share=0.8354,trend_n=88,breadth_cut=0.6179,rsi_n=2,rsi_max=22.4133,vwap_n=12,max_hold=23,slots=10
+v4-3	clean	0.5076	0.823	0.9226	0.5076	0.7855	0.778	7.23	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 21: fast=19,slow=46,sleeve_share=0.6761,trend_n=105,breadth_cut=0.6714,rsi_n=3,rsi_max=22.9025,vwap_n=11,max_hold=17,slots=13
+v4-3	clean	0.7022	0.8084	0.9233	0.7022	0.8244	0.8365	9.87	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 22: fast=23,slow=44,sleeve_share=0.8236,trend_n=106,breadth_cut=0.6262,rsi_n=3,rsi_max=21.2895,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.1906	0.1906	0.7777	0.9572	0.6763	0.8407	22.87	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 23: fast=19,slow=54,sleeve_share=0.9175,trend_n=116,breadth_cut=0.5188,rsi_n=2,rsi_max=21.2065,vwap_n=9,max_hold=21,slots=14
+v4-3	clean	0.6977	0.7514	1.0849	0.6977	0.891	0.9424	12.85	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 24: fast=19,slow=45,sleeve_share=0.7861,trend_n=106,breadth_cut=0.5043,rsi_n=3,rsi_max=17.0698,vwap_n=11,max_hold=23,slots=11
+v4-3	clean	0.4347	1.0324	1.1731	0.4347	0.9352	0.9184	9.55	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 25: fast=19,slow=51,sleeve_share=0.7088,trend_n=90,breadth_cut=0.5592,rsi_n=3,rsi_max=16.6523,vwap_n=11,max_hold=21,slots=11
+v4-3	clean	0.2831	0.2831	1.0012	0.6436	0.7213	0.8689	17.39	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 26: fast=17,slow=55,sleeve_share=0.6819,trend_n=85,breadth_cut=0.5114,rsi_n=2,rsi_max=23.2511,vwap_n=9,max_hold=18,slots=14
+v4-3	clean	0.5533	1.071	1.0775	0.5533	0.9236	0.8935	10.17	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 27: fast=21,slow=44,sleeve_share=0.7791,trend_n=115,breadth_cut=0.5701,rsi_n=3,rsi_max=16.7745,vwap_n=11,max_hold=22,slots=14
+v4-3	clean	0.2495	1.0982	1.1718	0.2495	0.9182	0.8709	7.28	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 28: fast=21,slow=47,sleeve_share=0.6605,trend_n=101,breadth_cut=0.6618,rsi_n=3,rsi_max=18.1299,vwap_n=10,max_hold=22,slots=14
+v4-3	clean	0.5065	1.0074	0.9752	0.5065	0.8573	0.8117	8.16	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 29: fast=17,slow=44,sleeve_share=0.8959,trend_n=106,breadth_cut=0.653,rsi_n=4,rsi_max=23.5134,vwap_n=11,max_hold=22,slots=11
+v4-3	clean	0.6456	0.9226	1.0132	0.6456	0.8822	0.8816	9.14	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 30: fast=21,slow=44,sleeve_share=0.883,trend_n=110,breadth_cut=0.6531,rsi_n=3,rsi_max=19.0254,vwap_n=10,max_hold=16,slots=14
+v4-3	clean	0.6684	0.8784	0.9703	0.6684	0.8538	0.8589	14.65	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 31: fast=20,slow=48,sleeve_share=0.8154,trend_n=109,breadth_cut=0.5716,rsi_n=3,rsi_max=23.3557,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.7362	1.1358	0.7362	0.7759	0.8407	0.7412	6.55	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 32: fast=24,slow=43,sleeve_share=0.8681,trend_n=113,breadth_cut=0.7009,rsi_n=3,rsi_max=16.7345,vwap_n=12,max_hold=17,slots=10
+v4-3	clean	0.7165	0.9848	0.8488	0.7165	0.8104	0.7944	9.33	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 33: fast=21,slow=49,sleeve_share=0.8801,trend_n=88,breadth_cut=0.6995,rsi_n=3,rsi_max=22.1529,vwap_n=8,max_hold=20,slots=10
+v4-3	clean	0.6799	0.6799	0.9698	0.8624	0.8601	0.9228	12.15	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 34: fast=19,slow=46,sleeve_share=0.8703,trend_n=98,breadth_cut=0.4936,rsi_n=4,rsi_max=23.1096,vwap_n=12,max_hold=18,slots=11
+v4-3	clean	0.5978	0.5978	1.0423	0.8213	0.8687	0.9583	13.82	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 35: fast=18,slow=42,sleeve_share=0.6506,trend_n=100,breadth_cut=0.5096,rsi_n=3,rsi_max=22.8838,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.2905	0.9107	1.2228	0.2905	0.9124	0.92	8.86	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 36: fast=18,slow=51,sleeve_share=0.7305,trend_n=101,breadth_cut=0.6308,rsi_n=3,rsi_max=19.1648,vwap_n=11,max_hold=23,slots=10
+v4-3	clean	0.6633	1.3866	1.1156	0.6633	1.0322	0.9551	8.7	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 37: fast=17,slow=42,sleeve_share=0.9535,trend_n=118,breadth_cut=0.5354,rsi_n=4,rsi_max=17.6625,vwap_n=10,max_hold=20,slots=14
+v4-3	clean	0.8124	0.8124	0.9717	0.8301	0.8812	0.9143	13.18	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 38: fast=16,slow=46,sleeve_share=0.832,trend_n=83,breadth_cut=0.5368,rsi_n=3,rsi_max=23.0469,vwap_n=11,max_hold=23,slots=13
+v4-3	clean	0.7885	0.7885	0.9536	0.9599	0.9013	0.9463	16.89	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 39: fast=22,slow=57,sleeve_share=0.8581,trend_n=109,breadth_cut=0.5524,rsi_n=3,rsi_max=22.0522,vwap_n=9,max_hold=23,slots=12
+v4-3	clean	0.5186	0.842	1.2594	0.5186	0.9572	1.0008	8.63	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 40: fast=19,slow=59,sleeve_share=0.6896,trend_n=101,breadth_cut=0.502,rsi_n=4,rsi_max=20.603,vwap_n=11,max_hold=18,slots=13
+v4-3	clean	0.8455	0.859	0.8455	1.053	0.8879	0.9095	16.49	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 41: fast=22,slow=53,sleeve_share=0.9442,trend_n=97,breadth_cut=0.5796,rsi_n=3,rsi_max=22.6804,vwap_n=9,max_hold=21,slots=11
+v4-3	clean	0.4801	1.0463	1.3236	0.4801	1.028	1.0307	9.38	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 42: fast=20,slow=55,sleeve_share=0.6609,trend_n=109,breadth_cut=0.4837,rsi_n=4,rsi_max=19.7494,vwap_n=10,max_hold=22,slots=12
+v4-3	clean	0.7932	0.7991	0.7932	1.0137	0.8291	0.8434	6.52	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 43: fast=22,slow=42,sleeve_share=0.8201,trend_n=102,breadth_cut=0.7037,rsi_n=2,rsi_max=19.6226,vwap_n=11,max_hold=20,slots=10
+v4-3	clean	0.7088	0.7088	0.9351	0.7644	0.8264	0.8693	13.77	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 44: fast=21,slow=44,sleeve_share=0.7026,trend_n=115,breadth_cut=0.5275,rsi_n=3,rsi_max=22.0023,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	0.7158	0.7158	1.1152	1.0973	0.9982	1.0919	11.75	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 45: fast=20,slow=52,sleeve_share=0.9021,trend_n=107,breadth_cut=0.634,rsi_n=3,rsi_max=20.4666,vwap_n=10,max_hold=22,slots=11
+v4-3	clean	0.5955	0.8462	0.9032	0.5955	0.7998	0.792	7.06	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 46: fast=20,slow=55,sleeve_share=0.8012,trend_n=94,breadth_cut=0.6784,rsi_n=3,rsi_max=22.7578,vwap_n=11,max_hold=20,slots=13
+v4-3	clean	0.6683	0.7153	1.1395	0.6683	0.9027	0.968	13.5	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 47: fast=16,slow=48,sleeve_share=0.9153,trend_n=103,breadth_cut=0.6139,rsi_n=3,rsi_max=21.4214,vwap_n=10,max_hold=19,slots=10
+v4-3	clean	0.6189	0.8249	1.0078	0.6189	0.8505	0.867	12.57	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 48: fast=18,slow=46,sleeve_share=0.7778,trend_n=120,breadth_cut=0.5646,rsi_n=3,rsi_max=18.973,vwap_n=10,max_hold=24,slots=14
+v4-3	clean	0.5839	0.5839	0.8355	1.1674	0.8503	0.9397	14.27	joint	J abl c2 rsi-rank rsi_max 20 joint+-0.2 draw 49: fast=19,slow=45,sleeve_share=0.923,trend_n=100,breadth_cut=0.6445,rsi_n=2,rsi_max=22.9325,vwap_n=9,max_hold=20,slots=11
+v4-3	clean	0.6396	0.7126	1.1241	0.6396	0.8892	0.9515	13.33	discard	c2 core = NIFTY > EMA(trend_n=100) instead of R0
+v4-3	clean	0.5198	0.6485	1.0974	0.5198	0.8313	0.8944	13.43	discard	c2 core = NIFTY > EMA100, sleeve .7
+v4-3	clean	0.7452	0.8938	1.2326	0.7452	1.0107	1.0581	11.27	keep	candidate.py: clean R0 core 20% NIFTYBEES + pullback sleeve 80% (hard breadth cut .6, no sliver, no dead ~reclaimed)
+v4-3	clean	0.5593	0.6965	1.0623	0.5593	0.8341	0.8846	11.27	cost	candidate.py at 25 bps one-way
+v4-3	clean	0.2805	0.4003	0.8051	0.2805	0.568	0.6231	11.27	cost	candidate.py at 40 bps one-way
+v4-3	clean	0.1659	1.2922	1.153	0.1659	0.9165	0.8327	5.88	joint	candidate.py (all params) joint+-0.2 draw 0: fast=17,slow=50,sleeve_share=0.8325,trend_n=81,breadth_cut=0.5155,rsi_n=4,rsi_max=16.5634,vwap_n=9,max_hold=24,slots=13
+v4-3	clean	0.5685	0.5685	0.9435	0.8736	0.8263	0.9107	15.16	joint	candidate.py (all params) joint+-0.2 draw 1: fast=19,slow=50,sleeve_share=0.8521,trend_n=91,breadth_cut=0.5131,rsi_n=3,rsi_max=21.3629,vwap_n=10,max_hold=23,slots=12
+v4-3	clean	0.8118	1.0503	1.2056	0.8118	1.044	1.0599	11.86	joint	candidate.py (all params) joint+-0.2 draw 2: fast=24,slow=44,sleeve_share=0.8172,trend_n=99,breadth_cut=0.5648,rsi_n=3,rsi_max=17.8824,vwap_n=11,max_hold=23,slots=10
+v4-3	clean	0.7137	1.0313	0.9892	0.7137	0.9135	0.887	13.28	joint	candidate.py (all params) joint+-0.2 draw 3: fast=20,slow=46,sleeve_share=0.6666,trend_n=116,breadth_cut=0.5832,rsi_n=3,rsi_max=21.3869,vwap_n=9,max_hold=23,slots=11
+v4-3	clean	0.3866	0.9482	1.15	0.3866	0.8949	0.8958	7.68	joint	candidate.py (all params) joint+-0.2 draw 4: fast=16,slow=44,sleeve_share=0.7506,trend_n=99,breadth_cut=0.6975,rsi_n=3,rsi_max=18.7146,vwap_n=8,max_hold=17,slots=14
+v4-3	clean	0.4534	1.1989	1.1938	0.4534	0.9957	0.9526	6.56	joint	candidate.py (all params) joint+-0.2 draw 5: fast=20,slow=54,sleeve_share=0.6575,trend_n=81,breadth_cut=0.683,rsi_n=3,rsi_max=18.4697,vwap_n=9,max_hold=17,slots=10
+v4-3	clean	0.3517	1.1793	1.0307	0.3517	0.882	0.8084	7.51	joint	candidate.py (all params) joint+-0.2 draw 6: fast=16,slow=57,sleeve_share=0.7892,trend_n=85,breadth_cut=0.6574,rsi_n=3,rsi_max=16.4954,vwap_n=10,max_hold=23,slots=10
+v4-3	clean	0.6417	0.8729	1.1553	0.6417	0.942	0.9717	10.33	joint	candidate.py (all params) joint+-0.2 draw 7: fast=22,slow=44,sleeve_share=0.6697,trend_n=81,breadth_cut=0.5503,rsi_n=3,rsi_max=19.9454,vwap_n=11,max_hold=18,slots=11
+v4-3	clean	0.5257	0.5257	0.9942	0.8465	0.8349	0.9326	16.16	joint	candidate.py (all params) joint+-0.2 draw 8: fast=18,slow=60,sleeve_share=0.9411,trend_n=94,breadth_cut=0.5846,rsi_n=3,rsi_max=21.9721,vwap_n=8,max_hold=17,slots=12
+v4-3	clean	0.6821	0.806	0.7614	0.6821	0.7336	0.7181	9.3	joint	candidate.py (all params) joint+-0.2 draw 9: fast=18,slow=57,sleeve_share=0.8774,trend_n=102,breadth_cut=0.6388,rsi_n=3,rsi_max=22.2484,vwap_n=12,max_hold=17,slots=13
+v4-3	clean	0.722	0.722	0.7707	0.8385	0.7674	0.7903	13.64	joint	candidate.py (all params) joint+-0.2 draw 10: fast=17,slow=49,sleeve_share=0.8916,trend_n=116,breadth_cut=0.6622,rsi_n=2,rsi_max=18.8753,vwap_n=9,max_hold=24,slots=10
+v4-3	clean	0.669	0.967	1.1261	0.669	0.9545	0.9625	12.03	joint	candidate.py (all params) joint+-0.2 draw 11: fast=18,slow=47,sleeve_share=0.6595,trend_n=115,breadth_cut=0.6327,rsi_n=3,rsi_max=19.9861,vwap_n=8,max_hold=21,slots=11
+v4-3	clean	0.599	0.599	1.0519	0.8195	0.8731	0.9627	14.33	joint	candidate.py (all params) joint+-0.2 draw 12: fast=16,slow=42,sleeve_share=0.8177,trend_n=105,breadth_cut=0.558,rsi_n=3,rsi_max=18.8165,vwap_n=9,max_hold=19,slots=11
+v4-3	clean	0.4795	1.0422	1.0906	0.4795	0.9044	0.8805	7.25	joint	candidate.py (all params) joint+-0.2 draw 13: fast=23,slow=42,sleeve_share=0.6676,trend_n=102,breadth_cut=0.7112,rsi_n=3,rsi_max=21.602,vwap_n=8,max_hold=22,slots=13
+v4-3	clean	0.7079	0.9467	1.1202	0.7079	0.9553	0.9705	10.66	joint	candidate.py (all params) joint+-0.2 draw 14: fast=17,slow=49,sleeve_share=0.6558,trend_n=112,breadth_cut=0.6525,rsi_n=3,rsi_max=22.0833,vwap_n=9,max_hold=22,slots=11
+v4-3	clean	0.6755	1.1918	1.1764	0.6755	1.0305	1.0004	9.05	joint	candidate.py (all params) joint+-0.2 draw 15: fast=17,slow=48,sleeve_share=0.7993,trend_n=91,breadth_cut=0.6254,rsi_n=3,rsi_max=17.9185,vwap_n=10,max_hold=19,slots=13
+v4-3	clean	0.6729	1.1285	0.9093	0.6729	0.8855	0.8193	7.83	joint	candidate.py (all params) joint+-0.2 draw 16: fast=18,slow=56,sleeve_share=0.7728,trend_n=102,breadth_cut=0.6416,rsi_n=3,rsi_max=18.0609,vwap_n=12,max_hold=17,slots=11
+v4-3	clean	0.4656	0.8653	1.0622	0.4656	0.8577	0.859	8.1	joint	candidate.py (all params) joint+-0.2 draw 17: fast=20,slow=41,sleeve_share=0.6896,trend_n=112,breadth_cut=0.6681,rsi_n=3,rsi_max=23.2144,vwap_n=11,max_hold=18,slots=13
+v4-3	clean	0.5719	1.1295	0.9873	0.5719	0.898	0.8426	6.58	joint	candidate.py (all params) joint+-0.2 draw 18: fast=19,slow=55,sleeve_share=0.7631,trend_n=86,breadth_cut=0.6903,rsi_n=3,rsi_max=21.9574,vwap_n=10,max_hold=22,slots=12
+v4-3	clean	0.5041	0.7831	0.8672	0.5041	0.7446	0.7401	8.05	joint	candidate.py (all params) joint+-0.2 draw 19: fast=21,slow=41,sleeve_share=0.8176,trend_n=113,breadth_cut=0.6493,rsi_n=3,rsi_max=19.9688,vwap_n=12,max_hold=17,slots=14
+v4-3	clean	0.653	1.0039	1.0696	0.653	0.9231	0.9202	11.46	joint	candidate.py (all params) joint+-0.2 draw 20: fast=19,slow=42,sleeve_share=0.8382,trend_n=98,breadth_cut=0.5828,rsi_n=3,rsi_max=17.1023,vwap_n=10,max_hold=19,slots=12
+v4-3	clean	0.2546	0.2546	0.716	0.7727	0.6076	0.7336	18.77	joint	candidate.py (all params) joint+-0.2 draw 21: fast=20,slow=43,sleeve_share=0.8038,trend_n=114,breadth_cut=0.5211,rsi_n=2,rsi_max=16.5405,vwap_n=10,max_hold=24,slots=10
+v4-3	clean	0.6382	0.6382	1.1435	0.8002	0.9235	1.0174	12.29	joint	candidate.py (all params) joint+-0.2 draw 22: fast=24,slow=51,sleeve_share=0.6784,trend_n=97,breadth_cut=0.5298,rsi_n=3,rsi_max=20.3321,vwap_n=9,max_hold=18,slots=14
+v4-3	clean	0.8748	1.3934	0.9238	0.8748	0.9684	0.8856	8.41	joint	candidate.py (all params) joint+-0.2 draw 23: fast=22,slow=49,sleeve_share=0.7698,trend_n=109,breadth_cut=0.713,rsi_n=2,rsi_max=17.2727,vwap_n=9,max_hold=20,slots=10
+v4-3	clean	0.6125	0.6125	1.0821	0.8361	0.8965	0.9887	12.16	joint	candidate.py (all params) joint+-0.2 draw 24: fast=16,slow=44,sleeve_share=0.7635,trend_n=110,breadth_cut=0.6264,rsi_n=2,rsi_max=16.3601,vwap_n=10,max_hold=23,slots=14
+v4-3	clean	0.5537	0.9387	0.9995	0.5537	0.8579	0.8456	8.12	joint	candidate.py (all params) joint+-0.2 draw 25: fast=19,slow=58,sleeve_share=0.9373,trend_n=96,breadth_cut=0.6591,rsi_n=3,rsi_max=17.2286,vwap_n=10,max_hold=17,slots=13
+v4-3	clean	0.6326	0.9842	0.9395	0.6326	0.8578	0.8279	6.81	joint	candidate.py (all params) joint+-0.2 draw 26: fast=22,slow=58,sleeve_share=0.7834,trend_n=85,breadth_cut=0.6966,rsi_n=3,rsi_max=23.7409,vwap_n=10,max_hold=21,slots=11
+v4-3	clean	0.5765	0.863	0.7598	0.5765	0.7228	0.6875	8.17	joint	candidate.py (all params) joint+-0.2 draw 27: fast=17,slow=46,sleeve_share=0.8706,trend_n=93,breadth_cut=0.646,rsi_n=3,rsi_max=19.592,vwap_n=12,max_hold=17,slots=12
+v4-3	clean	0.674	0.674	1.086	0.9502	0.9402	1.0284	14.44	joint	candidate.py (all params) joint+-0.2 draw 28: fast=17,slow=59,sleeve_share=0.7964,trend_n=93,breadth_cut=0.5204,rsi_n=3,rsi_max=19.1917,vwap_n=9,max_hold=16,slots=11
+v4-3	clean	0.792	0.9942	1.0386	0.792	0.9476	0.9437	7.67	joint	candidate.py (all params) joint+-0.2 draw 29: fast=21,slow=50,sleeve_share=0.928,trend_n=116,breadth_cut=0.7047,rsi_n=3,rsi_max=19.8209,vwap_n=10,max_hold=19,slots=12
+v4-3	clean	0.5405	0.7694	1.1696	0.5405	0.9032	0.9533	11.28	joint	candidate.py (all params) joint+-0.2 draw 30: fast=16,slow=56,sleeve_share=0.7187,trend_n=81,breadth_cut=0.592,rsi_n=3,rsi_max=19.4883,vwap_n=9,max_hold=21,slots=10
+v4-3	clean	0.5345	0.5345	1.0668	0.8141	0.8628	0.9699	13.56	joint	candidate.py (all params) joint+-0.2 draw 31: fast=16,slow=52,sleeve_share=0.8097,trend_n=115,breadth_cut=0.5798,rsi_n=3,rsi_max=16.1434,vwap_n=8,max_hold=21,slots=11
+v4-3	clean	0.8166	0.8822	1.2186	0.8166	1.0186	1.0723	11.41	joint	candidate.py (all params) joint+-0.2 draw 32: fast=17,slow=43,sleeve_share=0.7599,trend_n=93,breadth_cut=0.6153,rsi_n=3,rsi_max=18.9254,vwap_n=9,max_hold=21,slots=10
+v4-3	clean	0.554	0.9348	0.9184	0.554	0.8156	0.79	8.52	joint	candidate.py (all params) joint+-0.2 draw 33: fast=19,slow=46,sleeve_share=0.764,trend_n=82,breadth_cut=0.613,rsi_n=3,rsi_max=21.9957,vwap_n=12,max_hold=19,slots=13
+v4-3	clean	0.7075	1.3479	1.0095	0.7075	0.9615	0.8952	9.68	joint	candidate.py (all params) joint+-0.2 draw 34: fast=20,slow=44,sleeve_share=0.9246,trend_n=110,breadth_cut=0.7063,rsi_n=3,rsi_max=23.3397,vwap_n=9,max_hold=16,slots=11
+v4-3	clean	0.7813	0.7813	0.8494	0.8866	0.8317	0.858	12.65	joint	candidate.py (all params) joint+-0.2 draw 35: fast=19,slow=54,sleeve_share=0.7803,trend_n=101,breadth_cut=0.6626,rsi_n=2,rsi_max=21.4264,vwap_n=8,max_hold=18,slots=13
+v4-3	clean	0.3105	0.3105	0.8433	0.8603	0.7095	0.8465	18.81	joint	candidate.py (all params) joint+-0.2 draw 36: fast=21,slow=48,sleeve_share=0.7343,trend_n=113,breadth_cut=0.5459,rsi_n=2,rsi_max=17.9781,vwap_n=8,max_hold=22,slots=10
+v4-3	clean	0.5265	0.9	1.1107	0.5265	0.8942	0.9057	11.6	joint	candidate.py (all params) joint+-0.2 draw 37: fast=24,slow=44,sleeve_share=0.7379,trend_n=103,breadth_cut=0.554,rsi_n=3,rsi_max=16.8337,vwap_n=10,max_hold=16,slots=11
+v4-3	clean	0.5863	1.077	1.0608	0.5863	0.9312	0.8947	6.03	joint	candidate.py (all params) joint+-0.2 draw 38: fast=23,slow=46,sleeve_share=0.7267,trend_n=107,breadth_cut=0.6919,rsi_n=3,rsi_max=19.0106,vwap_n=11,max_hold=22,slots=13
+v4-3	clean	0.6036	1.0874	1.1053	0.6036	0.9491	0.9329	8.3	joint	candidate.py (all params) joint+-0.2 draw 39: fast=17,slow=44,sleeve_share=0.8825,trend_n=108,breadth_cut=0.6951,rsi_n=3,rsi_max=19.3697,vwap_n=9,max_hold=23,slots=13
+v4-3	clean	0.7444	0.8833	0.9744	0.7444	0.8771	0.8825	9.18	joint	candidate.py (all params) joint+-0.2 draw 40: fast=21,slow=54,sleeve_share=0.7632,trend_n=94,breadth_cut=0.6181,rsi_n=3,rsi_max=21.6718,vwap_n=12,max_hold=23,slots=11
+v4-3	clean	0.4802	0.4802	0.9978	0.7884	0.8082	0.9182	14.86	joint	candidate.py (all params) joint+-0.2 draw 41: fast=19,slow=59,sleeve_share=0.7663,trend_n=112,breadth_cut=0.5023,rsi_n=3,rsi_max=20.1299,vwap_n=11,max_hold=23,slots=10
+v4-3	clean	0.4285	1.1701	1.3565	0.4285	1.0669	1.0454	5.98	joint	candidate.py (all params) joint+-0.2 draw 42: fast=21,slow=53,sleeve_share=0.6885,trend_n=113,breadth_cut=0.6128,rsi_n=4,rsi_max=17.4905,vwap_n=10,max_hold=19,slots=13
+v4-3	clean	0.6787	0.8313	1.2265	0.6787	0.9763	1.0308	12.36	joint	candidate.py (all params) joint+-0.2 draw 43: fast=21,slow=50,sleeve_share=0.744,trend_n=100,breadth_cut=0.5693,rsi_n=3,rsi_max=19.6922,vwap_n=10,max_hold=18,slots=11
+v4-3	clean	0.5519	1.3657	0.8058	0.5519	0.865	0.713	6.47	joint	candidate.py (all params) joint+-0.2 draw 44: fast=24,slow=46,sleeve_share=0.9179,trend_n=104,breadth_cut=0.7153,rsi_n=3,rsi_max=23.5326,vwap_n=11,max_hold=21,slots=13
+v4-3	clean	0.6453	0.6453	0.9432	1.0277	0.8809	0.9596	12.2	joint	candidate.py (all params) joint+-0.2 draw 45: fast=22,slow=49,sleeve_share=0.843,trend_n=89,breadth_cut=0.4851,rsi_n=3,rsi_max=19.7957,vwap_n=12,max_hold=18,slots=14
+v4-3	clean	0.2463	0.2463	0.9146	0.776	0.7092	0.8585	17.86	joint	candidate.py (all params) joint+-0.2 draw 46: fast=24,slow=58,sleeve_share=0.9486,trend_n=86,breadth_cut=0.5196,rsi_n=3,rsi_max=18.8919,vwap_n=8,max_hold=17,slots=10
+v4-3	clean	0.5772	1.1169	1.0585	0.5772	0.9315	0.8934	8.82	joint	candidate.py (all params) joint+-0.2 draw 47: fast=23,slow=47,sleeve_share=0.8403,trend_n=98,breadth_cut=0.6583,rsi_n=3,rsi_max=19.0639,vwap_n=10,max_hold=17,slots=11
+v4-3	clean	0.4243	0.4243	0.975	0.8226	0.7941	0.9154	16.32	joint	candidate.py (all params) joint+-0.2 draw 48: fast=18,slow=46,sleeve_share=0.7438,trend_n=103,breadth_cut=0.5599,rsi_n=3,rsi_max=22.6503,vwap_n=8,max_hold=16,slots=10
+v4-3	clean	0.6328	1.3746	1.22	0.6328	1.0833	1.0118	9.07	joint	candidate.py (all params) joint+-0.2 draw 49: fast=23,slow=53,sleeve_share=0.8729,trend_n=118,breadth_cut=0.5323,rsi_n=4,rsi_max=17.9408,vwap_n=10,max_hold=21,slots=13
+v4-3	clean	0.4558	1.3202	1.0168	0.4558	0.9412	0.8263	5.49	joint	candidate.py (all params) joint+-0.2 draw 50: fast=18,slow=50,sleeve_share=0.6546,trend_n=92,breadth_cut=0.7154,rsi_n=3,rsi_max=20.6567,vwap_n=11,max_hold=23,slots=11
+v4-3	clean	0.6178	0.8335	1.1307	0.6178	0.9153	0.9509	10.99	joint	candidate.py (all params) joint+-0.2 draw 51: fast=24,slow=49,sleeve_share=0.6908,trend_n=101,breadth_cut=0.6225,rsi_n=3,rsi_max=21.3676,vwap_n=8,max_hold=21,slots=14
+v4-3	clean	0.5118	0.5118	0.9783	1.0225	0.8699	0.9825	12.94	joint	candidate.py (all params) joint+-0.2 draw 52: fast=21,slow=60,sleeve_share=0.8037,trend_n=112,breadth_cut=0.5137,rsi_n=3,rsi_max=19.4915,vwap_n=12,max_hold=19,slots=13
+v4-3	clean	0.4724	0.4724	0.9651	1.1895	0.9012	1.038	15.15	joint	candidate.py (all params) joint+-0.2 draw 53: fast=23,slow=54,sleeve_share=0.8384,trend_n=119,breadth_cut=0.5011,rsi_n=3,rsi_max=20.4126,vwap_n=12,max_hold=21,slots=11
+v4-3	clean	0.7302	1.0054	1.0462	0.7302	0.9329	0.9289	12.7	joint	candidate.py (all params) joint+-0.2 draw 54: fast=17,slow=49,sleeve_share=0.7937,trend_n=99,breadth_cut=0.6286,rsi_n=3,rsi_max=23.0431,vwap_n=9,max_hold=17,slots=11
+v4-3	clean	0.6555	0.7573	0.9944	0.6555	0.8383	0.8717	10.22	joint	candidate.py (all params) joint+-0.2 draw 55: fast=23,slow=43,sleeve_share=0.7289,trend_n=117,breadth_cut=0.5635,rsi_n=3,rsi_max=16.3635,vwap_n=12,max_hold=18,slots=10
+v4-3	clean	0.5211	1.3502	1.3098	0.5211	1.0884	1.0493	6.48	joint	candidate.py (all params) joint+-0.2 draw 56: fast=22,slow=60,sleeve_share=0.947,trend_n=110,breadth_cut=0.6994,rsi_n=4,rsi_max=20.4222,vwap_n=9,max_hold=23,slots=12
+v4-3	clean	0.4405	0.757	1.0493	0.4405	0.8182	0.8446	9.34	joint	candidate.py (all params) joint+-0.2 draw 57: fast=19,slow=50,sleeve_share=0.6512,trend_n=81,breadth_cut=0.5434,rsi_n=3,rsi_max=21.9953,vwap_n=12,max_hold=23,slots=14
+v4-3	clean	0.6045	0.6045	1.0871	0.7504	0.8751	0.9636	12.72	joint	candidate.py (all params) joint+-0.2 draw 58: fast=21,slow=55,sleeve_share=0.828,trend_n=83,breadth_cut=0.4949,rsi_n=3,rsi_max=17.6188,vwap_n=11,max_hold=20,slots=10
+v4-3	clean	0.6408	0.8313	1.1784	0.6408	0.9441	0.9886	12.27	joint	candidate.py (all params) joint+-0.2 draw 59: fast=20,slow=49,sleeve_share=0.6636,trend_n=90,breadth_cut=0.5536,rsi_n=3,rsi_max=21.6546,vwap_n=9,max_hold=20,slots=13
+v4-3	clean	0.738	0.738	0.9534	0.7926	0.8493	0.8908	15.54	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 0: sleeve_share=0.7203,trend_n=118,breadth_cut=0.5254,rsi_n=3,rsi_max=18.7991,vwap_n=9,max_hold=21,slots=10
+v4-3	clean	0.5646	0.5646	0.8444	0.6277	0.7118	0.7632	16.99	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 1: sleeve_share=0.9268,trend_n=114,breadth_cut=0.4807,rsi_n=3,rsi_max=16.8548,vwap_n=9,max_hold=19,slots=12
+v4-3	clean	0.6858	0.6858	0.9485	1.2176	0.9423	1.0283	12.4	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 2: sleeve_share=0.7898,trend_n=117,breadth_cut=0.5421,rsi_n=3,rsi_max=21.3641,vwap_n=12,max_hold=23,slots=14
+v4-3	clean	0.6237	0.9363	1.1703	0.6237	0.9615	0.9785	9.93	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 3: sleeve_share=0.6606,trend_n=117,breadth_cut=0.6358,rsi_n=3,rsi_max=19.2648,vwap_n=9,max_hold=22,slots=13
+v4-3	clean	0.9256	0.9256	1.0196	1.0488	0.9844	1.0168	10.84	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 4: sleeve_share=0.8892,trend_n=88,breadth_cut=0.5122,rsi_n=3,rsi_max=16.1618,vwap_n=12,max_hold=17,slots=12
+v4-3	clean	0.7746	0.7746	0.9984	0.8286	0.8881	0.9321	13.96	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 5: sleeve_share=0.7741,trend_n=93,breadth_cut=0.5209,rsi_n=3,rsi_max=23.3162,vwap_n=11,max_hold=21,slots=13
+v4-3	clean	0.5273	1.2618	0.8712	0.5273	0.8728	0.7484	5.72	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 6: sleeve_share=0.8115,trend_n=102,breadth_cut=0.6975,rsi_n=3,rsi_max=17.7777,vwap_n=12,max_hold=24,slots=12
+v4-3	clean	0.7455	0.9927	0.9792	0.7455	0.9018	0.8893	8.12	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 7: sleeve_share=0.8962,trend_n=110,breadth_cut=0.7078,rsi_n=2,rsi_max=23.1853,vwap_n=10,max_hold=20,slots=13
+v4-3	clean	0.6561	0.6561	1.1736	0.6827	0.9135	1.0015	11.22	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 8: sleeve_share=0.8373,trend_n=97,breadth_cut=0.5499,rsi_n=4,rsi_max=22.5505,vwap_n=8,max_hold=19,slots=13
+v4-3	clean	0.4131	0.4131	0.8492	0.8747	0.7435	0.8503	20.58	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 9: sleeve_share=0.9213,trend_n=118,breadth_cut=0.5378,rsi_n=3,rsi_max=21.559,vwap_n=8,max_hold=18,slots=11
+v4-3	clean	0.7336	0.9529	1.1776	0.7336	0.9942	1.0179	9.62	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 10: sleeve_share=0.6648,trend_n=107,breadth_cut=0.5544,rsi_n=3,rsi_max=16.6537,vwap_n=11,max_hold=22,slots=13
+v4-3	clean	0.6604	1.4673	1.2663	0.6604	1.1298	1.05	8.6	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 11: sleeve_share=0.8341,trend_n=98,breadth_cut=0.5263,rsi_n=4,rsi_max=17.1635,vwap_n=10,max_hold=17,slots=10
+v4-3	clean	0.6672	0.8907	1.036	0.6672	0.889	0.9	14.9	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 12: sleeve_share=0.863,trend_n=116,breadth_cut=0.5907,rsi_n=3,rsi_max=22.8766,vwap_n=10,max_hold=22,slots=11
+v4-3	clean	0.4452	0.4452	0.9126	0.9325	0.7972	0.9138	14.67	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 13: sleeve_share=0.688,trend_n=88,breadth_cut=0.4817,rsi_n=2,rsi_max=22.0091,vwap_n=12,max_hold=16,slots=13
+v4-3	clean	0.8029	0.8029	0.9864	0.8974	0.9066	0.949	15.06	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 14: sleeve_share=0.8889,trend_n=107,breadth_cut=0.5998,rsi_n=3,rsi_max=21.5573,vwap_n=9,max_hold=22,slots=11
+v4-3	clean	0.5302	0.6312	1.0896	0.5302	0.827	0.8947	11.9	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 15: sleeve_share=0.6513,trend_n=117,breadth_cut=0.5017,rsi_n=3,rsi_max=16.4477,vwap_n=8,max_hold=17,slots=14
+v4-3	clean	0.4321	0.4321	0.9579	0.995	0.8365	0.9671	16.07	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 16: sleeve_share=0.8626,trend_n=96,breadth_cut=0.4816,rsi_n=3,rsi_max=19.8792,vwap_n=11,max_hold=20,slots=10
+v4-3	clean	0.5876	0.8892	1.0549	0.5876	0.8821	0.889	12.67	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 17: sleeve_share=0.6636,trend_n=112,breadth_cut=0.5334,rsi_n=3,rsi_max=19.2739,vwap_n=9,max_hold=18,slots=13
+v4-3	clean	0.6667	0.6667	0.8909	0.9408	0.8436	0.9051	17.41	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 18: sleeve_share=0.7902,trend_n=120,breadth_cut=0.5036,rsi_n=3,rsi_max=23.0503,vwap_n=10,max_hold=22,slots=12
+v4-3	clean	0.5915	0.5915	0.9861	0.7774	0.8269	0.9063	16.5	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 19: sleeve_share=0.7699,trend_n=115,breadth_cut=0.5553,rsi_n=3,rsi_max=20.5165,vwap_n=8,max_hold=17,slots=11
+v4-3	clean	0.4112	0.951	1.0786	0.4112	0.8658	0.8507	10.0	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 20: sleeve_share=0.6409,trend_n=107,breadth_cut=0.6189,rsi_n=3,rsi_max=19.353,vwap_n=8,max_hold=19,slots=14
+v4-3	clean	0.6129	1.0228	1.262	0.6129	1.0233	1.0357	9.37	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 21: sleeve_share=0.6521,trend_n=106,breadth_cut=0.6459,rsi_n=3,rsi_max=18.364,vwap_n=9,max_hold=21,slots=11
+v4-3	clean	0.5662	1.071	1.2782	0.5662	1.0334	1.0333	8.66	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 22: sleeve_share=0.6816,trend_n=92,breadth_cut=0.5387,rsi_n=4,rsi_max=20.8828,vwap_n=10,max_hold=20,slots=12
+v4-3	clean	0.1241	0.1241	0.9544	0.9978	0.7522	0.9581	15.36	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 23: sleeve_share=0.9539,trend_n=95,breadth_cut=0.4937,rsi_n=3,rsi_max=16.06,vwap_n=9,max_hold=21,slots=11
+v4-3	clean	0.4488	0.4488	0.9784	1.3534	0.9422	1.0979	15.6	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 24: sleeve_share=0.9076,trend_n=118,breadth_cut=0.5094,rsi_n=3,rsi_max=21.2926,vwap_n=12,max_hold=18,slots=13
+v4-3	clean	0.3896	1.184	1.2849	0.3896	1.0154	0.9814	7.32	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 25: sleeve_share=0.7462,trend_n=88,breadth_cut=0.5423,rsi_n=4,rsi_max=19.8311,vwap_n=10,max_hold=23,slots=14
+v4-3	clean	0.2304	1.2471	0.6876	0.2304	0.6989	0.5417	5.05	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 26: sleeve_share=0.927,trend_n=81,breadth_cut=0.7189,rsi_n=3,rsi_max=23.2226,vwap_n=11,max_hold=23,slots=14
+v4-3	clean	0.906	0.906	0.9462	1.0038	0.9394	0.9601	11.66	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 27: sleeve_share=0.8471,trend_n=85,breadth_cut=0.6432,rsi_n=2,rsi_max=18.8004,vwap_n=9,max_hold=18,slots=13
+v4-3	clean	0.5619	1.2199	1.0961	0.5619	0.9637	0.9121	11.87	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 28: sleeve_share=0.9223,trend_n=116,breadth_cut=0.6287,rsi_n=3,rsi_max=17.0074,vwap_n=9,max_hold=22,slots=12
+v4-3	clean	0.6224	0.6224	0.998	0.763	0.8368	0.909	16.71	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 29: sleeve_share=0.7982,trend_n=111,breadth_cut=0.5337,rsi_n=3,rsi_max=21.9216,vwap_n=8,max_hold=19,slots=14
+v4-3	clean	0.544	0.544	1.0233	0.5933	0.7904	0.872	10.54	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 30: sleeve_share=0.7266,trend_n=81,breadth_cut=0.521,rsi_n=3,rsi_max=16.8151,vwap_n=8,max_hold=17,slots=14
+v4-3	clean	0.7144	1.1219	0.7146	0.7144	0.7824	0.6926	7.68	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 31: sleeve_share=0.9498,trend_n=85,breadth_cut=0.614,rsi_n=3,rsi_max=16.5643,vwap_n=12,max_hold=22,slots=13
+v4-3	clean	0.6479	1.1465	0.8676	0.6479	0.8682	0.7845	6.86	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 32: sleeve_share=0.7937,trend_n=112,breadth_cut=0.678,rsi_n=3,rsi_max=17.8958,vwap_n=12,max_hold=20,slots=12
+v4-3	clean	0.546	0.9218	0.7579	0.546	0.7323	0.6786	9.48	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 33: sleeve_share=0.9391,trend_n=109,breadth_cut=0.6592,rsi_n=3,rsi_max=22.6777,vwap_n=11,max_hold=24,slots=13
+v4-3	clean	0.561	0.5742	1.0806	0.561	0.8128	0.8973	14.22	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 34: sleeve_share=0.9048,trend_n=113,breadth_cut=0.4911,rsi_n=4,rsi_max=22.1153,vwap_n=8,max_hold=22,slots=13
+v4-3	clean	0.5356	1.0816	1.1838	0.5356	0.9753	0.9599	10.27	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 35: sleeve_share=0.7995,trend_n=92,breadth_cut=0.6094,rsi_n=3,rsi_max=19.1503,vwap_n=10,max_hold=22,slots=12
+v4-3	clean	0.8069	1.3089	0.8806	0.8069	0.9152	0.84	9.41	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 36: sleeve_share=0.9245,trend_n=116,breadth_cut=0.6984,rsi_n=3,rsi_max=17.9924,vwap_n=8,max_hold=21,slots=12
+v4-3	clean	0.6478	1.0307	1.0264	0.6478	0.9105	0.8908	6.41	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 37: sleeve_share=0.6405,trend_n=86,breadth_cut=0.7122,rsi_n=3,rsi_max=23.2379,vwap_n=9,max_hold=19,slots=12
+v4-3	clean	0.7498	0.9207	0.9168	0.7498	0.854	0.8442	8.7	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 38: sleeve_share=0.7687,trend_n=81,breadth_cut=0.5928,rsi_n=3,rsi_max=18.862,vwap_n=12,max_hold=23,slots=10
+v4-3	clean	0.3676	1.1577	1.248	0.3676	0.9944	0.9569	6.06	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 39: sleeve_share=0.7731,trend_n=104,breadth_cut=0.5779,rsi_n=4,rsi_max=18.4131,vwap_n=12,max_hold=19,slots=14
+v4-3	clean	0.5941	0.8909	1.1186	0.5941	0.92	0.9369	7.19	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 40: sleeve_share=0.6723,trend_n=114,breadth_cut=0.6821,rsi_n=3,rsi_max=18.4343,vwap_n=10,max_hold=17,slots=11
+v4-3	clean	0.6547	0.9455	1.1534	0.6547	0.962	0.9778	10.3	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 41: sleeve_share=0.8051,trend_n=101,breadth_cut=0.5929,rsi_n=3,rsi_max=17.71,vwap_n=11,max_hold=23,slots=11
+v4-3	clean	0.7268	0.8941	1.1873	0.7268	0.9837	1.022	10.15	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 42: sleeve_share=0.6583,trend_n=113,breadth_cut=0.6551,rsi_n=3,rsi_max=23.409,vwap_n=9,max_hold=22,slots=13
+v4-3	clean	0.617	0.617	1.024	1.0437	0.9214	1.021	13.78	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 43: sleeve_share=0.764,trend_n=111,breadth_cut=0.5056,rsi_n=3,rsi_max=19.9529,vwap_n=12,max_hold=22,slots=10
+v4-3	clean	0.7253	1.0655	1.296	0.7253	1.0797	1.0979	7.57	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 44: sleeve_share=0.8403,trend_n=86,breadth_cut=0.5737,rsi_n=4,rsi_max=18.1914,vwap_n=8,max_hold=23,slots=11
+v4-3	clean	0.4848	1.0859	0.9493	0.4848	0.8358	0.7916	7.57	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 45: sleeve_share=0.8283,trend_n=90,breadth_cut=0.7068,rsi_n=3,rsi_max=22.3977,vwap_n=8,max_hold=19,slots=14
+v4-3	clean	0.5178	1.0909	0.9574	0.5178	0.8566	0.807	7.17	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 46: sleeve_share=0.7341,trend_n=84,breadth_cut=0.6854,rsi_n=3,rsi_max=20.732,vwap_n=9,max_hold=17,slots=12
+v4-3	clean	0.8009	1.458	1.0657	0.8009	1.0396	0.961	8.89	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 47: sleeve_share=0.8445,trend_n=111,breadth_cut=0.7037,rsi_n=3,rsi_max=21.4963,vwap_n=9,max_hold=23,slots=11
+v4-3	clean	0.5565	1.0003	1.1263	0.5565	0.9342	0.9273	10.07	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 48: sleeve_share=0.6519,trend_n=88,breadth_cut=0.5146,rsi_n=3,rsi_max=17.2715,vwap_n=10,max_hold=19,slots=13
+v4-3	clean	0.6371	0.7509	1.0063	0.6371	0.8377	0.8716	13.16	joint	candidate.py (fast/slow fixed) joint+-0.2 draw 49: sleeve_share=0.7329,trend_n=89,breadth_cut=0.5492,rsi_n=3,rsi_max=21.2475,vwap_n=10,max_hold=22,slots=10
+v4-3	combine	0.1995	0.7467	1.1242	0.1995	0.7907	0.8077	3.33	reference	R0 reference
+v4-3	combine	0.7528	0.7756	1.1051	0.7528	0.9222	0.9761	9.67	reference	r2 pullbackcombo as-is
+v4-3	combine	0.4528	0.7097	1.0925	0.4528	0.8279	0.8712	5.93	reference	r2 whipsaw as-is
+v4-3	combine	0.3718	0.7807	1.321	0.3718	0.9299	0.9847	5.17	reference	r2 breadth as-is
+v4-3	combine	0.7528	0.7756	1.1051	0.7528	0.9222	0.9761	9.67	reference	wb reproduce r2 pullbackcombo (ew_share .25, dead kept)
+v4-3	combine	0.7528	0.7756	1.1051	0.7528	0.9222	0.9761	9.67	discard	wb sliver .25, dead removed
+v4-3	combine	0.7556	0.8659	1.0928	0.7556	0.9364	0.9691	9.6	discard	clean base: no sliver, dead removed
+v4-3	combine	0.5908	0.8681	1.166	0.5908	0.9346	0.9629	8.14	discard	clean base sleeve_share=0.6
+v4-3	combine	0.6745	0.8762	1.1397	0.6745	0.943	0.9731	8.88	discard	clean base sleeve_share=0.7
+v4-3	combine	0.7157	0.874	1.1191	0.7157	0.9419	0.9731	9.24	discard	clean base sleeve_share=0.75
+v4-3	combine	0.7933	0.8505	1.0606	0.7933	0.9258	0.9605	9.96	discard	clean base sleeve_share=0.85
+v4-3	combine	0.8267	0.8267	1.0223	0.828	0.9099	0.947	10.3	discard	clean base sleeve_share=0.9
+v4-3	combine	0.8508	0.9034	1.0783	0.8508	0.9605	0.9909	10.07	discard	clean + dist exit on core (climax 65, n20)
+v4-3	combine	0.8229	0.9096	1.2087	0.8229	1.0221	1.0674	9.98	discard	clean + washout-thrust early entry, EW basket
+v4-3	combine	0.7926	0.9547	1.1796	0.7926	1.0095	1.0382	9.6	discard	clean + washout-thrust early entry, NIFTYBEES
+v4-3	combine	0.9163	0.9462	1.1947	0.9163	1.0463	1.0894	10.45	discard	clean + dist + wash(EW)
+v4-3	combine	0.7565	0.9215	1.139	0.7565	0.9744	1.0003	9.08	discard	clean + dist, sleeve_share=0.6
+v4-3	combine	0.8087	0.9248	1.1186	0.8087	0.9763	1.0037	9.58	discard	clean + dist, sleeve_share=0.7
+v4-3	combine	0.8314	0.9179	1.1012	0.8314	0.971	0.9996	9.83	discard	clean + dist, sleeve_share=0.75
+v4-3	combine	0.8663	0.88	1.0495	0.8663	0.9444	0.9773	10.3	discard	clean + dist, sleeve_share=0.85
+v4-3	combine	0.8469	0.8469	1.0148	0.8774	0.9225	0.9584	10.54	discard	clean + dist, sleeve_share=0.9
+v4-3	combine	0.8435	0.9547	1.3084	0.8435	1.0893	1.14	9.83	discard	clean + dist + wash(EW), sleeve_share=0.6
+v4-3	combine	0.8882	0.9648	1.268	0.8882	1.0817	1.1283	10.15	discard	clean + dist + wash(EW), sleeve_share=0.7
+v4-3	combine	0.905	0.9603	1.236	0.905	1.0682	1.1128	10.3	discard	clean + dist + wash(EW), sleeve_share=0.75
+v4-3	combine	0.9197	0.9197	1.1432	0.9209	1.015	1.0571	10.59	discard	clean + dist + wash(EW), sleeve_share=0.85
+v4-3	combine	0.8787	0.8787	1.0813	0.9175	0.9736	1.0155	10.73	discard	clean + dist + wash(EW), sleeve_share=0.9
+v4-3	combine	0.8093	0.8746	1.0785	0.8093	0.944	0.9775	10.49	discard	clean + dist, rsi_climax=52
+v4-3	combine	0.8093	0.8766	1.0785	0.8093	0.9444	0.9775	10.45	discard	clean + dist, rsi_climax=55
+v4-3	combine	0.8514	0.8898	1.0785	0.8514	0.958	0.9914	10.32	discard	clean + dist, rsi_climax=60
+v4-3	combine	0.8028	0.9034	1.0805	0.8028	0.9493	0.9767	9.9	discard	clean + dist, rsi_climax=70
+v4-3	combine	0.8028	0.8638	1.0805	0.8028	0.9416	0.9767	9.77	discard	clean + dist, rsi_climax=75
+v4-3	combine	0.8028	0.8659	1.0928	0.8028	0.9486	0.9848	9.64	discard	clean + dist, rsi_climax=78
+v4-3	combine	0.8718	0.9064	1.0658	0.8718	0.9594	0.9897	10.4	discard	clean + dist, dist_n=14 (untied from fast)
+v4-3	combine	0.8367	0.8639	1.087	0.8367	0.9527	0.9922	10.23	discard	clean + dist, dist_n=16 (untied from fast)
+v4-3	combine	0.7982	0.936	1.0685	0.7982	0.9483	0.9673	9.94	discard	clean + dist, dist_n=25 (untied from fast)
+v4-3	combine	0.7431	0.8355	1.0928	0.7431	0.9265	0.965	9.77	discard	clean + dist, rsi midline=45.0
+v4-3	combine	0.8229	0.9356	1.0672	0.8229	0.9549	0.9747	10.23	discard	clean + dist, rsi midline=55.0
+v4-3	combine	0.881	0.881	1.0551	0.8981	0.9551	0.9906	9.71	discard	clean + dist, sleeve entries blocked while core in dist exit
+v4-3	combine	0.8475	0.8949	1.2357	0.8475	1.0388	1.0935	9.81	discard	clean + wash(EW), wash=0.32
+v4-3	combine	0.7826	0.9053	1.2357	0.7826	1.0245	1.0718	9.87	discard	clean + wash(EW), wash=0.35
+v4-3	combine	0.8229	0.9096	1.2088	0.8229	1.0222	1.0675	10.03	discard	clean + wash(EW), wash=0.45
+v4-3	combine	0.8229	0.9515	1.2088	0.8229	1.0315	1.0675	10.07	discard	clean + wash(EW), wash=0.48
+v4-3	combine	0.8258	0.9282	1.2239	0.8258	1.0346	1.0783	10.04	discard	clean + wash(EW), thrust=0.4
+v4-3	combine	0.8069	0.9282	1.2007	0.8069	1.018	1.0568	9.98	discard	clean + wash(EW), thrust=0.45
+v4-3	combine	0.8034	0.8926	1.2087	0.8034	1.0134	1.0609	9.93	discard	clean + wash(EW), thrust=0.55
+v4-3	combine	0.8833	0.904	1.2349	0.8833	1.0496	1.1048	9.92	discard	clean + wash(EW), thrust=0.6
+v4-3	combine	0.8229	0.9096	1.1923	0.8229	1.0138	1.0567	9.98	discard	clean + wash(EW), long=80
+v4-3	combine	0.8658	0.9096	1.2357	0.8658	1.0469	1.0995	9.97	discard	clean + wash(EW), long=120
+v4-3	combine	0.782	0.8572	1.2571	0.782	1.0244	1.0854	9.98	discard	clean + wash(EW), thrust_n=10
+v4-3	combine	0.8248	0.9189	1.25	0.8248	1.0455	1.0951	9.94	discard	clean + wash(EW), thrust_n=16
+v4-3	combine	0.8034	0.9134	1.1993	0.8034	1.0131	1.0547	9.97	discard	clean + wash(EW), thrust_n=25
+v4-3	combine	0.7556	0.8659	1.0928	0.7556	0.9364	0.9691	9.6	discard	clean base (re-score for concentration)
+v4-3	combine	0.8508	0.9034	1.0783	0.8508	0.9605	0.9909	10.07	discard	clean + dist (re-score)
+v4-3	combine	0.8229	0.9096	1.2087	0.8229	1.0221	1.0674	9.98	discard	clean + wash(EW) (re-score)
+v4-3	combine	0.9163	0.9462	1.1947	0.9163	1.0463	1.0894	10.45	discard	clean + dist + wash(EW) (re-score)
+v4-3	combine	0.881	0.881	1.0551	0.8981	0.9551	0.9906	9.71	discard	clean + dist + sleeve gate (re-score)
+v4-3	combine	0.1952	0.7421	1.1209	0.1952	0.7868	0.8041	0.84	diagnostic	part=core of clean base (diagnostic)
+v4-3	combine	0.4392	0.7844	1.0726	0.4392	0.8347	0.8542	1.3	diagnostic	part=core of clean+dist (diagnostic)
+v4-3	combine	0.7556	0.7556	0.9279	0.8855	0.8616	0.9048	8.8	diagnostic	part=sleeve of clean base (diagnostic)
+v4-3	combine	0.7556	0.7556	0.9279	0.8855	0.8616	0.9048	8.8	diagnostic	part=sleeve of clean+dist (diagnostic)
+v4-3	combine	0.3795	0.7783	1.3198	0.3795	0.9311	0.9871	1.21	diagnostic	part=core of clean+wash (diagnostic)
+v4-3	combine	0.8093	0.8746	1.0785	0.8093	0.944	0.9775	10.49	discard	clean + dist without climax condition (rsi_climax=0)
+v4-3	combine	0.8409	0.8409	1.0908	0.8577	0.9552	1.0014	10.05	discard	clean + dist without climax + sleeve gate
+v4-3	combine	0.9247	0.9247	1.1725	0.9633	1.0418	1.0898	10.09	discard	clean + dist(climax 65) + sleeve gate + wash(EW)
+v4-3	combine	0.8564	0.8564	1.0908	0.9009	0.9695	1.0155	9.88	discard	clean + dist(climax 60) + sleeve gate
+v4-3	combine	0.8628	0.881	1.056	0.8628	0.9465	0.9798	9.71	discard	clean + dist(climax 70) + sleeve gate
+v4-3	combine	0.8409	0.8409	1.0908	0.8577	0.9552	1.0014	10.05	discard	clean + dist(climax 52) + sleeve gate
+v4-3	combine	0.8628	0.8659	1.0928	0.8628	0.9637	1.0041	9.58	discard	clean + dist(climax 78) + sleeve gate
+v4-3	combine	0.8409	0.8409	1.0908	0.8577	0.9552	1.0014	10.05	discard	B = clean + dist(no climax) + sleeve gate
+v4-3	combine	0.7577	0.8659	1.0928	0.7577	0.937	0.9698	9.6	discard	B, rsi midline=40.0
+v4-3	combine	0.762	0.7964	1.0814	0.762	0.917	0.9638	9.83	discard	B, rsi midline=45.0
+v4-3	combine	0.5825	0.5825	0.9557	1.0692	0.8864	0.9827	8.77	discard	B, rsi midline=55.0
+v4-3	combine	0.5521	0.5521	1.1125	0.8168	0.8955	1.0023	7.69	discard	B, rsi midline=60.0
+v4-3	combine	0.726	0.8244	1.0926	0.726	0.9189	0.9592	10.26	discard	B, fast=16 (dist window tied)
+v4-3	combine	0.8169	0.828	1.1145	0.8169	0.9541	1.0037	10.05	discard	B, fast=24 (dist window tied)
+v4-3	combine	0.7748	0.7802	1.1042	0.7748	0.9279	0.983	10.27	discard	B, slow=40
+v4-3	combine	0.8026	0.8292	1.1309	0.8026	0.9591	1.0098	10.09	discard	B, slow=60
+v4-3	combine	0.7493	0.7493	1.0518	1.0748	0.9677	1.044	9.27	discard	B, dist_n=16 untied
+v4-3	combine	0.8687	0.8964	1.0732	0.8687	0.9598	0.9937	9.69	discard	B, dist_n=24 untied
+v4-3	combine	0.8093	0.8746	1.0785	0.8093	0.944	0.9775	10.49	discard	D = clean + dist(no climax), no gate
+v4-3	combine	0.7577	0.8659	1.0928	0.7577	0.937	0.9698	9.6	discard	D, rsi midline=40.0
+v4-3	combine	0.7431	0.8108	1.0814	0.7431	0.9153	0.9575	9.86	discard	D, rsi midline=45.0
+v4-3	combine	0.7698	0.7887	1.094	0.7698	0.9232	0.9744	10.52	discard	D, rsi midline=55.0
+v4-3	combine	0.6771	0.7516	1.1912	0.6771	0.9408	1.0073	10.34	discard	D, rsi midline=60.0
+v4-3	combine	0.6815	0.8584	1.0802	0.6815	0.9083	0.9361	10.7	discard	D, fast=16 (dist window tied)
+v4-3	combine	0.7696	0.8619	1.1019	0.7696	0.943	0.9798	10.49	discard	D, fast=24 (dist window tied)
+v4-3	combine	0.7966	0.8383	1.087	0.7966	0.9368	0.9789	10.49	discard	D, dist_n=16 untied
+v4-3	combine	0.8377	0.9372	1.0907	0.8377	0.9702	0.995	10.02	discard	D, dist_n=24 untied
+v4-3	combine	0.6937	0.8297	1.0866	0.6937	0.9092	0.9442	9.86	discard	clean base, fast=16
+v4-3	combine	0.6969	0.8345	1.116	0.6969	0.9263	0.9647	9.52	discard	clean base, fast=24
+v4-3	combine	0.1995	0.7467	1.1242	0.1995	0.7907	0.8077	3.33	reference	R0 (re-score for concentration)
+v4-3	combine	0.7556	0.8659	1.0928	0.7556	0.9364	0.9691	9.6	discard	clean base (re-score)
+v4-3	combine	0.8508	0.9034	1.0783	0.8508	0.9605	0.9909	10.07	discard	clean + dist climax65 (re-score)
+v4-3	combine	0.8229	0.9096	1.2087	0.8229	1.0221	1.0674	9.98	discard	clean + wash (re-score)
+v4-3	combine	0.7099	0.8368	1.029	0.7099	0.8862	0.9123	10.22	discard	clean + wash, no thrust condition (thrust=0)
+v4-3	combine	0.862	0.9284	1.2638	0.862	1.0638	1.117	10.08	discard	clean + wash, thrust = short breadth > long breadth
+v4-3	combine	0.7984	0.8686	1.0154	0.7984	0.9071	0.9315	10.69	discard	clean + dist(c65) + wash, no thrust
+v4-3	combine	0.9553	0.9649	1.2504	0.9553	1.0874	1.1383	10.54	discard	Q = clean + dist(c65) + wash(rel thrust)
+v4-3	combine	0.9601	0.9601	1.2659	0.9766	1.0998	1.1555	10.44	discard	Q, wash=0.32
+v4-3	combine	0.9287	1.0075	1.2847	0.9287	1.1076	1.1525	10.64	discard	Q, wash=0.48
+v4-3	combine	0.9155	0.9374	1.2513	0.9155	1.0722	1.1262	10.97	discard	Q, rsi_climax=52.0
+v4-3	combine	0.9087	0.9284	1.2638	0.9087	1.0757	1.1322	10.12	discard	Q, rsi_climax=78.0
+v4-3	combine	0.8791	0.8791	1.2772	0.925	1.0755	1.1463	10.6	discard	Q, long=80 (untied from trend_n)
+v4-3	combine	0.9657	0.9657	1.2437	0.9766	1.0906	1.1413	10.53	discard	Q, long=120 (untied from trend_n)
+v4-3	combine	0.8904	0.9462	1.2853	0.8904	1.0855	1.1405	10.65	discard	Q, thrust_n=16
+v4-3	combine	0.8989	0.9696	1.228	0.8989	1.0629	1.1053	10.49	discard	Q, thrust_n=24
+v4-3	combine	0.8823	0.9237	1.2794	0.8823	1.0759	1.1339	9.97	discard	clean + wash(rel), wash=0.32
+v4-3	combine	0.8361	0.9699	1.298	0.8361	1.0837	1.1311	10.17	discard	clean + wash(rel), wash=0.48
+v4-3	combine	0.9155	0.9374	1.2513	0.9155	1.0722	1.1262	10.97	discard	Q without climax (rsi_climax=0)
+v4-3	combine	0.9437	0.9437	1.229	1.0025	1.0831	1.1388	10.18	discard	Q + sleeve gate
+v4-3	combine	0.8103	0.9337	1.3004	0.8103	1.0698	1.1243	11.15	discard	Q, fast=16 (dist_n, thrust_n tied)
+v4-3	combine	0.7939	0.9467	1.2583	0.7939	1.0467	1.0913	10.24	discard	Q, fast=24 (dist_n, thrust_n tied)
+v4-3	combine	0.9275	0.9275	1.246	0.9409	1.0737	1.1309	10.83	discard	Q, slow=40
+v4-3	combine	0.8972	0.8972	1.2491	0.8996	1.0583	1.1195	10.63	discard	Q, slow=60
+v4-3	combine	0.7807	0.7807	1.3054	0.8124	1.0417	1.1299	9.82	discard	Q, trend_n=80 (long tied)
+v4-3	combine	0.981	0.981	1.2104	1.0125	1.0867	1.1329	11.33	discard	Q, trend_n=120 (long tied)
+v4-3	combine	0.8503	0.8994	1.2638	0.8503	1.0546	1.1133	10.25	discard	Q, dist midline=45.0
+v4-3	combine	0.9291	0.9959	1.2431	0.9291	1.0841	1.1253	10.71	discard	Q, dist midline=55.0
+v4-3	combine	0.9184	0.981	1.3314	0.9184	1.1243	1.1801	10.13	discard	Q, sleeve_share=0.64
+v4-3	combine	0.9387	0.9848	1.3142	0.9387	1.1208	1.1751	10.29	discard	Q, sleeve_share=0.7
+v4-3	combine	0.9362	0.9362	1.1962	0.9521	1.0528	1.1019	10.66	discard	Q, sleeve_share=0.85
+v4-3	combine	0.8155	0.8155	1.0144	0.9119	0.9247	0.97	10.91	discard	Q, sleeve_share=0.96
+v4-3	combine	0.9155	0.9374	1.2513	0.9155	1.0722	1.1262	10.97	discard	Qp = clean + dist(no climax) + wash(rel thrust)
+v4-3	combine	0.8503	0.8757	1.2531	0.8503	1.0439	1.1062	10.33	discard	Qp, dist midline=45.0
+v4-3	combine	0.8556	0.8556	1.2692	0.8782	1.0545	1.1258	11.0	discard	Qp, dist midline=55.0
+v4-3	combine	0.9327	0.9327	1.267	0.9367	1.0847	1.1434	10.86	discard	Qp, wash=0.32
+v4-3	combine	0.8889	0.9803	1.2858	0.8889	1.0925	1.1404	11.06	discard	Qp, wash=0.48
+v4-3	combine	0.7528	0.7528	1.3054	0.7685	1.0252	1.1165	10.24	discard	Qp, trend_n=80 (long tied)
+v4-3	combine	0.9554	0.9554	1.2116	0.9755	1.0721	1.1211	11.76	discard	Qp, trend_n=120 (long tied)
+v4-3	combine	0.7212	0.924	1.3004	0.7212	1.0448	1.0949	11.31	discard	Qp, fast=16 (dist_n, thrust_n tied)
+v4-3	combine	0.8536	0.9416	1.2564	0.8536	1.0597	1.1094	10.41	discard	Qp, fast=24 (dist_n, thrust_n tied)
+v4-3	combine	0.8851	0.8851	1.2513	0.9155	1.0608	1.1262	10.91	diagnostic	Qp leave-one-out: wash episode 0 skipped
+v4-3	combine	0.9155	0.9279	1.2513	0.9155	1.0702	1.1262	10.92	diagnostic	Qp leave-one-out: wash episode 1 skipped
+v4-3	combine	0.9155	0.9383	1.2513	0.9155	1.0713	1.1262	10.91	diagnostic	Qp leave-one-out: wash episode 2 skipped
+v4-3	combine	0.9155	0.9374	1.1137	0.9155	1.0044	1.0364	10.89	diagnostic	Qp leave-one-out: wash episode 3 skipped
+v4-3	combine	0.9155	0.9374	1.243	0.9155	1.0681	1.1207	10.91	diagnostic	Qp leave-one-out: wash episode 4 skipped
+v4-3	combine	0.9155	0.9374	1.2268	0.9155	1.0597	1.11	10.92	diagnostic	Qp leave-one-out: wash episode 5 skipped
+v4-3	combine	0.89	0.9374	1.2513	0.89	1.0659	1.1178	10.9	diagnostic	Qp leave-one-out: wash episode 6 skipped
+v4-3	combine	0.8163	0.9374	1.2513	0.8163	1.0476	1.0942	10.91	diagnostic	Qp leave-one-out: wash episode 7 skipped
+v4-3	combine	0.9356	0.9374	1.2513	0.9356	1.0773	1.1327	10.94	diagnostic	Qp leave-one-out: wash episode 8 skipped
+v4-3	combine	0.8563	0.9374	1.2513	0.8563	1.0572	1.1069	10.97	diagnostic	Qp leave-one-out: dist episode 21 skipped
+v4-3	combine	0.8955	0.9374	1.2513	0.8955	1.0672	1.1197	10.97	diagnostic	Qp leave-one-out: dist episode 22 skipped
+v4-3	combine	0.9302	0.9374	1.2513	0.9302	1.0759	1.131	10.92	diagnostic	Qp leave-one-out: dist episode 23 skipped
+v4-3	combine	0.8745	0.9374	1.2513	0.8745	1.0619	1.1129	10.97	diagnostic	Qp leave-one-out: dist episode 25 skipped
+v4-3	combine	0.8871	0.9374	1.2513	0.8871	1.0651	1.117	10.97	diagnostic	Qp leave-one-out: dist episode 29 skipped
+v4-3	combine	0.7573	0.9374	1.2513	0.7573	1.0326	1.075	10.91	diagnostic	Qp leave-two-out: wash ep 7 and dist ep 21 skipped
+v4-3	combine	0.6355	0.6607	0.9643	0.6355	0.7955	0.8446	11.65	discard	clean base, core trend = NIFTY > EMA(trend_n) (no fast/slow)
+v4-3	combine	0.7285	0.7285	0.9622	0.7292	0.8335	0.8746	10.79	discard	clean base, core trend = cross AND NIFTY > EMA(trend_n)
+v4-3	combine	0.7641	0.9284	1.2638	0.7641	1.0395	1.0854	10.02	diagnostic	clean + wash(rel), Apr-2026 episode (7) skipped
+v4-3	combine	0.7487	0.8746	1.0785	0.7487	0.9283	0.9574	10.49	diagnostic	clean + dist(no climax), Oct-2024 episode (21) skipped
+v4-3	combine	0.8508	0.9034	1.0783	0.8508	0.9605	0.9909	10.07	diagnostic	clean + dist(climax65), Oct-2024 episode skipped [INVALID: episode index 21 refers to the no-climax numbering; nothing was skipped]
+v4-3	combine	0.79	0.9034	1.0783	0.79	0.9449	0.971	10.07	diagnostic	clean + dist(climax65), Oct-2024 episode (13 in climax numbering) skipped
+v4-3	combine	0.7482	0.9034	1.0783	0.7482	0.9342	0.9571	10.07	diagnostic	clean + dist(climax65), Oct-2024 and Jan-2026 episodes skipped
+v4-3	combine	0.7452	0.8938	1.2326	0.7452	1.0107	1.0581	11.27	discard	clean base, sleeve size ramp replaced by hard breadth cut at 0.6 (breadth_full removed)
+v4-3	combine	0.6974	0.6974	1.0355	0.9185	0.9133	0.9869	15.31	discard	clean base, sleeve size ramp replaced by hard breadth cut at 0.48 (breadth_full removed)
+v4-3	combine	0.6229	1.1477	0.9448	0.6229	0.8903	0.8286	5.87	discard	clean base, sleeve size ramp replaced by hard breadth cut at 0.72 (breadth_full removed)
+v4-3	combine	0.7556	0.8659	1.0928	0.7556	0.9364	0.9691	9.6	discard	standalone clean ramp file (check = wb clean base)
+v4-3	combine	0.7452	0.8938	1.2326	0.7452	1.0107	1.0581	11.27	discard	standalone clean hard-cut 0.6 file
+v4-3	combine	0.9257	0.9872	1.3732	0.9257	1.1476	1.2103	12.21	discard	cut base (wb) + dist(c65) + wash(rel)
+v4-3	combine	0.8894	0.9625	1.3753	0.8894	1.1345	1.2	12.64	discard	cut base (wb) + dist(no climax) + wash(rel)
+v4-3	combine	0.7469	0.9625	1.3753	0.7469	1.099	1.1542	12.58	diagnostic	cut base + dist(no climax) + wash(rel), Oct-2024 dist and Apr-2026 wash episodes skipped
+v4-3	combine	0.5593	0.6965	1.0623	0.5593	0.8341	0.8846	11.27	cost-check	clean hard-cut candidate [cost 25 bps]
+v4-3	combine	0.2805	0.4003	0.8051	0.2805	0.568	0.6231	11.27	cost-check	clean hard-cut candidate [cost 40 bps]
+v4-3	combine	0.7452	0.8938	1.2326	0.7452	1.0107	1.0581	11.27	candidate	clean hard-cut candidate (years)
+v4-3	combine	0.5673	0.5791	0.9451	0.5673	0.7505	0.8092	9.67	reference	r2 pullbackcombo [cost 25 bps]
+v4-3	combine	0.2844	0.2844	0.7033	0.2889	0.4918	0.5575	9.67	reference	r2 pullbackcombo [cost 40 bps]
+v4-3	combine	0.5695	0.669	0.9329	0.5695	0.7647	0.8021	9.6	cost-check	clean ramp candidate (sliver + dead code removed) [cost 25 bps]
+v4-3	combine	0.2903	0.3737	0.6913	0.2903	0.506	0.5503	9.6	cost-check	clean ramp candidate (sliver + dead code removed) [cost 40 bps]
+v4-3	combine	0.7556	0.8659	1.0928	0.7556	0.9364	0.9691	9.6	candidate	candidate.py final (= clean ramp)
+v4-3	core	0.1995	0.7467	1.1242	0.1995	0.7907	0.8077	3.33	ref	R0 base (reference)
+v4-3	core	0.017	0.6576	1.1033	0.017	0.7048	0.7229	4.62	ref	R0 fast=16 (reference neighbour)
+v4-3	core	0.0281	0.6767	1.2069	0.0281	0.7686	0.8027	2.9	ref	R0 fast=24 (reference neighbour)
+v4-3	core	0.1591	0.5662	1.1642	0.1591	0.7453	0.8109	4.4	ref	R0 slow=40 (reference neighbour)
+v4-3	core	0.0633	0.6134	1.2429	0.0633	0.7819	0.8428	3.54	ref	R0 slow=60 (reference neighbour)
+v4-3	core	0.7528	0.7756	1.1051	0.7528	0.9222	0.9761	9.67	ref	r2_pullbackcombo base (reference)
+v4-3	core	-0.1215	0.3331	0.9255	-0.1215	0.5014	0.5613	3.66	discard	core ens 10/30,20/50,30/100,50/150 graded scale1
+v4-3	core	-0.0788	0.3288	1.0834	-0.0788	0.5827	0.6722	5.16	discard	core ens 4 pairs graded scale0.8
+v4-3	core	-0.0692	0.3484	0.8317	-0.0692	0.4744	0.5199	3.39	discard	core ens 4 pairs graded scale1.2
+v4-3	core	-0.2158	0.0539	1.1379	-0.2158	0.5131	0.6766	2.25	discard	core ens 10/30,20/50,30/100,50/150 majority(>=0.5) scale1
+v4-3	core	0.0838	0.5216	0.96	0.0838	0.6261	0.6644	2.68	discard	core hyst EMA20/50 band 0.0025
+v4-3	core	0.192	0.3708	0.8096	0.192	0.5421	0.6015	2.47	discard	core hyst EMA20/50 band 0.005
+v4-3	core	-0.1257	-0.1257	0.9076	0.0778	0.4361	0.6229	1.83	discard	core hyst EMA20/50 band 0.01
+v4-3	core	0.1708	0.4863	1.27	0.1708	0.7753	0.8766	5.27	discard	core slope EMA50 vs 10d ago
+v4-3	core	0.0558	0.2995	0.9447	0.0558	0.5469	0.634	2.69	discard	core slope EMA100 vs 20d ago
+v4-3	core	-0.5586	0.1616	1.1008	-0.5586	0.4075	0.4914	11.07	discard	core slope EMA30 vs 5d ago
+v4-3	core	-0.4637	0.0499	1.2403	-0.4637	0.4623	0.5986	18.36	discard	core close>EMA50 band 0.0
+v4-3	core	-0.1502	0.2505	0.7181	-0.1502	0.3773	0.4216	13.64	discard	core close>EMA100 band 0.0
+v4-3	core	-0.2419	0.0038	1.0981	-0.2419	0.4582	0.6128	7.2	discard	core close>EMA50 band 0.01
+v4-3	core	-0.1102	0.5248	1.2537	-0.1102	0.6902	0.7493	6.34	discard	core slope EMA40 vs 10d ago (neighbour)
+v4-3	core	-0.2769	0.4844	1.1408	-0.2769	0.5966	0.6371	5.26	discard	core slope EMA60 vs 10d ago (neighbour)
+v4-3	core	-0.2795	0.3721	1.1506	-0.2795	0.5667	0.6358	6.55	discard	core slope EMA50 vs 8d ago (neighbour)
+v4-3	core	0.0484	0.6055	1.1428	0.0484	0.7098	0.7479	4.84	discard	core slope EMA50 vs 12d ago (neighbour)
+v4-3	core	0.113	0.6237	1.1797	0.113	0.7608	0.8108	3.76	discard	core ens 9 pairs fast16-24 x slow40-60 graded scale1.0
+v4-3	core	-0.0024	0.4507	1.2289	-0.0024	0.6992	0.7876	5.14	discard	core ens 9 pairs fast16-24 x slow40-60 graded scale0.8
+v4-3	core	0.0948	0.5205	1.0286	0.0948	0.6589	0.7092	3.17	discard	core ens 9 pairs fast16-24 x slow40-60 graded scale1.2
+v4-3	core	0.7556	0.8659	1.0928	0.7556	0.9364	0.9691	9.6	discard	combo R0 core, sleeve cleaned (no sliver, ETF only core), keep ~reclaimed filter
+v4-3	core	0.7556	0.8659	1.0928	0.7556	0.9364	0.9691	9.6	discard	combo R0 core, sleeve cleaned (no sliver), ~reclaimed filter removed
+v4-3	core	0.6937	0.8297	1.0866	0.6937	0.9092	0.9442	9.86	discard	combo R0 core fast=16, cleaned sleeve
+v4-3	core	0.6969	0.8345	1.116	0.6969	0.9263	0.9647	9.52	discard	combo R0 core fast=24, cleaned sleeve
+v4-3	core	0.7437	0.7937	1.1057	0.7437	0.924	0.9735	9.81	discard	combo R0 core slow=40, cleaned sleeve
+v4-3	core	0.7083	0.8071	1.1319	0.7083	0.9312	0.9791	9.65	discard	combo R0 core slow=60, cleaned sleeve
+v4-3	core	0.7272	0.8145	1.1057	0.7272	0.9242	0.968	9.67	discard	combo core=ens9 (fast20 slow50 spread0.2 graded) + cleaned sleeve
+v4-3	core	0.67	0.686	1.0671	0.67	0.8619	0.9237	9.67	discard	combo core=ramp EMA20/50 band 1% + cleaned sleeve
+v4-3	core	0.7527	0.785	1.1453	0.7527	0.9436	1.0023	9.99	discard	combo core=slope EMA50 10d + cleaned sleeve
+v4-3	core	0.7556	0.7556	0.9279	0.8855	0.8616	0.9048	8.8	discard	combo core=none (sleeve only, 80% book) 
+v4-3	core	0.0392	0.4391	1.1581	0.0392	0.6804	0.7661	4.55	discard	core ens5 ratio2.5 fast10-30 graded scale1.0
+v4-3	core	-0.066	0.462	1.2842	-0.066	0.7127	0.8017	5.88	discard	core ens5 ratio2.5 fast10-30 graded scale0.8
+v4-3	core	-0.0212	0.3963	1.1286	-0.0212	0.6411	0.7283	3.83	discard	core ens5 ratio2.5 fast10-30 graded scale1.2
+v4-3	core	0.5451	0.7939	0.9915	0.5451	0.8156	0.8333	9.05	discard	combo core=always-on NIFTYBEES 20% (no timing) + cleaned sleeve
+v4-3	core	0.6745	0.8762	1.1397	0.6745	0.943	0.9731	8.88	discard	combo R0 core, sleeve_share 0.7
+v4-3	core	0.8267	0.8267	1.0223	0.828	0.9099	0.947	10.3	discard	combo R0 core, sleeve_share 0.9
+v4-3	core	-0.3439	0.3364	1.1169	-0.3439	0.5474	0.6149	4.0	discard	core breadth: exposure = share of members with EMA20>EMA50 (graded)
+v4-3	core	-0.3643	0.3581	1.145	-0.3643	0.5588	0.6235	4.41	discard	core breadth graded fast=16 (neighbour)
+v4-3	core	-0.302	0.3073	1.0598	-0.302	0.5216	0.5898	3.76	discard	core breadth graded fast=24 (neighbour)
+v4-3	core	-0.3878	0.3897	1.1503	-0.3878	0.561	0.6174	4.43	discard	core breadth graded slow=40 (neighbour)
+v4-3	core	-0.3029	0.3269	1.0499	-0.3029	0.5211	0.5833	3.75	discard	core breadth graded slow=60 (neighbour)
+v4-3	core	0.1106	0.4131	0.7141	0.1106	0.4821	0.5074	9.34	discard	core EMA20>EMA50 and NIFTY>EMA100
+v4-3	core	0.3248	0.7019	0.7672	0.3248	0.635	0.613	3.11	discard	core EMA20>EMA50>EMA100 aligned
+v4-3	core	0.2108	0.718	0.7302	0.2108	0.5916	0.5492	3.97	discard	core aligned EMA20>EMA50>EMA100, fast=16 (neighbour)
+v4-3	core	0.1798	0.5589	0.9115	0.1798	0.6324	0.6596	2.9	discard	core aligned EMA20>EMA50>EMA100, fast=24 (neighbour)
+v4-3	core	0.2134	0.6654	0.8293	0.2134	0.6273	0.6152	4.19	discard	core aligned EMA20>EMA50>EMA100, slow=40 (neighbour)
+v4-3	core	0.1691	0.4078	0.7642	0.1691	0.5223	0.5638	3.11	discard	core aligned EMA20>EMA50>EMA100, slow=60 (neighbour)
+v4-3	core	0.0995	0.6129	0.8592	0.0995	0.6015	0.5989	3.54	discard	core aligned EMA20>EMA50>EMA100, n=80 (neighbour)
+v4-3	core	0.2903	0.6347	0.779	0.2903	0.6151	0.6095	3.33	discard	core aligned EMA20>EMA50>EMA100, n=120 (neighbour)
+v4-3	core	0.7981	0.8381	0.9628	0.7981	0.8752	0.8979	9.54	discard	combo core=aligned EMA20>EMA50>EMA(trend_n=100) + cleaned sleeve
+v4-3	core	0.7372	0.8428	0.9572	0.7372	0.8591	0.8738	8.79	discard	combo core=aligned, sleeve_share 0.7
+v4-3	core	0.6708	0.8318	0.9402	0.6708	0.8327	0.8407	8.03	discard	combo core=aligned, sleeve_share 0.6
+v4-3	core	0.0758	0.4966	0.8484	0.0758	0.5596	0.5829	2.65	discard	core alone ladder2 (20,50,100) graded [sleeve_share=0]
+v4-3	core	0.7144	0.7543	0.9929	0.7144	0.8509	0.8898	9.46	discard	combo core=ladder2 (20,50,100) + cleaned sleeve
+v4-3	core	-0.0275	0.4456	0.8718	-0.0275	0.5335	0.5655	2.82	discard	core alone ladder3 (20,50,100) graded [sleeve_share=0]
+v4-3	core	0.6794	0.7325	1.0013	0.6794	0.8414	0.8837	9.49	discard	combo core=ladder3 (20,50,100) + cleaned sleeve
+v4-3	core	-0.1588	0.5093	1.2349	-0.1588	0.662	0.7168	6.55	discard	core grid R0 fast=10 slow=35
+v4-3	core	-0.192	0.2113	1.1874	-0.192	0.5709	0.6972	5.91	discard	core grid R0 fast=10 slow=50
+v4-3	core	-0.4537	0.5288	1.0193	-0.4537	0.5007	0.4924	5.69	discard	core grid R0 fast=10 slow=70
+v4-3	core	-0.0911	0.3895	1.0792	-0.0911	0.6063	0.6831	3.97	discard	core grid R0 fast=10 slow=100
+v4-3	core	-0.1714	0.3002	1.2139	-0.1714	0.5998	0.7058	6.12	discard	core grid R0 fast=15 slow=35
+v4-3	core	-0.0536	0.5681	1.0738	-0.0536	0.6472	0.6765	4.83	discard	core grid R0 fast=15 slow=50
+v4-3	core	-0.1638	0.5998	1.2526	-0.1638	0.7261	0.7719	3.97	discard	core grid R0 fast=15 slow=70
+v4-3	core	-0.202	0.1206	0.9847	-0.202	0.4634	0.5831	3.97	discard	core grid R0 fast=15 slow=100
+v4-3	core	0.0736	0.4762	1.2315	0.0736	0.7303	0.8209	4.62	discard	core grid R0 fast=20 slow=35
+v4-3	core	0.1153	0.4428	0.9496	0.1153	0.6056	0.6644	3.33	discard	core grid R0 fast=20 slow=70
+v4-3	core	-0.2244	0.3336	0.8908	-0.2244	0.4671	0.5146	3.11	discard	core grid R0 fast=20 slow=100
+v4-3	core	0.1508	0.7606	1.0816	0.1508	0.7552	0.7548	4.19	discard	core grid R0 fast=25 slow=35
+v4-3	core	0.0644	0.6048	1.1392	0.0644	0.7258	0.7703	3.11	discard	core grid R0 fast=25 slow=50
+v4-3	core	0.1137	0.373	0.8779	0.1137	0.5537	0.6184	2.69	discard	core grid R0 fast=25 slow=70
+v4-3	core	-0.3181	0.2259	0.8189	-0.3181	0.3808	0.435	2.47	discard	core grid R0 fast=25 slow=100
+v4-3	core	0.2231	0.7503	1.0531	0.2231	0.7625	0.7681	3.11	discard	core grid R0 fast=30 slow=35
+v4-3	core	0.0595	0.3335	1.1178	0.0595	0.644	0.7556	3.11	discard	core grid R0 fast=30 slow=50
+v4-3	core	-0.0669	0.4246	0.9956	-0.0669	0.5805	0.6363	2.9	discard	core grid R0 fast=30 slow=70
+v4-3	core	-0.2559	-0.0126	0.8379	-0.2559	0.3403	0.4652	2.25	discard	core grid R0 fast=30 slow=100
+v4-3	core	0.2636	0.7365	0.9639	0.2636	0.7251	0.7226	3.25	discard	core alone nested: R0 at half size when EMA50<EMA100 [sleeve_share=0]
+v4-3	core	0.7778	0.8544	1.0296	0.7778	0.9074	0.935	9.57	discard	combo core=nested (R0 half when EMA50<EMA100) + cleaned sleeve
+v4-3	core	0.1136	0.6989	0.9371	0.1136	0.6622	0.651	4.33	discard	core alone nested fast=16 (neighbour) [sleeve_share=0]
+v4-3	core	0.1032	0.6291	1.0749	0.1032	0.7112	0.7416	2.92	discard	core alone nested fast=24 (neighbour) [sleeve_share=0]
+v4-3	core	0.1903	0.6259	1.0144	0.1903	0.7	0.7276	4.32	discard	core alone nested slow=40 (neighbour) [sleeve_share=0]
+v4-3	core	0.1157	0.5213	1.0234	0.1157	0.6654	0.7174	3.35	discard	core alone nested slow=60 (neighbour) [sleeve_share=0]
+v4-3	core	0.1516	0.6921	1.0076	0.1516	0.7073	0.7142	3.46	discard	core alone nested trend_n=80 (neighbour) [sleeve_share=0]
+v4-3	core	0.2465	0.7027	0.9691	0.2465	0.7148	0.7206	3.36	discard	core alone nested trend_n=120 (neighbour) [sleeve_share=0]
+v4-3	core	0.7882	0.8469	0.9966	0.7882	0.8917	0.9168	9.56	discard	combo core=nested counter=0.25 + cleaned sleeve
+v4-3	core	0.7669	0.8608	1.0617	0.7669	0.9223	0.9524	9.59	discard	combo core=nested counter=0.75 + cleaned sleeve
+v4-3	core	0.7981	0.8381	0.9628	0.7981	0.8752	0.8979	9.54	discard	combo core=nested counter=0.0 + cleaned sleeve
+v4-3	core	0.6766	0.7804	1.1094	0.6766	0.9053	0.9534	9.83	discard	combo core=ens9 fast=16 (neighbour)
+v4-3	core	0.7154	0.8027	1.0854	0.7154	0.9085	0.9508	9.58	discard	combo core=ens9 fast=24 (neighbour)
+v4-3	core	0.7146	0.8043	1.1136	0.7146	0.9223	0.9687	9.79	discard	combo core=ens9 slow=40 (neighbour)
+v4-3	core	0.7089	0.7823	1.0845	0.7089	0.9019	0.9481	9.62	discard	combo core=ens9 slow=60 (neighbour)
+v4-3	core	0.7218	0.8212	1.0949	0.7218	0.9188	0.9591	9.66	discard	combo core=ens9 spread=0.16 (neighbour)
+v4-3	core	0.7167	0.8025	1.097	0.7167	0.9144	0.9587	9.69	discard	combo core=ens9 spread=0.24 (neighbour)
+v4-3	core	0.7933	0.8505	1.0606	0.7933	0.9258	0.9605	9.96	discard	combo R0 core, core share 0.15 (sleeve_share 0.85)
+v4-3	core	0.8145	0.8373	1.0383	0.8145	0.9169	0.953	10.17	discard	combo R0 core, core share 0.12 (sleeve_share 0.88)
+v4-3	core	0.8148	0.8148	1.0052	0.8409	0.9019	0.9402	10.44	discard	combo R0 core, core share 0.08 (sleeve_share 0.92)
+v4-3	core	0.7973	0.8075	1.0189	0.7973	0.8961	0.9346	10.43	discard	combo R0 core share 0.1, fast=16 (neighbour)
+v4-3	core	0.798	0.8102	1.0339	0.798	0.9045	0.9446	10.26	discard	combo R0 core share 0.1, fast=24 (neighbour)
+v4-3	core	0.7892	0.7892	1.0285	0.8229	0.9037	0.9495	10.41	discard	combo R0 core share 0.1, slow=40 (neighbour)
+v4-3	core	0.7954	0.7954	1.0428	0.8038	0.9073	0.9524	10.33	discard	combo R0 core share 0.1, slow=60 (neighbour)
+v4-3	core	0.1874	0.6083	1.2069	0.1874	0.7903	0.857	2.9	discard	core 9-pair consensus hysteresis (on >2/3 up, off <1/3) scale1.0
+v4-3	core	0.0524	0.7114	1.3069	0.0524	0.8205	0.861	3.76	discard	core 9-pair consensus hysteresis (on >2/3 up, off <1/3) scale0.8
+v4-3	core	0.1293	0.3876	0.8834	0.1293	0.5627	0.6261	2.68	discard	core 9-pair consensus hysteresis (on >2/3 up, off <1/3) scale1.2
+v4-3	core	-0.4972	0.0524	1.2307	-0.4972	0.4506	0.5834	11.27	discard	core agreement: enter when close>EMA50 & RSI14>50 & ETF>VWAP50, exit when all 3 bearish
+v4-3	core	-0.5603	-0.0907	1.3324	-0.5603	0.433	0.6074	14.92	discard	core agreement: enter all 3 bullish, exit when >=2 bearish (n=50)
+v4-3	core	0.6138	0.6138	1.0233	0.98	0.9042	0.9985	14.39	discard	combo R0 core 20%, breadth hard cut at 0.5 (ramp removed)
+v4-3	core	0.7452	0.8938	1.2326	0.7452	1.0107	1.0581	11.27	discard	combo R0 core 20%, breadth hard cut at 0.6 (ramp removed)
+v4-3	core	0.6229	1.1477	0.9448	0.6229	0.8903	0.8286	5.87	discard	combo R0 core 20%, breadth hard cut at 0.72 (ramp removed)
+v4-3	core	0.791	0.791	1.1212	0.8462	0.9568	1.0178	10.47	discard	sleeve only (no core), breadth hard cut 0.6
+v4-3	core	0.8026	0.8544	1.1856	0.8026	0.9922	1.0459	12.18	discard	combo R0 core share 0.1, breadth hard cut 0.6
+v4-3	core	0.6772	0.9074	1.2605	0.6772	1.0117	1.0543	10.35	discard	combo R0 core share 0.3, breadth hard cut 0.6
+v4-3	core	0.7754	0.8775	1.2115	0.7754	1.0037	1.054	11.73	discard	combo R0 core share 0.15, breadth hard cut 0.6
+v4-3	core	0.7452	0.8938	1.2326	0.7452	1.0107	1.0581	11.27	keep	candidate.py: R0 core 20% (core_fast/core_slow) + cleaned sleeve, breadth hard cut 0.6
+v4-3	core	0.6907	0.8623	1.227	0.6907	0.9869	1.0362	11.53	plateau	plateau candidate core_fast=16
+v4-3	core	0.693	0.8655	1.2525	0.693	1.0015	1.054	11.19	plateau	plateau candidate core_fast=24
+v4-3	core	0.7349	0.8312	1.2439	0.7349	1.0001	1.0619	11.48	plateau	plateau candidate core_slow=40
+v4-3	core	0.7032	0.8412	1.2661	0.7032	1.0058	1.0665	11.32	plateau	plateau candidate core_slow=60
+v4-3	core	0.7696	0.8813	1.2161	0.7696	1.0054	1.0551	11.64	plateau	plateau candidate core_share=0.16
+v4-3	core	0.7191	0.9021	1.2461	0.7191	1.0131	1.0584	10.9	plateau	plateau candidate core_share=0.24
+v4-3	core	0.6788	0.8946	1.2202	0.6788	0.9914	1.0318	9.98	plateau	plateau candidate trend_n=80
+v4-3	core	0.7209	0.888	1.2105	0.7209	0.9907	1.0332	12.15	plateau	plateau candidate trend_n=120
+v4-3	core	0.6974	0.6974	1.0355	0.9185	0.9133	0.9869	15.31	plateau	plateau candidate breadth_cut=0.48
+v4-3	core	0.6229	1.1477	0.9448	0.6229	0.8903	0.8286	5.87	plateau	plateau candidate breadth_cut=0.72
+v4-3	core	0.7102	0.7102	0.9645	1.015	0.9071	0.9751	13.15	plateau	plateau candidate rsi_n=2
+v4-3	core	0.6678	1.3584	1.3632	0.6678	1.1595	1.1191	7.81	plateau	plateau candidate rsi_n=4
+v4-3	core	0.6621	1.1263	1.2563	0.6621	1.052	1.0472	9.51	plateau	plateau candidate rsi_max=16.0
+v4-3	core	0.8276	0.9932	1.1535	0.8276	1.0131	1.0326	12.49	plateau	plateau candidate rsi_max=24.0
+v4-3	core	0.7234	0.8796	1.1032	0.7234	0.9343	0.9662	12.74	plateau	plateau candidate vwap_n=8
+v4-3	core	0.6075	0.7639	0.994	0.6075	0.8291	0.8574	9.46	plateau	plateau candidate vwap_n=12
+v4-3	core	0.7531	0.8664	1.259	0.7531	1.0199	1.0776	11.29	plateau	plateau candidate max_hold=16
+v4-3	core	0.6585	0.8808	1.22	0.6585	0.9797	1.0213	11.26	plateau	plateau candidate max_hold=24
+v4-3	core	0.7534	1.0063	1.2455	0.7534	1.0427	1.0676	11.87	plateau	plateau candidate slots=10
+v4-3	core	0.7268	0.9097	1.2159	0.7268	1.0011	1.0414	10.61	plateau	plateau candidate slots=14
+v4-3	core	0.7347	1.0656	1.2241	0.7347	1.0407	1.0495	9.61	perturb	joint +-20 pct draw 0: core_fast=21, core_slow=58, core_share=0.2221, trend_n=89, breadth_cut=0.552, rsi_n=3, rsi_max=16.0421, vwap_n=11, max_hold=22, slots=12
+v4-3	core	0.4881	0.7035	0.9092	0.4881	0.7439	0.7634	11.18	perturb	joint +-20 pct draw 1: core_fast=18, core_slow=46, core_share=0.1804, trend_n=98, breadth_cut=0.6011, rsi_n=3, rsi_max=23.964, vwap_n=11, max_hold=21, slots=14
+v4-3	core	0.5659	0.5659	1.1256	0.9807	0.9441	1.0643	12.05	perturb	joint +-20 pct draw 2: core_fast=18, core_slow=43, core_share=0.209, trend_n=82, breadth_cut=0.4886, rsi_n=3, rsi_max=19.7296, vwap_n=12, max_hold=21, slots=12
+v4-3	core	0.6513	1.2042	0.943	0.6513	0.8935	0.836	10.91	perturb	joint +-20 pct draw 3: core_fast=20, core_slow=45, core_share=0.1609, trend_n=88, breadth_cut=0.6461, rsi_n=3, rsi_max=18.9563, vwap_n=8, max_hold=23, slots=10
+v4-3	core	0.6516	1.0217	1.2688	0.6516	1.0376	1.0551	8.96	perturb	joint +-20 pct draw 4: core_fast=18, core_slow=58, core_share=0.2008, trend_n=114, breadth_cut=0.6335, rsi_n=3, rsi_max=16.732, vwap_n=10, max_hold=20, slots=14
+v4-3	core	0.7212	0.7802	0.9579	0.7212	0.8398	0.8692	14.72	perturb	joint +-20 pct draw 5: core_fast=19, core_slow=52, core_share=0.1647, trend_n=96, breadth_cut=0.5575, rsi_n=3, rsi_max=22.5307, vwap_n=10, max_hold=24, slots=12
+v4-3	core	0.6194	0.8204	1.1597	0.6194	0.9283	0.9736	12.42	perturb	joint +-20 pct draw 6: core_fast=21, core_slow=53, core_share=0.2141, trend_n=86, breadth_cut=0.5857, rsi_n=3, rsi_max=19.22, vwap_n=8, max_hold=24, slots=11
+v4-3	core	0.5684	0.5684	0.9125	0.9707	0.8394	0.9288	14.74	perturb	joint +-20 pct draw 7: core_fast=21, core_slow=46, core_share=0.2299, trend_n=106, breadth_cut=0.5116, rsi_n=3, rsi_max=23.5596, vwap_n=12, max_hold=21, slots=10
+v4-3	core	0.6788	1.1193	1.0723	0.6788	0.9657	0.9317	6.82	perturb	joint +-20 pct draw 8: core_fast=18, core_slow=59, core_share=0.2042, trend_n=87, breadth_cut=0.6922, rsi_n=3, rsi_max=20.5576, vwap_n=10, max_hold=19, slots=11
+v4-3	core	0.6677	0.9418	1.0358	0.6677	0.8997	0.9031	12.69	perturb	joint +-20 pct draw 9: core_fast=16, core_slow=58, core_share=0.1974, trend_n=102, breadth_cut=0.5573, rsi_n=3, rsi_max=16.2016, vwap_n=9, max_hold=16, slots=10
+v4-3	core	0.7005	0.9517	1.0487	0.7005	0.9233	0.9223	6.75	perturb	joint +-20 pct draw 10: core_fast=24, core_slow=53, core_share=0.1943, trend_n=101, breadth_cut=0.6895, rsi_n=3, rsi_max=20.7223, vwap_n=11, max_hold=19, slots=12
+v4-3	core	0.5148	0.5148	0.8354	0.8249	0.7463	0.8237	18.43	perturb	joint +-20 pct draw 11: core_fast=22, core_slow=58, core_share=0.1721, trend_n=117, breadth_cut=0.4812, rsi_n=3, rsi_max=22.4842, vwap_n=9, max_hold=19, slots=14

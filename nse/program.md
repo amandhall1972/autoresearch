@@ -273,3 +273,30 @@ were rejected, and the reasons exposed two flaws in the rules rather than in the
    wherever the inherited core sits. The inherited core's own fragility is reported, not hidden: R0's fast/slow
    neighbours are part of the final report and of the deep hold-out reading.
 3. Round 2 merged nothing (dry round 1 of 2 under the v4.1 stopping rule).
+
+## v4 round 3 and the first merge (lead decision, before any deep hold-out look)
+
+Round 3 (three lenses, 1,072 logged rows including plateau neighbours and joint-perturbation draws; candidates
+`v4/r3_clean.py`, `v4/r3_core.py` (the same rules as r3_clean under other parameter names) and `v4/r3_combine.py`)
+converged on one strategy: R0 at 20 % of the book plus an 80 % pullback sleeve (objective 0.745; every mechanical
+gate against R0, plateau4, compliance, costs and the joint perturbation pass). All three audits rejected on
+protocol grounds only: deleting the 20 % EMA-timer core RAISES the objective to 0.789 and still passes every gate,
+so the simplification rule makes the deletion the keep; one sell rule duplicated the harness (dead code). The
+combine lens's R0-side additions (distribution exit, washout re-entry) each rested on one or two episodes and were
+not kept.
+
+**Merge (incumbent 1): `v4/inc1_pullback.py`** = the round-3 sleeve without the core and without the dead rule.
+Verified by the lead: lookahead_ok, every mechanical gate against R0 (leave-one-year-out gain at least +0.19 in all
+ten years), compliant (RSI 0.30, EMA 0.68, VWAP 0.84), plateau4 (minimum neighbour 0.578 against a floor of 0.553),
+objective 0.557 at 25 bps and 0.209 at 40 bps (R0 0.168 / 0.120), joint +-20 % perturbation mean 0.597 (p10 0.370,
+min 0.189, 98 % of draws above R0). Windows 0.789 / 1.121 / 0.847, span 0.956, 2020-26 1.018, drop-10 0.559.
+Disclosed weaknesses: exposure averages 16 % of the book; with each window's own 5 best days removed, 2017-19 falls to
+0.06 (R0 0.35); the VWAP-depth ranking is no better than random choice among eligible names; the RSI(3) filter costs
+about 0.02 of objective and is kept as the brief's RSI.
+
+The with-core version is somewhat sturdier on event days (2017-19 without its 5 best days 0.22), costs (0.28 at
+40 bps) and the joint-perturbation tail (p10 0.42). Because the choice between the two hinged on the simplification
+rule, **`v4/r3_clean.py` is added to the deep hold-out set for information** (amendment made before any deep look).
+
+Round 3 gained 0.589 over R0 (not dry). Under the stopping rule, rounds 4 and 5 remain; gates are now measured
+against incumbent 1.
