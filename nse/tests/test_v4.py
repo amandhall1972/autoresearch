@@ -183,3 +183,21 @@ def test_deep_index_rebuild_is_close_to_vendor(deep):
     rep = deep_holdout.data_report(deep)
     assert rep["banknifty_proxy_rms_bps"] < 30 and rep["banknifty_proxy_corr"] > 0.99
     assert rep["sessions_scored"] > 1200
+
+
+def test_compliance_counts_sessions_moved_by_each_family(md, tmp_path):
+    import compare4, v4lab
+    src = ("import pandas as pd\nfrom indicators import ema, rsi\nfrom prepare import ETF_TICKER\n"
+           "PARAMS = dict(use_rsi=True, use_ema=True, use_vwap=True, n=20)\n"
+           "def compute_target_weights(md):\n    idx = md.index_close[['NIFTY50']]\n"
+           "    on = (ema(idx, 20) > ema(idx, 50))['NIFTY50'] if PARAMS['use_ema'] else idx['NIFTY50'] > 0\n"
+           "    if PARAMS['use_rsi']:\n        on = on & (rsi(idx, 14)['NIFTY50'] < 70)\n"
+           "    W = pd.DataFrame(0.0, index=md.calendar, columns=md.tickers)\n    W[ETF_TICKER] = on.astype(float)\n"
+           "    return W\n")
+    f = tmp_path / "c.py"; f.write_text(src)
+    mod = v4lab.load(str(f))
+    comp = compare4.compliance(mod, md)
+    assert comp["use_ema"] > 0.05 and comp["use_rsi"] > 0.05
+    assert comp["use_vwap"] == 0.0 and not comp["compliant"]          # the switch exists but binds nowhere
+    assert compare4.n_params(mod) == 1                                  # switches are not parameters
+    assert mod.PARAMS["use_rsi"] is True                                # restored after the ablation

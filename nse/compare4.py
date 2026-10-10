@@ -11,12 +11,17 @@ and print every gate that can be computed mechanically.
                above the incumbent's (an improvement that rests on one year is not a keep)
   consistency  no fewer calendar years with a positive excess return
   parsimony    each extra PARAMS entry must buy at least 0.05 of objective; fewer parameters at no worse
-               objective passes (a simplification)
+               objective passes (a simplification); the use_rsi / use_ema / use_vwap switches do not count
+Brief compliance (protocol v4.1, printed, required of the final strategy): a candidate exposes boolean PARAMS
+use_rsi, use_ema and use_vwap that switch each indicator family's rules to their neutral setting; it is compliant
+when switching off any one family changes the target weights on at least 5 % of the 2017-04..2026-10 sessions.
 Gate 3 (plateau: the neighbouring values of every moved parameter also beat the incumbent) needs neighbour runs.
 
 Usage: python compare4.py candidate.py [--incumbent strategy.py] [--years]
 """
 import argparse, os, sys
+
+import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -24,6 +29,35 @@ import prepare as P
 from run4 import load_strategy
 
 PARSIMONY = 0.05
+COMPLIANCE_MIN = 0.05
+FAMILIES = ("use_rsi", "use_ema", "use_vwap")
+
+
+def n_params(mod) -> int:
+    return len([k for k in getattr(mod, "PARAMS", {}) if k not in FAMILIES])
+
+
+def compliance(mod, md) -> dict:
+    """Share of 2017-04..2026-10 sessions whose target weights change when one indicator family is switched off.
+    None for a family the strategy does not expose a switch for (non-compliant)."""
+    params = getattr(mod, "PARAMS", {})
+    base = mod.compute_target_weights(md).reindex(index=md.calendar, columns=md.tickers).fillna(0.0)
+    span = base.index[(base.index >= pd.Timestamp(P.V4_START)) & (base.index <= pd.Timestamp(P.END))]
+    out = {}
+    for fam in FAMILIES:
+        if fam not in params:
+            out[fam] = None
+            continue
+        saved = params[fam]
+        try:
+            params[fam] = False
+            alt = mod.compute_target_weights(md).reindex(index=md.calendar, columns=md.tickers).fillna(0.0)
+        finally:
+            params[fam] = saved
+        diff = (alt.loc[span] - base.loc[span]).abs().sum(axis=1) > 1e-9
+        out[fam] = round(float(diff.mean()), 4)
+    out["compliant"] = all(v is not None and v >= COMPLIANCE_MIN for v in (out[f] for f in FAMILIES))
+    return out
 
 
 def stats(path, md):
@@ -31,7 +65,8 @@ def stats(path, md):
     ev = P.evaluate_v4(mod.compute_target_weights(md), md)
     res = ev.pop("_res")
     ev["_ret"] = res["ret"].loc[P.V4_START:P.END]
-    ev["n_params"] = len(getattr(mod, "PARAMS", {}))
+    ev["n_params"] = n_params(mod)
+    ev["_mod"] = mod
     return ev
 
 
@@ -84,6 +119,9 @@ def main():
     if args.years:
         for y, a, b in ytab:
             print(f"  without {y}: candidate {a:.4f}  incumbent {b:.4f}  gain {a - b:+.4f}")
+    comp = compliance(c["_mod"], md)
+    print("brief compliance (share of sessions moved when a family is switched off): "
+          + ", ".join(f"{k} {v}" for k, v in comp.items()))
     for k, v in gates(c, i, ytab).items():
         print(f"{k:<24}{v}")
 
