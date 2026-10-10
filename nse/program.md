@@ -216,3 +216,35 @@ gain in the objective is below 0.05.
 **Logging.** Every experiment goes into `results_v4.tsv`:
 `round	lens	objective	sharpe_pre	sharpe_is	sharpe_oos	sharpe_span	sharpe_full	turnover_yr	status	description`
 (status `keep`, `discard` or `crash`). The deflated Sharpe at the end counts every row.
+
+## Protocol v4.1 (amended after v4 round 1, before round 2, before any deep hold-out look)
+
+**What round 1 showed.** Six lens researchers (595 logged variants, `results_v4.tsv`, candidates in `v4/r1_*.py`)
+and six independent auditors. Every candidate lifted the objective far above the v1 final's -1.06 (best 0.69),
+and every one failed the `windows` and `drop10` gates. Those gates compare against the v1 final, whose 2020-23
+Sharpe (4.97) and drop-10 Sharpe (1.55) are the in-sample fit that v4 exists to correct, so no strategy that
+repairs 2017-19 and 2024-26 can pass them. The audits found something more important: the one effect that holds
+in all three windows is the NIFTY's own EMA20 > EMA50 trend, and the candidates' extra objective came mostly from
+moving Sharpe out of 2020-23 into the binding windows, not from new edge. Measured against the plain EMA timer
+`v4/r0_ema_timer.py` (NIFTYBEES while EMA20 > EMA50, the calibration the round-1 brief named as the bar to
+beat: objective 0.20, windows 0.75 / 1.12 / 0.20, span 0.79, drop-10 0.51, 8 positive years), no round-1 candidate
+passes `windows` or `drop10`.
+
+**Amendments (in force from round 2).**
+
+1. *Gate anchor.* R0 = `v4/r0_ema_timer.py` replaces the v1 final as the incumbent the gates are measured against.
+   A keep must lift the worst window without letting any window fall more than 0.10 below the incumbent and without
+   leaning more on a few days (`drop10`): a Pareto improvement on the plain EMA timer.
+2. *Brief compliance is measured.* R0 uses EMA only. A candidate is *compliant* when RSI, EMA and VWAP each bind:
+   replacing each family's rule by its neutral setting (always true / not applied) changes the target weights on at
+   least 5 % of the 2017-04..2026-10 sessions. The final strategy must be compliant.
+3. *Final-strategy rule.* The final strategy is the last compliant incumbent. If by the end of the stopping rule no
+   compliant candidate has passed the gates against its incumbent, there is no compliant final: the report then
+   presents R0 (the robust core) and the compliant candidate with the highest objective among those that pass every
+   gate except `windows`/`drop10` against R0, states the shortfall, and scores both on the deep hold-out.
+4. *Deep hold-out set (amended before any look).* v1 baseline `3659aab`, v1 final `c44574d`, R0, the six round-1
+   candidates `v4/r1_*.py` (information only: they show which structural families generalise), every v4.1
+   incumbent, and the final strategy (or the two strategies of rule 3). The deep scores cannot change which strategy
+   is final.
+5. The stopping rule restarts with round 2: at most 4 further rounds (2-5), stop after 2 consecutive rounds whose
+   merged objective gain is below 0.05.
