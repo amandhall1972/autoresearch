@@ -1,235 +1,129 @@
 """
-RSI + EMA + VWAP strategy on the point-in-time Nifty 50 universe. Long-only, daily bars.
-This is the ONLY file the research agent edits. The harness (prepare.py) executes the target
-weights at the next day's open and charges costs; signals here must use data up to the close.
-Final version after 8 autoresearch rounds (see results.tsv and reports/REPORT.md).
+Pullback strategy: RSI + EMA + VWAP dip buying inside uptrends (protocol v4.2, incumbent 1, merged after round 3).
+The final strategy of protocol v4: rounds 4 and 5 merged nothing, so under the stopping rule incumbent 1 is final.
 
-REGIME (when to be in the market). The NIFTY 50's own RSI(regime_rsi_n) is a hysteresis switch: the
-book switches on when it crosses above regime_rsi_mid + regime_rsi_band (57) and goes fully to cash
-below regime_rsi_mid - regime_rsi_band (53). It also stands aside while the index RSI is above
-regime_rsi_max (80); when the RSI falls back under 80 with the regime still on, the book re-enters.
+The whole book is a dip-buying sleeve. Its trades open only when the leaders of the market have pulled back together
+inside a long uptrend, and close when the dip has been bought back. Every weight is decided with data up to the
+close of day t; the harness trades it at the open of t+1. Capital not in a trade stays in cash and earns the repo
+rate (credited by the harness).
 
-ENTRY (which names). On the day the regime switches on, ONE cohort is bought: every Nifty 50 member with
-  EMA      : EMA(ema_fast) > EMA(ema_slow), but EMA(fast) no more than ema_spread (6 %) above EMA(slow)
-  VWAP     : close > the rolling vwap_n-day VWAP
-  RSI      : EMA(rsi_smooth)-smoothed Wilder RSI(rsi_n) below rsi_hi (70) and no reading above rsi_peak
-             (80) in the last rsi_peak_n days (no fresh blow-off)
-  calm     : its vol_n/vol_long_n realised-vol ratio is not in the members' top third (vol_calm_q)
-  and none of the exit rules below would sell it that day.
-  A re-entry cohort after the RSI>80 stand-aside instead buys the re_k (5) names with the largest
-  (VWAP20/VWAP50 - 1)+ x (smoothed RSI - (NIFTY smoothed RSI - rsi_lag))+: medium-term volume-weighted
-  momentum times momentum relative to a hot market.
+RULES
+1. Trigger (EMA + VWAP). Trades open only on a day when
+     a) the NIFTY 50 closes above its EMA(trend_n = 100): the market is in a long uptrend, and
+     b) the pullback is broad among the leaders: of the members in their own uptrend (close above their own
+        EMA(100)), more than breadth_cut (60 %) close below their rolling vwap_n (10)-day VWAP.
+2. Name filter (EMA + RSI). On such a day a member is eligible when it is in its own uptrend (close above its
+   EMA(100)) and was sold hard: Wilder RSI(rsi_n = 3) below rsi_max = 20.
+3. Selection (VWAP). Free slots (slots = 12; one slot = 1/12 of the book) are filled with the eligible names that
+   sit deepest below their 10-day VWAP. A name keeps the weight it was bought with until it is sold.
+4. Exit (VWAP + time). A held name is sold as soon as it closes back above its 10-day VWAP (the dip has been
+   bought back), or after max_hold (20) sessions if that never happens. Names leaving the index are sold by the
+   harness.
 
-WEIGHTS (how much of each). Fresh cohorts: Blume-adjusted beta (w_corr_n-day correlation, shrunk by
-beta_shrink toward 1) / idiosyncratic variance (vol_n-day vol with the NIFTY-explained part removed),
-i.e. single-index mean-variance weights for a timed bet on the market's up-leg, times
-  min(1, days since the name's last shock or volume-spike day / vwap_n)   (news names bought small)
-  (close / VWAP(vwap_short_n)) ^ rung_power                               (strongest bottom rung first)
-Re-entry cohorts: weights proportional to the re-entry score above. No name may exceed w_cap (40 %) of a
-cohort; the excess is parked in NIFTYBEES (index exposure, held until the regime switches off).
+WHY IT SHOULD HOLD ACROSS REGIMES
+* It harvests short-term reversal after market-wide selling: forced and impatient sellers push uptrending names
+  below the volume-weighted price their recent buyers paid, and the bounce back to that price pays whoever supplies
+  liquidity. Names are chosen by how far they fell, not by momentum or sector, so a change of market leadership
+  does not remove the edge.
+* Breadth is counted over the uptrend names only, so it fires when the leaders themselves pull back, not in narrow
+  tapes where most members are already falling. The index filter keeps it out of crashes in progress (March 2020);
+  the time stop cuts dips that are not bought back within a month.
 
-SIZING. A fresh-start cohort is scaled by the BANK NIFTY's variance ratio,
-min(1, (vol_long_n-day vol / vol_n-day vol)^size_power): when the most liquid, most leveraged sector has
-just become more volatile than its norm, the new up-leg is less trustworthy. A re-cross after
-whipsaw_days or fewer days off (a whipsaw) is bought at whipsaw_size of that. Idle capital earns the
-repo rate (the harness credits cash).
+PROVENANCE (results_v4.tsv, program.md protocol v4.2)
+Round 1 (pullback lens) found the dip-buying effect with an index RSI(3) trigger (objective 0.69, fragile). Round 2
+moved the oversold test to the stocks and the trigger to leader breadth, inside a 20 % EMA-timer core (0.75).
+Round 3 removed a dead entry rule, a token equal-weight sliver and the breadth size ramp (0.745). The round-3 audits
+then showed that the 20 % EMA-timer core LOWERS the objective (removing it: 0.79) while every gate still passes, so
+under the simplification rule the lead deleted it (and one dead sell rule duplicated by the harness) for this
+incumbent.
 
-WHILE HELD. Weights ride with prices (no rebalancing) and no new names are added until the next
-switch-on. Day by day:
-  exits      a held name is sold on (a) close < vwap_exit (0.985) x VWAP20, (b) a VWAP-ladder break:
-             close < VWAP(vwap_short_n) < VWAP(vwap_long_n), (c) an idiosyncratic shock: return net of
-             beta x NIFTY return below -shock_k residual sigmas (previous day's vol_n/corr_n estimates),
-             (d) a volume spike: volume > vspike_k x its average over the previous vwap_n days.
-  exhaust    once the exits and the re-rank have sold more than 1 - exhaust (60 %) of the formation
-             stock weight, the stock remainder is sold (the cohort is spent; NIFTYBEES rides on).
-  re-rank    on day vol_cap_delay + 1 the riding book is re-ranked by today's own score (fresh: beta /
-             idio variance; re-entry: the re-entry score) and the bottom rerank_drop (a third, rounded
-             down) of its stock names are sold, once per cohort.
-  vol budget from day vol_cap_delay + 1 the book is trimmed (never topped up) so its single-index model
-             vol sqrt((sum w*beta)^2 x NIFTY var + sum w^2 x idio var) stays at or below vol_cap (10 %/yr);
-             name i keeps min(1, lam x score_i), so the names the cohort's own weighting likes least go
-             first. A name whose EMA20 ran more than ema_spread above its EMA50 counts at stretch_score
-             (half) of its score in the re-rank and the trims. NIFTYBEES is never trimmed.
-  dip top-up when the share of eligible members above their VWAP20 was more than dip_k (15 points)
-             below its vwap_n-day mean yesterday and rises today, a fresh cohort's riding stock names are
-             topped up pro rata with idle cash, up to the vol budget (no new names).
-Everything is sold when the regime switches off. Names with no fresh bar stay held (they cannot trade).
+DISCLOSED WEAK POINTS (round-3 audits)
+* Low exposure (16 % of the book on average over 2017-26; stocks held on about a third of sessions); the Sharpe
+  partly reflects sitting in cash at the repo rate.
+* Event days: a dip buyer earns much of its return on a few market-wide rebound days. With each window's own 5 best
+  days removed, 2017-19 and 2020-23 fall below the plain EMA timer R0; the 2024-26 advantage survives.
+* The 2024-26 result is concentrated in 2024 (the June 2024 exit-poll rebound among its best days); 2026 is negative.
+* The VWAP-depth ranking is no better than random choice among eligible names (it is kept because some rule must
+  choose and it is the structural one). The RSI(3) filter costs about 0.02 of objective in 2024-26 but lifts
+  2017-19 and 2020-23 and carries the brief's RSI.
+* vwap_n is one length shared by the trigger, the ranking and the exit; untied, the trigger's own length is a
+  narrower peak (12 sessions loses about a third of the margin).
+
+Long-only, gross at most 1 (12 slots of 1/12). Longest lookback 100 sessions (EMA100), inside the 200-session limit;
+warm-up NaNs read as "no trend", "not oversold", "no breadth".
+
+Brief-compliance switches (not parameters): use_ema=False makes every EMA rule pass (index and stock trend filters
+off, breadth over all live members); use_rsi=False drops the stock RSI filter; use_vwap=False drops the breadth
+trigger (trades may open every day), the VWAP-depth ranking (ties keep the ticker order) and the VWAP-reclaim exit
+(time stop only).
 """
 import numpy as np
 import pandas as pd
-from indicators import ema, rsi, rolling_vwap, realized_vol
+from indicators import ema, rsi, rolling_vwap
 from prepare import ETF_TICKER
 
 PARAMS = dict(
-    rsi_n=14, rsi_smooth=3, rsi_hi=70.0, rsi_peak=80.0, rsi_peak_n=20, rsi_lag=16.0, re_k=5,
-    ema_fast=20, ema_slow=50, ema_spread=0.06,
-    vwap_n=20, vwap_exit=0.985, shock_k=2.5, vspike_k=4.0, vwap_long_n=50, vwap_short_n=3,
-    vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0, corr_n=20,
-    w_corr_n=15, beta_shrink=1.0 / 3.0, w_cap=0.4, rung_power=20.0,
-    regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
-    size_index="BANKNIFTY", size_power=2.0, whipsaw_days=3, whipsaw_size=0.5, vol_cap=0.10, vol_cap_delay=2,
-    rerank_drop=1.0 / 3.0, stretch_score=0.5, exhaust=0.4, dip_k=0.15, gross=1.0,
+    trend_n=100,         # EMA length of the uptrend filters (index and stocks)
+    breadth_cut=0.6,     # trigger: share of uptrend members below their VWAP must exceed this
+    rsi_n=3,             # stock Wilder RSI length
+    rsi_max=20.0,        # stock is oversold when RSI(rsi_n) < rsi_max
+    vwap_n=10,           # rolling VWAP length: trigger breadth, ranking and the reclaim exit
+    max_hold=20,         # time stop in sessions
+    slots=12,            # each held name weighs 1 / slots of the book
+    use_rsi=True, use_ema=True, use_vwap=True,
 )
-
-
-def hysteresis(x: pd.Series, on: float, off: float) -> np.ndarray:
-    """Causal switch: True after x > on, False after x < off; NaN (warm-up) is always off."""
-    out = np.zeros(len(x), dtype=bool)
-    state = False
-    for i, v in enumerate(x.values):
-        if np.isnan(v) or v < off:
-            state = False
-        elif v > on:
-            state = True
-        out[i] = state
-    return out
-
-
-def budget_trim(w, b, s2, nv, cap, score):
-    """Trim (never add) a book to the model-vol budget, keeping what the cohort's own weighting likes best: name i
-    keeps min(1, lam x score_i) of its weight, lam (bisection) puts the model vol on the cap. NIFTYBEES scores
-    infinite (no idiosyncratic risk) and is cut only if it alone is over the budget."""
-    mvol = lambda x: np.sqrt((x @ b) ** 2 * nv ** 2 + x ** 2 @ s2)
-    fin = np.isfinite(score); fs = np.where(fin, score, 0.0)
-    keep = lambda lam: np.where(fin, np.minimum(1.0, lam * fs), 1.0)
-    fin = fin & (w > 0)
-    lo, hi = 0.0, (1.0 / max(score[fin].min(), 1e-12) if fin.any() else 0.0)   # at hi every name keeps its weight
-    for _ in range(60):
-        lam = 0.5 * (lo + hi)
-        if mvol(w * keep(lam)) > cap:
-            hi = lam
-        else:
-            lo = lam
-    x = w * keep(lo)
-    return x * min(1.0, cap / max(mvol(x), 1e-12))
 
 
 def compute_target_weights(md) -> pd.DataFrame:
     p = PARAMS
-    c, h, l, v = md.close, md.high, md.low, md.volume
-    r = ema(rsi(c, p["rsi_n"]), p["rsi_smooth"])
-    ef, es = ema(c, p["ema_fast"]), ema(c, p["ema_slow"])
-    vw = rolling_vwap(h, l, c, v, p["vwap_n"])
-    idx_rsi = rsi(md.index_close[["NIFTY50"]], p["regime_rsi_n"])["NIFTY50"]
-    hyst = hysteresis(idx_rsi, p["regime_rsi_mid"] + p["regime_rsi_band"], p["regime_rsi_mid"] - p["regime_rsi_band"])
-    regime_v = hyst & (idx_rsi <= p["regime_rsi_max"]).values         # NaN compares False -> off
-    ix = md.index_close[[p["size_index"]]]
-    idx_vr = (realized_vol(ix, p["vol_long_n"]) / realized_vol(ix, p["vol_n"]))[p["size_index"]]
-    size_v = (idx_vr ** p["size_power"]).clip(upper=1.0).fillna(0.0).values   # index variance ratio (NaN -> 0)
+    tick = [t for t in md.tickers if t != ETF_TICKER]
+    c = md.close[tick]
+    live = md.member[tick] & md.tradable[tick]
+    vw = rolling_vwap(md.high[tick], md.low[tick], c, md.volume[tick], p["vwap_n"])
+    ix = md.index_close[["NIFTY50"]]
+    if p["use_ema"]:
+        uptrend = c > ema(c, p["trend_n"])
+        ix_up = (ix > ema(ix, p["trend_n"]))["NIFTY50"]
+    else:
+        uptrend = pd.DataFrame(True, index=c.index, columns=tick)
+        ix_up = pd.Series(True, index=ix.index)
+    base = live & uptrend
+    if p["use_vwap"]:
+        below = (c < vw) & base
+        breadth = below.sum(axis=1) / base.sum(axis=1).replace(0, np.nan)
+        broad = (breadth > p["breadth_cut"]).values
+        reclaimed = (c > vw).values
+        depth = (c / vw - 1.0).values
+    else:
+        broad = np.ones(len(c), bool)
+        reclaimed = np.zeros(c.shape, bool)
+        depth = np.zeros(c.shape)
+    if p["use_rsi"]:
+        oversold = rsi(c, p["rsi_n"]) < p["rsi_max"]
+    else:
+        oversold = pd.DataFrame(True, index=c.index, columns=tick)
+    trigger = ix_up.reindex(c.index).fillna(False).values & broad
+    eligible = (base & oversold).values
+    fresh = md.tradable[tick].values
 
-    stock = md.member.copy(); stock[ETF_TICKER] = False          # the ETF is not part of the stock pool
-    eligible = stock & md.tradable
-    r_peak = r.rolling(p["rsi_peak_n"], min_periods=p["rsi_peak_n"]).max()   # NaN (warm-up) compares False
-    r_idx = ema(rsi(md.index_close[["NIFTY50"]], p["rsi_n"]), p["rsi_smooth"])["NIFTY50"]   # same RSI, on the index
-    trend = (ef > es) & (ef < es * (1.0 + p["ema_spread"]))         # up, but not stretched
-    stretched_v = (ef > es * (1.0 + p["ema_spread"])).values          # a held name past the cap (NaN -> False)
-    vol = realized_vol(c, p["vol_n"])
-    vol_rank = (vol / realized_vol(c, p["vol_long_n"])).where(stock).rank(axis=1, pct=True)   # NaN -> no entry
-    entry = (eligible & trend & (c > vw) & (r < p["rsi_hi"]) & (r_peak < p["rsi_peak"]) & (vol_rank < p["vol_calm_q"]))
-    lead_v = r.sub(r_idx - p["rsi_lag"], axis=0).clip(lower=0.0).fillna(0.0).values   # RSI lead over (index RSI - lag)
-    ret, idx_ret = c.pct_change(), md.index_close["NIFTY50"].pct_change()
-    corr = ret.rolling(p["corr_n"], min_periods=p["corr_n"]).corr(idx_ret)
-    ivol = vol * np.sqrt((1.0 - corr ** 2).clip(lower=0.0))          # residual (idiosyncratic) vol vs the NIFTY 50
-    nvol = realized_vol(md.index_close[["NIFTY50"]], p["vol_n"])["NIFTY50"]
-    vol_ratio = vol.div(nvol, axis=0)
-    beta = corr * vol_ratio
-    shock = (ret - beta.shift(1).mul(idx_ret, axis=0)) < -p["shock_k"] * ivol.shift(1) / np.sqrt(252)   # NaN -> no shock
-    spike = v > p["vspike_k"] * v.rolling(p["vwap_n"], min_periods=p["vwap_n"]).mean().shift(1)   # NaN -> no spike
-    vw_short = rolling_vwap(h, l, c, v, p["vwap_short_n"])
-    vw_long = rolling_vwap(h, l, c, v, p["vwap_long_n"])
-    ladder_break = (c < vw_short) & (vw_short < vw_long)            # NaN -> no break
-    rung_v = ((c / vw_short) ** p["rung_power"]).fillna(0.0).values     # bottom-rung tilt (close/VWAP3)^k (NaN -> 0)
-    height_v = (vw / vw_long - 1.0).clip(lower=0.0).fillna(0.0).values * lead_v   # re-entry: ladder height x RSI lead
-    hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]) & ~shock & ~spike
-                                     & ~ladder_break)
-    hold[ETF_TICKER] = True                                 # a parked index slot rides until the regime switches off
-    e = md.tickers.index(ETF_TICKER)
-    nontrad_v = (stock & ~md.tradable).values               # held members without a fresh bar (cannot be traded)
-    stock_col = np.arange(len(md.tickers)) != e
-
-    dates = md.calendar
-    N = len(md.tickers)
-    W = np.zeros((len(dates), N))
-    held = np.zeros(N, dtype=bool)
-    w = np.zeros(N)                                         # yesterday's target weights
-    entry_v, hold_v = entry.values, hold.values
-    g_v = (c / c.shift(1)).fillna(1.0).values               # close-to-close growth (1 when unknown)
-    corr_w = ret.rolling(p["w_corr_n"], min_periods=p["w_corr_n"]).corr(idx_ret)   # faster correlation for the weights
-    ivol_w = vol * np.sqrt((1.0 - corr_w ** 2).clip(lower=0.0))
-    beta_w = ((1.0 - p["beta_shrink"]) * corr_w * vol_ratio + p["beta_shrink"]).clip(lower=0.0)   # Blume-adjusted beta
-    iv_v = (beta_w / ivol_w.where(ivol_w > 0) ** p["vol_power"]).fillna(0.0).values   # 0 when unknown
-    i_v = np.arange(len(dates))[:, None]                    # days since the name's last abnormal day (shock or spike)
-    age = i_v - pd.DataFrame(np.where((shock | spike).values, i_v, np.nan)).ffill().values   # NaN: none on record
-    iv_v = iv_v * np.nan_to_num(np.minimum(1.0, age / p["vwap_n"]), nan=1.0) * rung_v   # ramp back over vwap_n days
-    b_v = beta_w.fillna(0.0).to_numpy(copy=True); b_v[:, e] = 1.0          # single-index model of the riding book: betas (ETF 1)
-    s2_v = (ivol_w ** 2).fillna(0.0).to_numpy(copy=True); s2_v[:, e] = 0.0  # ... idiosyncratic variances (ETF 0)
-    nv_v = nvol.values                                       # ... and the NIFTY 50 vol (NaN -> no trim)
-    mvs_v = np.where(s2_v > 0, b_v / np.where(s2_v > 0, s2_v, 1.0), np.inf)   # trim scores: fresh cohorts beta / idio var,
-    hs_v = height_v.copy(); hs_v[:, e] = np.inf                                # re-entry cohorts their ladder height
-    score_v = mvs_v
-    breadth = ((c > vw) & eligible).sum(axis=1) / eligible.sum(axis=1).replace(0, np.nan)   # share above VWAP20
-    dip = breadth < breadth.rolling(p["vwap_n"], min_periods=p["vwap_n"]).mean() - p["dip_k"]   # NaN -> no dip
-    dip_up_v = (dip.shift(1, fill_value=False) & (breadth > breadth.shift(1))).values   # yesterday a dip, today up
-    last_on, t_form = -10 ** 6, -10 ** 6                    # last day the regime was on; the cohort's formation day
-    fresh = True                                            # the riding cohort is a fresh (not a re-entry) cohort
-    w0 = np.zeros(N)                                        # the cohort's formation stock weights
-    for t in range(len(dates)):
-        if not regime_v[t]:                                 # regime off: fully in cash
-            held[:] = False
-            w = np.zeros(N)
-        elif t == 0 or not regime_v[t - 1]:                 # regime switches on: buy the cohort
-            t_form, score_v, fresh = t, mvs_v, True
-            held = entry_v[t] & hold_v[t] & (iv_v[t] > 0)     # never buy a name the exit rules would sell today
-            w = np.where(held, iv_v[t], 0.0)
-            g = p["gross"]
-            if t == 0 or not hyst[t - 1]:                   # fresh regime start (not a stand-aside re-entry)
-                g *= size_v[t]                              # index variance-ratio sizing
-                if t - last_on - 1 <= p["whipsaw_days"]:
-                    g *= p["whipsaw_size"]                  # re-cross after only a few days off: whipsaw
-            else:                                           # re-entry after the RSI>80 stand-aside: height x lead weights
-                w = np.where(held, height_v[t], 0.0)
-                if (w > 0).sum() > p["re_k"]:
-                    w = np.where(w >= np.sort(w)[-p["re_k"]], w, 0.0)   # only the re_k strongest names
-                held &= w > 0                               # no ladder height or no RSI lead: not bought
-                score_v, fresh = hs_v, False
-            if held.any():
-                w = w / w.sum()                             # cohort shares
-                excess = np.clip(w - p["w_cap"], 0.0, None)   # share above the single-name cap ...
-                w = g * (w - excess)
-                w[e] = g * excess.sum(); held[e] = w[e] > 0   # ... is parked in NIFTYBEES (index exposure)
-            else:
-                w = np.zeros(N)
-            w0 = w.copy(); w0[e] = 0.0
-        else:                                               # hold the cohort, weights ride, no top-ups
-            held &= hold_v[t]
-            if w0.sum() > 0 and (w0 * held).sum() < p["exhaust"] * w0.sum():   # the exits sold most of the cohort:
-                held[w0 > 0] = False                        # it is spent, sell the stock remainder (NIFTYBEES rides on)
-            wg = w * g_v[t]
-            w = np.where(held, wg, 0.0) / (wg.sum() + 1.0 - w.sum())
-            sc = np.where(stretched_v[t], score_v[t] * p["stretch_score"], score_v[t])   # past the EMA band cap: cut first
-            if t - t_form == p["vol_cap_delay"] + 1:        # the first day the budget may trim: re-rank the book
-                ix_h = np.flatnonzero(held & (w > 0) & stock_col)
-                k = int(np.floor(p["rerank_drop"] * len(ix_h)))
-                if len(ix_h) >= 3 and k > 0:                # sell the bottom third by today's own score
-                    drop = ix_h[np.argsort(sc[ix_h], kind="stable")[:k]]
-                    drop = drop[~nontrad_v[t, drop]]        # a name with no fresh bar cannot be sold today
-                    held[drop] = False; w[drop] = 0.0
-            mv = np.sqrt((w @ b_v[t]) ** 2 * nv_v[t] ** 2 + w ** 2 @ s2_v[t])   # the riding book's model vol
-            if mv > p["vol_cap"] and t - t_form > p["vol_cap_delay"]:   # the first days of the up-leg run untrimmed
-                w = budget_trim(w, b_v[t], s2_v[t], nv_v[t], p["vol_cap"], sc)   # trim (never add) to budget
-            x = np.where(held, w, 0.0); x[e] = 0.0             # breadth-dip recovery: top up the riding stock names
-            if dip_up_v[t] and fresh and x.sum() > 0:       # pro rata, with idle cash, up to the vol budget
-                x = x / x.sum()
-                mvol = lambda a: np.sqrt(((w + a * x) @ b_v[t]) ** 2 * nv_v[t] ** 2 + (w + a * x) ** 2 @ s2_v[t])
-                lo, hi = 0.0, max(0.0, 1.0 - w.sum())
-                if mvol(hi) > p["vol_cap"]:
-                    for _ in range(40):
-                        mid = 0.5 * (lo + hi)
-                        lo, hi = (lo, mid) if mvol(mid) > p["vol_cap"] else (mid, hi)
-                else:
-                    lo = hi
-                w = w + lo * x
-        if regime_v[t]:
-            last_on = t
-        W[t] = w
-    return pd.DataFrame(W, index=dates, columns=md.tickers)
+    T, N = c.shape
+    K, mh = int(p["slots"]), int(p["max_hold"])
+    held = np.zeros(N, bool)
+    age = np.zeros(N, int)
+    out = np.zeros((T, N))
+    for t in range(T):
+        age[held] += 1
+        sell = held & fresh[t] & (reclaimed[t] | (age >= mh))
+        held &= ~sell
+        age[~held] = 0
+        free = K - int(held.sum())
+        if trigger[t] and free > 0:
+            cand = np.where(eligible[t] & ~held)[0]
+            if len(cand) > free:
+                cand = cand[np.argsort(depth[t, cand], kind="stable")[:free]]
+            held[cand] = True
+            age[cand] = 0
+        out[t, held] = 1.0 / K
+    W = pd.DataFrame(0.0, index=md.calendar, columns=md.tickers)
+    W[tick] = pd.DataFrame(out, index=c.index, columns=tick).reindex(index=md.calendar).fillna(0.0)
+    return W

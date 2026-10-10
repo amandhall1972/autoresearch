@@ -1,5 +1,6 @@
 """
 Pullback strategy: RSI + EMA + VWAP dip buying inside uptrends (protocol v4.2, incumbent 1, merged after round 3).
+The final strategy of protocol v4: rounds 4 and 5 merged nothing, so under the stopping rule incumbent 1 is final.
 
 The whole book is a dip-buying sleeve. Its trades open only when the leaders of the market have pulled back together
 inside a long uptrend, and close when the dip has been bought back. Every weight is decided with data up to the
@@ -37,7 +38,8 @@ under the simplification rule the lead deleted it (and one dead sell rule duplic
 incumbent.
 
 DISCLOSED WEAK POINTS (round-3 audits)
-* Low exposure (about a quarter of the book on average); the Sharpe partly reflects sitting in cash at the repo rate.
+* Low exposure (16 % of the book on average over 2017-26; stocks held on about a third of sessions); the Sharpe
+  partly reflects sitting in cash at the repo rate.
 * Event days: a dip buyer earns much of its return on a few market-wide rebound days. With each window's own 5 best
   days removed, 2017-19 and 2020-23 fall below the plain EMA timer R0; the 2024-26 advantage survives.
 * The 2024-26 result is concentrated in 2024 (the June 2024 exit-poll rebound among its best days); 2026 is negative.

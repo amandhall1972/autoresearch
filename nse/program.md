@@ -310,3 +310,38 @@ leave-one-year-out in 4 years, consistency as 2018 turns negative, plateau4), an
 instead of the 10-session one (0.987; fails sanity at 28 % of days invested, leave-one-year-out without 2020,
 plateau4). Second sources of return on ordinary days (NIFTYBEES cores, low-volatility, momentum or equal-weight
 sleeves) all cut 2024-26. Dry round 1 of 2 since the last merge; round 5 is the last the stopping rule allows.
+
+## v4 round 5 (dry) and the final strategy (lead decision, before any deep hold-out look)
+
+Three lenses against incumbent 1 (530 logged rows; candidates `v4/r5_*.py`), three audits, nothing merged:
+
+* **simplify** (`v4/r5_simplify.py`, 0.792): the only deletion within 0.02 of the objective ties the time stop to
+  `vwap_n` (6 parameters). The audit showed it is `max_hold` moved from 20 to 10 rather than removed (identical
+  weights), with an implicit multiplier at a local minimum; it fails sanity (28 % of days invested), drop10,
+  leave-one-year-out (2018, 2019, 2020, 2025), consistency (2018 turns negative) and plateau4. Every other deletion
+  lost more than 0.1: the time stop, the RSI filter, the index filter, the own-uptrend test and the breadth trigger
+  each carry the strategy.
+* **reconcile** (`v4/r5_reconcile.py`, 0.934): the round-4 VWAP7 exit made conditional on NIFTYBEES still being
+  below its own VWAP (one parameter). It passes every mechanical gate but `years` (without 2020: 0.739 against
+  0.774) and fails plateau4 (breadth_cut 0.72, rsi_max 16). The audit found the gain rests on three failing-rebound
+  months (2018-09, 2024-10, 2023-10; 325 % of the net gain), a 2024-26 lift that is volatility reduction only (the
+  same mean excess), knife-edge hidden constants, and an iid placebo flag at the same base rate reaching 0.934 in
+  13 % of seeds.
+* **trigger** (`v4/r5_trigger.py`, 0.847): about thirty structurally different trigger definitions (multi-length,
+  relative, smoothed, change-of and turn-of breadth, index confirmations) were tested; none was both higher and
+  flatter. The best (NIFTYBEES below its VWAP as a confirmation) removes 6 of 204 trigger days, gains only in 2017,
+  and fails `years`, consistency and plateau4. Its diagnosis is the most useful finding of the round: the
+  breadth-cut surface is one sharp peak (0.45..0.75 give 0.28 / 0.46 / 0.55 / 0.79 / 0.65 / 0.56 / 0.39) because a
+  looser cut fires a day earlier and fills the slots; averaging the book over neighbouring cuts or VWAP lengths
+  gives about 0.75, so the honest level of the neighbourhood is 0.70-0.75 rather than 0.79 (the joint +-20 %
+  perturbation, which moves every parameter at once, averages 0.60).
+
+Round 5 is dry round 2 of 2: **the stopping rule ends protocol v4**. By the final-strategy rule the final strategy
+is the last compliant incumbent, **incumbent 1 (`v4/inc1_pullback.py`), now installed as `strategy.py`** (byte
+identical; the v1 final stays in `v4/v1_final.py`). Before the deep look only its docstring was corrected: the
+exposure figure (16 % of the book on average, not a quarter) and one line naming it final; no rule or parameter
+changed (objective 0.7887, lookahead_ok, as before).
+
+Deep hold-out set, as registered: v1 baseline and final, R0, the six round-1 candidates and `v4/r3_clean.py`
+(information), incumbent 1 = the final (scored once; `deep4.py` scores identical file contents once). The round-4
+and round-5 candidates were not registered and are not scored.

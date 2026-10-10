@@ -3028,3 +3028,533 @@ v4-4	exits	0.9916	1.1879	1.0618	0.9916	1.038	1.0216	13.73	plateau	candidate.py p
 v4-4	exits	1.0044	1.2107	1.0714	1.0044	1.0509	1.0322	13.72	plateau	candidate.py plateau neighbour max_hold=24
 v4-4	exits	1.0278	1.2643	1.0466	1.0278	1.0567	1.027	14.75	plateau	candidate.py plateau neighbour slots=10
 v4-4	exits	0.858	1.196	1.0448	0.858	0.9973	0.9684	12.7	plateau	candidate.py plateau neighbour slots=14
+v4-5	simplify	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	baseline	incumbent 1 (v4/inc1_pullback.py) reproduced
+v4-5	simplify	0.314	0.314	0.6782	0.9644	0.666	0.7848	22.99	joint-inc	incumbent 1 joint +-20 pct draw 0: trend_n=115, breadth_cut=0.487384, rsi_n=2, rsi_max=18.330692, vwap_n=11, max_hold=17, slots=11
+v4-5	simplify	0.6479	0.6479	0.9255	0.8355	0.8232	0.8846	14.01	joint-inc	incumbent 1 joint +-20 pct draw 1: trend_n=90, breadth_cut=0.561368, rsi_n=3, rsi_max=18.865466, vwap_n=10, max_hold=16, slots=12
+v4-5	simplify	0.6896	0.8266	0.7314	0.6896	0.7231	0.7014	8.99	joint-inc	incumbent 1 joint +-20 pct draw 2: trend_n=107, breadth_cut=0.633598, rsi_n=3, rsi_max=18.888815, vwap_n=12, max_hold=17, slots=14
+v4-5	simplify	0.5008	1.2392	1.0189	0.5008	0.9126	0.8356	9.25	joint-inc	incumbent 1 joint +-20 pct draw 3: trend_n=91, breadth_cut=0.57853, rsi_n=4, rsi_max=21.128649, vwap_n=12, max_hold=21, slots=10
+v4-5	simplify	0.4384	0.9269	0.8056	0.4384	0.7268	0.6797	8.52	joint-inc	incumbent 1 joint +-20 pct draw 4: trend_n=96, breadth_cut=0.67386, rsi_n=3, rsi_max=19.14261, vwap_n=10, max_hold=24, slots=12
+v4-5	simplify	0.7421	0.894	0.7421	0.9014	0.7994	0.7813	9.57	joint-inc	incumbent 1 joint +-20 pct draw 5: trend_n=119, breadth_cut=0.647615, rsi_n=3, rsi_max=18.096554, vwap_n=12, max_hold=23, slots=11
+v4-5	simplify	0.5842	1.0022	0.6236	0.5842	0.6868	0.5992	9.17	joint-inc	incumbent 1 joint +-20 pct draw 6: trend_n=105, breadth_cut=0.641276, rsi_n=3, rsi_max=20.158381, vwap_n=12, max_hold=23, slots=13
+v4-5	simplify	0.8033	1.0761	1.1316	0.8033	1.0063	1.0103	9.62	joint-inc	incumbent 1 joint +-20 pct draw 7: trend_n=84, breadth_cut=0.590578, rsi_n=3, rsi_max=16.014468, vwap_n=10, max_hold=18, slots=13
+v4-5	simplify	0.6625	0.6625	1.094	1.2418	1.018	1.1331	16.68	joint-inc	incumbent 1 joint +-20 pct draw 8: trend_n=81, breadth_cut=0.54731, rsi_n=3, rsi_max=20.682146, vwap_n=9, max_hold=18, slots=10
+v4-5	simplify	0.5174	1.1223	0.5174	0.544	0.6308	0.5118	6.32	joint-inc	incumbent 1 joint +-20 pct draw 9: trend_n=85, breadth_cut=0.707816, rsi_n=3, rsi_max=22.596306, vwap_n=10, max_hold=20, slots=13
+v4-5	simplify	0.7911	0.8354	0.7911	0.9483	0.8188	0.8194	10.75	joint-inc	incumbent 1 joint +-20 pct draw 10: trend_n=117, breadth_cut=0.648845, rsi_n=3, rsi_max=22.002661, vwap_n=11, max_hold=23, slots=13
+v4-5	simplify	0.6396	0.6396	0.8255	0.9172	0.7941	0.849	15.38	joint-inc	incumbent 1 joint +-20 pct draw 11: trend_n=111, breadth_cut=0.536302, rsi_n=3, rsi_max=19.651245, vwap_n=11, max_hold=23, slots=13
+v4-5	simplify	0.5927	0.5927	1.0214	0.9066	0.8799	0.9725	17.63	joint-inc	incumbent 1 joint +-20 pct draw 12: trend_n=104, breadth_cut=0.56212, rsi_n=3, rsi_max=21.534188, vwap_n=9, max_hold=18, slots=12
+v4-5	simplify	0.6488	1.0048	0.6488	0.754	0.7419	0.6669	9.74	joint-inc	incumbent 1 joint +-20 pct draw 13: trend_n=106, breadth_cut=0.639812, rsi_n=3, rsi_max=20.829825, vwap_n=12, max_hold=22, slots=12
+v4-5	simplify	0.6715	1.2794	0.8053	0.6715	0.8365	0.7443	10.21	joint-inc	incumbent 1 joint +-20 pct draw 14: trend_n=89, breadth_cut=0.641793, rsi_n=3, rsi_max=16.704177, vwap_n=8, max_hold=20, slots=13
+v4-5	simplify	0.5606	0.5606	0.6473	0.7794	0.6569	0.6924	18.74	joint-inc	incumbent 1 joint +-20 pct draw 15: trend_n=110, breadth_cut=0.539255, rsi_n=3, rsi_max=21.414669, vwap_n=10, max_hold=19, slots=10
+v4-5	simplify	0.755	0.755	0.8387	0.8759	0.8139	0.8436	15.14	joint-inc	incumbent 1 joint +-20 pct draw 16: trend_n=111, breadth_cut=0.573764, rsi_n=3, rsi_max=21.485418, vwap_n=11, max_hold=21, slots=12
+v4-5	simplify	0.7581	1.1919	1.0167	0.7581	0.9533	0.9158	11.1	joint-inc	incumbent 1 joint +-20 pct draw 17: trend_n=82, breadth_cut=0.563515, rsi_n=3, rsi_max=16.93435, vwap_n=9, max_hold=23, slots=14
+v4-5	simplify	0.4427	1.0686	0.8379	0.4427	0.78	0.7009	6.24	joint-inc	incumbent 1 joint +-20 pct draw 18: trend_n=112, breadth_cut=0.703053, rsi_n=3, rsi_max=16.026492, vwap_n=10, max_hold=24, slots=14
+v4-5	simplify	0.7981	0.7981	0.9738	0.809	0.8712	0.9065	12.75	joint-inc	incumbent 1 joint +-20 pct draw 19: trend_n=103, breadth_cut=0.620244, rsi_n=3, rsi_max=19.009685, vwap_n=9, max_hold=22, slots=13
+v4-5	simplify	0.5078	1.0062	0.9011	0.5078	0.7993	0.7619	12.64	joint-inc	incumbent 1 joint +-20 pct draw 20: trend_n=114, breadth_cut=0.594443, rsi_n=3, rsi_max=17.477947, vwap_n=10, max_hold=18, slots=13
+v4-5	simplify	0.8933	1.2813	1.0075	0.8933	0.9966	0.948	9.07	joint-inc	incumbent 1 joint +-20 pct draw 21: trend_n=97, breadth_cut=0.688179, rsi_n=3, rsi_max=18.424751, vwap_n=9, max_hold=18, slots=10
+v4-5	simplify	0.6201	0.6201	0.8724	0.8473	0.7938	0.854	15.95	joint-inc	incumbent 1 joint +-20 pct draw 22: trend_n=92, breadth_cut=0.535497, rsi_n=3, rsi_max=21.688983, vwap_n=10, max_hold=16, slots=14
+v4-5	simplify	0.5703	0.5703	1.0014	1.0523	0.8951	0.9984	14.67	joint-inc	incumbent 1 joint +-20 pct draw 23: trend_n=81, breadth_cut=0.596903, rsi_n=3, rsi_max=23.209863, vwap_n=9, max_hold=17, slots=12
+v4-5	simplify	0.3126	0.3126	1.0326	0.7203	0.764	0.9177	14.53	joint-inc	incumbent 1 joint +-20 pct draw 24: trend_n=95, breadth_cut=0.502629, rsi_n=4, rsi_max=22.719452, vwap_n=8, max_hold=22, slots=12
+v4-5	simplify	0.6977	0.7408	0.6977	0.7503	0.6952	0.6983	11.5	joint-inc	incumbent 1 joint +-20 pct draw 25: trend_n=85, breadth_cut=0.661392, rsi_n=3, rsi_max=22.367818, vwap_n=8, max_hold=22, slots=12
+v4-5	simplify	0.395	0.395	0.8585	0.8047	0.7265	0.8299	19.06	joint-inc	incumbent 1 joint +-20 pct draw 26: trend_n=106, breadth_cut=0.556516, rsi_n=3, rsi_max=21.729168, vwap_n=8, max_hold=18, slots=13
+v4-5	simplify	0.376	1.1038	0.376	0.7214	0.6266	0.474	8.06	joint-inc	incumbent 1 joint +-20 pct draw 27: trend_n=85, breadth_cut=0.656838, rsi_n=3, rsi_max=23.304805, vwap_n=12, max_hold=22, slots=10
+v4-5	simplify	0.5038	1.2498	0.8774	0.5038	0.8338	0.7476	7.01	joint-inc	incumbent 1 joint +-20 pct draw 28: trend_n=101, breadth_cut=0.705591, rsi_n=3, rsi_max=18.519025, vwap_n=9, max_hold=18, slots=14
+v4-5	simplify	0.4812	0.4812	0.8572	0.8174	0.7494	0.8367	14.82	joint-inc	incumbent 1 joint +-20 pct draw 29: trend_n=109, breadth_cut=0.512963, rsi_n=3, rsi_max=18.127093, vwap_n=11, max_hold=19, slots=13
+v4-5	simplify	0.2792	1.1308	1.0023	0.2792	0.8294	0.7673	5.65	joint-inc	incumbent 1 joint +-20 pct draw 30: trend_n=84, breadth_cut=0.50895, rsi_n=4, rsi_max=16.310862, vwap_n=9, max_hold=22, slots=14
+v4-5	simplify	0.5206	0.5206	0.7778	0.9241	0.7506	0.8293	18.89	joint-inc	incumbent 1 joint +-20 pct draw 31: trend_n=113, breadth_cut=0.522578, rsi_n=3, rsi_max=22.871733, vwap_n=11, max_hold=16, slots=11
+v4-5	simplify	0.6968	0.6968	0.8213	0.9179	0.809	0.8516	17.15	joint-inc	incumbent 1 joint +-20 pct draw 32: trend_n=111, breadth_cut=0.555461, rsi_n=3, rsi_max=23.608239, vwap_n=11, max_hold=21, slots=11
+v4-5	simplify	0.5457	0.8695	0.8721	0.5457	0.7736	0.756	8.78	joint-inc	incumbent 1 joint +-20 pct draw 33: trend_n=105, breadth_cut=0.645343, rsi_n=3, rsi_max=18.907645, vwap_n=11, max_hold=18, slots=14
+v4-5	simplify	0.6778	0.6778	0.9414	0.8085	0.8328	0.8884	16.77	joint-inc	incumbent 1 joint +-20 pct draw 34: trend_n=111, breadth_cut=0.563659, rsi_n=3, rsi_max=22.553849, vwap_n=10, max_hold=20, slots=14
+v4-5	simplify	0.9805	1.108	1.2034	0.9805	1.0963	1.1159	10.96	joint-inc	incumbent 1 joint +-20 pct draw 35: trend_n=105, breadth_cut=0.676093, rsi_n=3, rsi_max=18.835775, vwap_n=9, max_hold=17, slots=10
+v4-5	simplify	0.5247	0.5247	1.0222	1.0834	0.9139	1.035	18.73	joint-inc	incumbent 1 joint +-20 pct draw 36: trend_n=100, breadth_cut=0.507386, rsi_n=3, rsi_max=19.624418, vwap_n=9, max_hold=17, slots=11
+v4-5	simplify	0.1894	0.1894	0.8792	1.2636	0.8163	1.0145	18.93	joint-inc	incumbent 1 joint +-20 pct draw 37: trend_n=83, breadth_cut=0.507623, rsi_n=2, rsi_max=19.144664, vwap_n=11, max_hold=22, slots=11
+v4-5	simplify	0.8657	1.3292	1.1059	0.8657	1.0588	1.0122	10.92	joint-inc	incumbent 1 joint +-20 pct draw 38: trend_n=90, breadth_cut=0.648122, rsi_n=3, rsi_max=18.092057, vwap_n=9, max_hold=23, slots=11
+v4-5	simplify	0.771	1.2003	0.8383	0.771	0.8648	0.7996	9.21	joint-inc	incumbent 1 joint +-20 pct draw 39: trend_n=98, breadth_cut=0.684662, rsi_n=3, rsi_max=17.649575, vwap_n=8, max_hold=17, slots=12
+v4-5	simplify	0.6739	0.6739	0.8921	0.8084	0.8043	0.8533	15.82	joint-inc	incumbent 1 joint +-20 pct draw 40: trend_n=110, breadth_cut=0.576391, rsi_n=3, rsi_max=20.220756, vwap_n=9, max_hold=18, slots=13
+v4-5	simplify	0.7352	0.7352	0.8397	0.9645	0.8261	0.8655	11.39	joint-inc	incumbent 1 joint +-20 pct draw 41: trend_n=95, breadth_cut=0.562421, rsi_n=3, rsi_max=17.207921, vwap_n=12, max_hold=20, slots=11
+v4-5	simplify	0.5761	0.9424	0.8841	0.5761	0.8035	0.7727	10.89	joint-inc	incumbent 1 joint +-20 pct draw 42: trend_n=107, breadth_cut=0.665266, rsi_n=3, rsi_max=22.681334, vwap_n=10, max_hold=22, slots=13
+v4-5	simplify	0.2087	0.2087	0.7977	0.9224	0.6814	0.836	21.15	joint-inc	incumbent 1 joint +-20 pct draw 43: trend_n=112, breadth_cut=0.499464, rsi_n=3, rsi_max=21.360535, vwap_n=9, max_hold=21, slots=12
+v4-5	simplify	0.3797	1.269	0.623	0.3797	0.6949	0.5367	5.08	joint-inc	incumbent 1 joint +-20 pct draw 44: trend_n=82, breadth_cut=0.717281, rsi_n=3, rsi_max=19.278757, vwap_n=10, max_hold=20, slots=13
+v4-5	simplify	0.6719	0.6719	0.9489	0.7079	0.8061	0.855	10.95	joint-inc	incumbent 1 joint +-20 pct draw 45: trend_n=108, breadth_cut=0.651169, rsi_n=3, rsi_max=21.628969, vwap_n=10, max_hold=23, slots=14
+v4-5	simplify	0.5008	0.5008	0.8143	0.5482	0.6615	0.7165	11.08	joint-inc	incumbent 1 joint +-20 pct draw 46: trend_n=83, breadth_cut=0.632346, rsi_n=2, rsi_max=23.890579, vwap_n=11, max_hold=18, slots=11
+v4-5	simplify	0.6045	1.2338	0.9169	0.6045	0.8748	0.8038	4.84	joint-inc	incumbent 1 joint +-20 pct draw 47: trend_n=107, breadth_cut=0.706128, rsi_n=4, rsi_max=19.667132, vwap_n=10, max_hold=18, slots=14
+v4-5	simplify	0.7281	0.7281	0.8111	0.948	0.8154	0.851	18.53	joint-inc	incumbent 1 joint +-20 pct draw 48: trend_n=116, breadth_cut=0.510763, rsi_n=3, rsi_max=19.270139, vwap_n=10, max_hold=23, slots=11
+v4-5	simplify	0.7376	1.3806	0.9713	0.7376	0.9649	0.8809	10.7	joint-inc	incumbent 1 joint +-20 pct draw 49: trend_n=91, breadth_cut=0.598533, rsi_n=3, rsi_max=17.144286, vwap_n=9, max_hold=23, slots=14
+v4-5	simplify	0.5169	0.9398	0.77	0.5169	0.7333	0.678	8.32	joint-inc	incumbent 1 joint +-20 pct draw 50: trend_n=93, breadth_cut=0.68575, rsi_n=3, rsi_max=22.404133, vwap_n=10, max_hold=16, slots=11
+v4-5	simplify	0.662	0.662	1.1195	0.9729	0.9599	1.0567	15.42	joint-inc	incumbent 1 joint +-20 pct draw 51: trend_n=84, breadth_cut=0.550918, rsi_n=3, rsi_max=21.102944, vwap_n=9, max_hold=21, slots=13
+v4-5	simplify	0.6217	1.2385	0.7518	0.6217	0.8148	0.6986	7.54	joint-inc	incumbent 1 joint +-20 pct draw 52: trend_n=90, breadth_cut=0.661827, rsi_n=3, rsi_max=16.58883, vwap_n=11, max_hold=21, slots=10
+v4-5	simplify	0.8513	0.8753	0.8513	1.0087	0.884	0.9018	16.61	joint-inc	incumbent 1 joint +-20 pct draw 53: trend_n=101, breadth_cut=0.590629, rsi_n=3, rsi_max=21.548827, vwap_n=9, max_hold=19, slots=10
+v4-5	simplify	0.22	0.22	0.9335	0.9964	0.767	0.9361	14.11	joint-inc	incumbent 1 joint +-20 pct draw 54: trend_n=97, breadth_cut=0.547229, rsi_n=3, rsi_max=16.622269, vwap_n=8, max_hold=18, slots=13
+v4-5	simplify	0.4588	1.1944	0.4588	0.6004	0.6569	0.4948	5.76	joint-inc	incumbent 1 joint +-20 pct draw 55: trend_n=93, breadth_cut=0.701443, rsi_n=3, rsi_max=18.966695, vwap_n=12, max_hold=17, slots=13
+v4-5	simplify	0.5059	1.4672	0.5059	0.879	0.7892	0.6059	7.68	joint-inc	incumbent 1 joint +-20 pct draw 56: trend_n=84, breadth_cut=0.639514, rsi_n=3, rsi_max=18.271544, vwap_n=12, max_hold=19, slots=11
+v4-5	simplify	0.5495	1.2274	1.1543	0.5495	0.9962	0.9522	8.81	joint-inc	incumbent 1 joint +-20 pct draw 57: trend_n=92, breadth_cut=0.671613, rsi_n=3, rsi_max=18.875718, vwap_n=9, max_hold=23, slots=14
+v4-5	simplify	0.6984	0.7679	0.9749	0.6984	0.8394	0.8727	12.86	joint-inc	incumbent 1 joint +-20 pct draw 58: trend_n=92, breadth_cut=0.568168, rsi_n=3, rsi_max=19.250255, vwap_n=10, max_hold=18, slots=14
+v4-5	simplify	0.9459	1.4218	1.2083	0.9459	1.151	1.1008	7.71	joint-inc	incumbent 1 joint +-20 pct draw 59: trend_n=103, breadth_cut=0.605527, rsi_n=4, rsi_max=18.770788, vwap_n=8, max_hold=23, slots=14
+v4-5	simplify	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	check	explore.py at incumbent settings (identity check)
+v4-5	simplify	0.5932	0.8089	1.0865	0.5932	0.8779	0.9111	13.03	discard	delete time stop (max_hold) [6 params]
+v4-5	simplify	0.7915	0.8564	1.0886	0.7915	0.9394	0.9783	13.18	discard	time stop tied to VWAP window: max_hold = vwap_n (10) [6 params]
+v4-5	simplify	0.6637	0.6823	0.6637	0.9265	0.7274	0.748	16.1	discard	delete rsi_max: no RSI threshold, rank eligible by RSI(3) lowest first [6 params]
+v4-5	simplify	0.8417	0.8906	1.1097	0.8417	0.9713	1.009	13.02	discard	rank by RSI(3) instead of VWAP depth, RSI<20 kept [7 params, info]
+v4-5	simplify	0.7339	0.8382	0.9736	0.7339	0.8471	0.8748	4.1	discard	delete slots: every eligible name bought at 1/50, no cap, no ranking [6 params]
+v4-5	simplify	0.1737	0.9155	0.1737	0.3644	0.336	0.2299	17.85	discard	delete index trend filter (NIFTY>EMA100) [7 params, rule deletion]
+v4-5	simplify	0.6505	0.6505	0.7143	1.0593	0.7833	0.8315	15.99	discard	delete RSI filter entirely [5 params, info; non-compliant]
+v4-5	simplify	0.62	0.62	0.9403	0.8324	0.826	0.8956	13.14	discard	delete VWAP-depth ranking: ticker order among eligible [7 params, rule deletion]
+v4-5	simplify	0.8586	0.9423	1.0516	0.8586	0.9566	0.9767	13.16	discard	RSI rank (RSI<20 kept) + max_hold = vwap_n [6 params]
+v4-5	simplify	0.5922	0.9371	1.1123	0.5922	0.9163	0.9255	13.01	discard	RSI rank (RSI<20 kept) + no time stop [6 params]
+v4-5	simplify	0.7965	0.8422	0.9249	0.7965	0.8314	0.8549	4.08	discard	1/50 sizing (no slots) + max_hold = vwap_n [5 params]
+v4-5	simplify	0.5319	0.8771	0.9824	0.5319	0.8172	0.8284	4.1	discard	1/50 sizing (no slots) + no time stop [5 params]
+v4-5	simplify	0.6748	0.6909	0.6748	0.769	0.6936	0.7015	16.82	discard	RSI rank, no RSI threshold + max_hold=vwap_n [5 params]
+v4-5	simplify	0.4757	0.4757	0.8933	0.9542	0.803	0.9033	14.42	discard	time stop replaced by trend-break exit (close < own EMA100) [6 params]
+v4-5	simplify	0.6402	0.6402	0.6572	0.8579	0.6928	0.721	13.01	discard	time stop replaced by index trend-break exit (NIFTY < EMA100) [6 params]
+v4-5	simplify	0.2792	0.2792	0.6874	0.9591	0.6606	0.7713	14.44	discard	time stop replaced by stock or index trend-break exit [6 params]
+v4-5	simplify	0.4757	0.4757	0.8933	0.9542	0.803	0.9033	14.42	discard	time stop kept + trend-break exit (info) [7 params]
+v4-5	simplify	0.5546	0.5546	0.8664	0.908	0.7941	0.8721	14.43	discard	RSI rank + trend-break exit, no time stop [6 params]
+v4-5	simplify	0.8004	0.9029	1.0871	0.8004	0.9531	0.9792	11.4	plateau	RSI rank (RSI<20 kept) plateau neighbour trend_n=80
+v4-5	simplify	0.8228	0.8228	1.1022	0.9846	0.9923	1.054	14.13	plateau	RSI rank (RSI<20 kept) plateau neighbour trend_n=120
+v4-5	simplify	0.5117	0.5117	0.8566	1.2422	0.8684	0.9821	18.14	plateau	RSI rank (RSI<20 kept) plateau neighbour breadth_cut=0.48
+v4-5	simplify	0.6266	1.1336	0.6266	0.8063	0.769	0.6713	6.23	plateau	RSI rank (RSI<20 kept) plateau neighbour breadth_cut=0.72
+v4-5	simplify	0.5595	0.5595	0.7858	1.0883	0.8015	0.8817	15.69	plateau	RSI rank (RSI<20 kept) plateau neighbour rsi_n=2
+v4-5	simplify	0.7748	1.5064	1.2365	0.7748	1.1484	1.0696	8.72	plateau	RSI rank (RSI<20 kept) plateau neighbour rsi_n=4
+v4-5	simplify	0.8591	1.0594	1.0972	0.8591	1.0041	1.0063	10.83	plateau	RSI rank (RSI<20 kept) plateau neighbour rsi_max=16.0
+v4-5	simplify	0.6917	0.6917	0.9252	0.9839	0.8745	0.9385	14.71	plateau	RSI rank (RSI<20 kept) plateau neighbour rsi_max=24.0
+v4-5	simplify	0.8269	0.8269	0.8914	0.889	0.8521	0.8774	14.87	plateau	RSI rank (RSI<20 kept) plateau neighbour vwap_n=8
+v4-5	simplify	0.5272	0.5272	0.6955	0.6779	0.6344	0.673	10.77	plateau	RSI rank (RSI<20 kept) plateau neighbour vwap_n=12
+v4-5	simplify	0.8417	0.8417	1.1132	0.8674	0.9694	1.02	13.06	plateau	RSI rank (RSI<20 kept) plateau neighbour max_hold=16
+v4-5	simplify	0.7415	0.9212	1.0967	0.7415	0.945	0.9665	13.0	plateau	RSI rank (RSI<20 kept) plateau neighbour max_hold=24
+v4-5	simplify	0.6841	0.6841	1.1393	0.8568	0.946	1.0332	13.84	plateau	RSI rank (RSI<20 kept) plateau neighbour slots=10
+v4-5	simplify	0.7893	0.8594	1.0552	0.7893	0.9232	0.9556	12.22	plateau	RSI rank (RSI<20 kept) plateau neighbour slots=14
+v4-5	simplify	0.9476	1.0984	1.0468	0.9476	0.9984	0.9954	13.3	discard	time stop replaced by market-recovered exit: sell laggards when breadth < 1-breadth_cut [6 params]
+v4-5	simplify	0.5315	0.5315	0.9163	0.6329	0.7424	0.8121	13.85	discard	time stop replaced by NIFTYBEES-reclaim exit: sell laggards when NIFTYBEES > its VWAP10 [6 params]
+v4-5	simplify	0.5796	0.6333	0.7157	0.5796	0.6423	0.656	14.71	discard	time stop replaced by trigger-off exit: sell laggards when breadth <= breadth_cut [6 params]
+v4-5	simplify	0.9476	1.0984	1.0468	0.9476	0.9984	0.9954	13.3	discard	time stop kept + market-recovered exit (info) [7 params]
+v4-5	simplify	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	identity check after edit
+v4-5	simplify	0.172	0.172	0.9934	0.3738	0.5902	0.7666	15.11	discard	delete stock-uptrend requirement in eligibility (kept in breadth) [7 params, rule deletion]
+v4-5	simplify	0.456	0.456	0.8468	0.8325	0.7387	0.829	17.22	discard	breadth over all live members instead of uptrend members [7 params, rule simplification]
+v4-5	simplify	-0.6186	-0.6186	0.0862	0.6228	0.0414	0.2705	27.18	discard	delete breadth trigger (open on any index-uptrend day) [6 params]
+v4-5	simplify	0.7135	0.7135	1.1605	0.8853	0.9674	1.0541	12.71	discard	delete rsi_max: eligible when stock RSI(3) < NIFTY RSI(3) (relative oversold) [6 params]
+v4-5	simplify	0.6646	0.6833	0.9972	0.6646	0.8226	0.8768	12.77	discard	relative oversold (stock RSI3 < NIFTY RSI3) + RSI rank [6 params]
+v4-5	simplify	0.6164	0.7151	0.9142	0.6164	0.7737	0.8059	17.17	discard	recovered exit (laggards sold when breadth < 1-cut), breadth_cut 0.55 [6 params]
+v4-5	simplify	0.6087	0.6087	0.8368	0.6562	0.7211	0.7647	18.98	discard	recovered exit, breadth_cut 0.5 (recovery = below-VWAP share < 0.5) [6 params]
+v4-5	simplify	0.8699	0.9841	0.9453	0.8699	0.9035	0.8979	9.77	discard	recovered exit, slots 20 [6 params]
+v4-5	simplify	0.6212	0.6212	0.7143	1.0497	0.7742	0.8281	15.92	discard	delete rsi_max: RSI midline, eligible when RSI(3) < 50 (avg loss > avg gain) [6 params]
+v4-5	simplify	0.7543	0.7543	0.7919	0.9843	0.8194	0.849	15.72	discard	RSI midline with rsi_n=10 (= vwap_n), RSI(10) < 50 [5 params if tied]
+v4-5	simplify	0.0	0.0	0.5025	0.0	0.3263	0.3865	0.02	discard	textbook Wilder RSI(14) < 30 (both RSI dials fixed by convention) [5 params]
+v4-5	simplify	0.8305	0.8305	1.0354	0.9982	0.9602	1.0137	13.51	discard	textbook Connors RSI(2) < 10 [5 params]
+v4-5	simplify	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	identity check after loop rewrite
+v4-5	simplify	0.7849	0.7849	1.0787	0.7854	0.9172	0.9698	12.56	discard	index filter expressed through breadth: more than half of live members above own EMA100 [7 params]
+v4-5	simplify	0.7254	0.7254	1.0696	0.8617	0.9211	0.9892	13.0	discard	slots as cap only: all eligible bought at min(1/12, free capacity/n), no ranking [7 params, rule deletion]
+v4-5	simplify	0.7915	0.8564	1.0886	0.7915	0.9394	0.9783	13.18	candidate	candidate.py = incumbent 1 with max_hold deleted; holding limit = vwap_n (entry day leaves the VWAP window) [6 params]
+v4-5	simplify	0.3794	0.3794	0.5673	0.8238	0.591	0.6634	24.35	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 0: trend_n=115, breadth_cut=0.487384, rsi_n=2, rsi_max=18.330692, vwap_n=11, slots=10
+v4-5	simplify	0.6217	0.6217	0.9956	1.2499	0.9585	1.066	16.76	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 1: trend_n=94, breadth_cut=0.541062, rsi_n=3, rsi_max=19.643408, vwap_n=9, slots=12
+v4-5	simplify	0.8928	1.0568	0.8928	1.2236	0.9801	0.9779	13.25	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 2: trend_n=80, breadth_cut=0.616607, rsi_n=3, rsi_max=21.119938, vwap_n=9, slots=11
+v4-5	simplify	0.6102	1.2494	1.1012	0.6102	0.9916	0.9264	10.09	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 3: trend_n=120, breadth_cut=0.509859, rsi_n=4, rsi_max=18.206621, vwap_n=10, slots=14
+v4-5	simplify	0.515	1.0729	0.5701	0.515	0.6609	0.5428	5.68	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 4: trend_n=106, breadth_cut=0.715461, rsi_n=3, rsi_max=16.779979, vwap_n=10, slots=13
+v4-5	simplify	0.6701	0.8197	0.8863	0.6701	0.7981	0.8051	17.15	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 5: trend_n=110, breadth_cut=0.574278, rsi_n=3, rsi_max=23.567636, vwap_n=10, slots=14
+v4-5	simplify	0.5197	0.5197	0.8065	1.1318	0.8095	0.9018	16.84	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 6: trend_n=108, breadth_cut=0.539761, rsi_n=3, rsi_max=23.70162, vwap_n=12, slots=11
+v4-5	simplify	0.6373	0.8685	0.6373	0.8665	0.726	0.6906	9.04	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 7: trend_n=105, breadth_cut=0.641276, rsi_n=3, rsi_max=20.158381, vwap_n=12, slots=14
+v4-5	simplify	0.2226	0.2226	0.6442	0.7309	0.56	0.6647	21.11	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 8: trend_n=109, breadth_cut=0.503276, rsi_n=3, rsi_max=20.000105, vwap_n=8, slots=12
+v4-5	simplify	0.7109	0.7109	0.913	0.9288	0.8476	0.8966	12.98	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 9: trend_n=91, breadth_cut=0.64489, rsi_n=2, rsi_max=18.243671, vwap_n=10, slots=12
+v4-5	simplify	0.8997	0.8997	0.9876	1.1607	0.9876	1.0271	12.03	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 10: trend_n=88, breadth_cut=0.532795, rsi_n=3, rsi_max=17.058547, vwap_n=12, slots=11
+v4-5	simplify	0.674	0.674	0.8813	1.0988	0.8715	0.9393	13.81	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 11: trend_n=113, breadth_cut=0.57492, rsi_n=3, rsi_max=22.045216, vwap_n=12, slots=13
+v4-5	simplify	0.7003	0.8997	0.7003	0.7666	0.7414	0.7018	9.94	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 12: trend_n=102, breadth_cut=0.66008, rsi_n=3, rsi_max=23.330776, vwap_n=11, slots=13
+v4-5	simplify	0.841	0.841	0.8868	0.8758	0.8529	0.8653	12.26	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 13: trend_n=89, breadth_cut=0.594132, rsi_n=3, rsi_max=21.26888, vwap_n=11, slots=13
+v4-5	simplify	0.6227	0.6227	0.8783	1.0872	0.8601	0.9389	18.49	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 14: trend_n=104, breadth_cut=0.56212, rsi_n=3, rsi_max=21.534188, vwap_n=9, slots=11
+v4-5	simplify	0.7731	0.7731	1.0136	0.7955	0.88	0.9219	11.58	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 15: trend_n=97, breadth_cut=0.636335, rsi_n=3, rsi_max=21.602313, vwap_n=10, slots=14
+v4-5	simplify	0.5524	0.9095	0.8429	0.5524	0.7657	0.7378	15.54	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 16: trend_n=109, breadth_cut=0.580182, rsi_n=3, rsi_max=21.393099, vwap_n=11, slots=10
+v4-5	simplify	0.7337	0.7337	0.9756	1.3863	1.0054	1.096	15.38	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 17: trend_n=81, breadth_cut=0.597819, rsi_n=3, rsi_max=21.922648, vwap_n=9, slots=10
+v4-5	simplify	0.6728	0.9347	0.9521	0.6728	0.8571	0.8493	11.95	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 18: trend_n=107, breadth_cut=0.592666, rsi_n=3, rsi_max=17.117855, vwap_n=11, slots=11
+v4-5	simplify	0.9001	1.0374	0.9517	0.9001	0.9316	0.9144	11.13	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 19: trend_n=84, breadth_cut=0.644563, rsi_n=3, rsi_max=21.307751, vwap_n=10, slots=10
+v4-5	simplify	0.9118	1.062	0.9118	0.9987	0.9432	0.9234	10.94	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 20: trend_n=94, breadth_cut=0.552914, rsi_n=3, rsi_max=17.835382, vwap_n=12, slots=14
+v4-5	simplify	0.5738	1.0541	0.7755	0.5738	0.7752	0.6991	6.23	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 21: trend_n=112, breadth_cut=0.703053, rsi_n=3, rsi_max=16.026492, vwap_n=10, slots=14
+v4-5	simplify	0.7376	0.9162	1.0364	0.7376	0.9114	0.9256	14.41	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 22: trend_n=113, breadth_cut=0.616787, rsi_n=3, rsi_max=20.424636, vwap_n=10, slots=10
+v4-5	simplify	0.8468	0.8468	0.8984	0.9203	0.87	0.8863	10.68	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 23: trend_n=111, breadth_cut=0.632065, rsi_n=3, rsi_max=19.814763, vwap_n=12, slots=10
+v4-5	simplify	0.5232	0.5232	0.8823	0.914	0.7985	0.8859	14.72	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 24: trend_n=99, breadth_cut=0.55022, rsi_n=3, rsi_max=19.498647, vwap_n=11, slots=11
+v4-5	simplify	0.7556	0.8083	0.7556	1.0235	0.8134	0.8311	15.91	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 25: trend_n=92, breadth_cut=0.518698, rsi_n=3, rsi_max=17.387174, vwap_n=9, slots=11
+v4-5	simplify	0.5548	1.2847	0.5548	1.0433	0.809	0.6879	7.04	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 26: trend_n=87, breadth_cut=0.650669, rsi_n=3, rsi_max=16.121366, vwap_n=12, slots=10
+v4-5	simplify	0.8322	0.9087	0.8322	0.8804	0.8312	0.8307	11.22	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 27: trend_n=99, breadth_cut=0.665739, rsi_n=3, rsi_max=18.831529, vwap_n=8, slots=12
+v4-5	simplify	0.4215	0.4215	0.9037	0.5899	0.6985	0.7906	14.06	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 28: trend_n=95, breadth_cut=0.502629, rsi_n=4, rsi_max=22.719452, vwap_n=8, slots=13
+v4-5	simplify	0.4197	0.4197	0.7363	1.2108	0.787	0.9031	17.78	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 29: trend_n=101, breadth_cut=0.512027, rsi_n=3, rsi_max=20.258728, vwap_n=11, slots=10
+v4-5	simplify	0.8477	0.8724	0.852	0.8477	0.8333	0.8382	13.29	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 30: trend_n=109, breadth_cut=0.595377, rsi_n=3, rsi_max=18.550544, vwap_n=10, slots=13
+v4-5	simplify	0.8713	1.1339	0.8713	0.9345	0.9204	0.8813	11.93	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 31: trend_n=84, breadth_cut=0.550606, rsi_n=3, rsi_max=17.018472, vwap_n=11, slots=11
+v4-5	simplify	0.775	1.0299	0.8708	0.775	0.8645	0.8234	7.3	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 32: trend_n=117, breadth_cut=0.692312, rsi_n=3, rsi_max=16.652892, vwap_n=10, slots=14
+v4-5	simplify	0.8877	0.9596	1.0313	0.8877	0.9563	0.972	12.58	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 33: trend_n=95, breadth_cut=0.555571, rsi_n=3, rsi_max=18.276503, vwap_n=11, slots=13
+v4-5	simplify	0.6548	1.2205	0.6548	0.9398	0.7897	0.7032	8.03	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 34: trend_n=85, breadth_cut=0.697573, rsi_n=3, rsi_max=21.158975, vwap_n=9, slots=13
+v4-5	simplify	0.5961	0.9975	0.9163	0.5961	0.8282	0.8006	6.06	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 35: trend_n=84, breadth_cut=0.50895, rsi_n=4, rsi_max=16.310862, vwap_n=9, slots=13
+v4-5	simplify	0.6793	0.8983	0.7922	0.6793	0.7703	0.7431	7.84	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 36: trend_n=114, breadth_cut=0.680192, rsi_n=3, rsi_max=20.030483, vwap_n=11, slots=14
+v4-5	simplify	0.897	1.1051	0.897	1.0587	0.9565	0.9299	11.02	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 37: trend_n=82, breadth_cut=0.565085, rsi_n=3, rsi_max=18.515353, vwap_n=11, slots=14
+v4-5	simplify	0.784	0.9087	0.784	0.7919	0.7965	0.7711	12.46	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 38: trend_n=112, breadth_cut=0.617802, rsi_n=3, rsi_max=20.929648, vwap_n=11, slots=11
+v4-5	simplify	0.7169	0.8125	0.7169	0.7303	0.725	0.7027	10.81	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 39: trend_n=95, breadth_cut=0.644006, rsi_n=3, rsi_max=23.334158, vwap_n=11, slots=11
+v4-5	simplify	0.6903	1.166	0.6903	0.842	0.8152	0.7176	7.06	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 40: trend_n=91, breadth_cut=0.676615, rsi_n=3, rsi_max=20.231193, vwap_n=12, slots=13
+v4-5	simplify	0.4362	0.4362	0.678	0.793	0.6408	0.7082	20.17	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 41: trend_n=113, breadth_cut=0.546532, rsi_n=3, rsi_max=18.382078, vwap_n=8, slots=10
+v4-5	simplify	0.4514	0.4514	0.8032	0.9746	0.7623	0.86	19.93	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 42: trend_n=100, breadth_cut=0.507386, rsi_n=3, rsi_max=19.624418, vwap_n=9, slots=10
+v4-5	simplify	0.7522	1.0299	0.7604	0.7522	0.7959	0.7492	13.06	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 43: trend_n=90, breadth_cut=0.497569, rsi_n=3, rsi_max=16.217164, vwap_n=10, slots=13
+v4-5	simplify	0.6681	0.6681	0.8176	1.0005	0.8197	0.8751	19.6	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 44: trend_n=110, breadth_cut=0.558241, rsi_n=3, rsi_max=21.604077, vwap_n=9, slots=11
+v4-5	simplify	0.6771	1.0897	0.6771	0.843	0.7827	0.712	6.83	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 45: trend_n=88, breadth_cut=0.687721, rsi_n=3, rsi_max=19.66826, vwap_n=11, slots=11
+v4-5	simplify	0.5691	0.5691	0.8342	0.8825	0.7759	0.8452	16.02	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 46: trend_n=88, breadth_cut=0.481077, rsi_n=3, rsi_max=19.208014, vwap_n=11, slots=12
+v4-5	simplify	0.8369	1.3632	0.8369	0.8812	0.9391	0.8311	10.42	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 47: trend_n=87, breadth_cut=0.606623, rsi_n=3, rsi_max=17.891404, vwap_n=11, slots=11
+v4-5	simplify	0.8305	0.9322	0.8824	0.8305	0.8562	0.842	10.82	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 48: trend_n=94, breadth_cut=0.660756, rsi_n=3, rsi_max=23.327942, vwap_n=10, slots=11
+v4-5	simplify	0.7331	0.8519	0.8858	0.7331	0.8179	0.8187	11.06	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 49: trend_n=107, breadth_cut=0.665266, rsi_n=3, rsi_max=22.681334, vwap_n=10, slots=13
+v4-5	simplify	0.6988	0.6988	0.7386	0.9173	0.7658	0.7915	9.57	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 50: trend_n=107, breadth_cut=0.672544, rsi_n=2, rsi_max=16.908343, vwap_n=11, slots=10
+v4-5	simplify	0.5492	0.5492	0.7073	0.7004	0.6582	0.6972	15.76	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 51: trend_n=104, breadth_cut=0.595515, rsi_n=2, rsi_max=23.909375, vwap_n=11, slots=12
+v4-5	simplify	0.7655	0.8907	0.7655	0.859	0.794	0.7721	11.91	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 52: trend_n=96, breadth_cut=0.606124, rsi_n=3, rsi_max=21.642531, vwap_n=11, slots=13
+v4-5	simplify	0.6068	0.6068	0.7223	0.9231	0.7325	0.7814	18.49	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 53: trend_n=108, breadth_cut=0.593831, rsi_n=3, rsi_max=23.050274, vwap_n=8, slots=13
+v4-5	simplify	0.767	1.344	0.767	0.882	0.8521	0.7582	5.81	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 54: trend_n=82, breadth_cut=0.716717, rsi_n=3, rsi_max=18.270175, vwap_n=9, slots=13
+v4-5	simplify	0.9016	1.068	0.9016	1.0596	0.9415	0.9217	8.43	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 55: trend_n=118, breadth_cut=0.711266, rsi_n=3, rsi_max=20.244007, vwap_n=9, slots=14
+v4-5	simplify	0.7834	0.9488	0.7834	0.8365	0.8134	0.792	17.17	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 56: trend_n=116, breadth_cut=0.510763, rsi_n=3, rsi_max=19.270139, vwap_n=10, slots=14
+v4-5	simplify	0.8432	0.8432	0.9308	1.3592	1.0055	1.0646	16.87	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 57: trend_n=92, breadth_cut=0.545204, rsi_n=3, rsi_max=18.496744, vwap_n=9, slots=10
+v4-5	simplify	0.673	1.013	0.7023	0.673	0.7528	0.6795	8.81	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 58: trend_n=115, breadth_cut=0.685982, rsi_n=3, rsi_max=22.858317, vwap_n=11, slots=13
+v4-5	simplify	0.3833	0.3833	0.746	0.7606	0.6521	0.7386	15.52	joint	candidate.py (max_hold = vwap_n) joint +-20 pct draw 59: trend_n=102, breadth_cut=0.484489, rsi_n=3, rsi_max=16.809973, vwap_n=9, slots=14
+v4-5	simplify	0.8347	0.8347	1.0496	0.8903	0.9384	0.9808	11.5	plateau4	candidate.py plateau4 neighbour trend_n=80
+v4-5	simplify	0.7908	0.8539	1.0614	0.7908	0.9252	0.9602	14.4	plateau4	candidate.py plateau4 neighbour trend_n=120
+v4-5	simplify	0.5861	0.5861	0.8577	0.8238	0.7756	0.8399	18.69	plateau4	candidate.py plateau4 neighbour breadth_cut=0.48
+v4-5	simplify	0.6058	1.0886	0.6058	0.7938	0.7338	0.6503	6.29	plateau4	candidate.py plateau4 neighbour breadth_cut=0.72
+v4-5	simplify	0.5776	0.5776	0.8333	1.0474	0.8259	0.9081	15.92	plateau4	candidate.py plateau4 neighbour rsi_n=2
+v4-5	simplify	0.8781	1.4066	1.1749	0.8781	1.1218	1.0636	8.71	plateau4	candidate.py plateau4 neighbour rsi_n=4
+v4-5	simplify	0.6482	1.149	1.0324	0.6482	0.9343	0.8946	10.88	plateau4	candidate.py plateau4 neighbour rsi_max=16.0
+v4-5	simplify	0.838	0.8873	1.0059	0.838	0.9182	0.9407	14.93	plateau4	candidate.py plateau4 neighbour rsi_max=24.0
+v4-5	simplify	0.7605	0.7605	0.8384	0.9635	0.8268	0.8621	15.3	plateau4	candidate.py plateau4 neighbour vwap_n=8
+v4-5	simplify	0.5856	0.5856	0.7955	0.8606	0.7413	0.7955	10.86	plateau4	candidate.py plateau4 neighbour vwap_n=12
+v4-5	simplify	0.8133	0.9094	1.1099	0.8133	0.9673	0.9994	14.05	plateau4	candidate.py plateau4 neighbour slots=10
+v4-5	simplify	0.7954	0.899	1.0523	0.7954	0.93	0.9553	12.27	plateau4	candidate.py plateau4 neighbour slots=14
+v4-5	reconcile	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	reference	inc1 reference
+v4-5	reconcile	0.9872	1.1902	1.0664	0.9872	1.0399	1.0234	13.71	reference	r4_exits (VWAP7 exit) reference
+v4-5	reconcile	0.9101	1.1628	1.0392	0.9101	1.0179	0.9835	11.28	reference	r4_event (cap 5/day) reference
+v4-5	reconcile	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	check	explore sanity = inc1
+v4-5	reconcile	0.8925	0.8925	1.0219	1.1713	1.0008	1.0523	13.98	discard	shrinking exit VWAP length vwap_n-age (min 1), max_hold 20
+v4-5	reconcile	0.8925	0.8925	1.0083	1.1713	0.9928	1.0424	13.98	discard	shrinking exit VWAP length vwap_n-age (min 2), max_hold 20
+v4-5	reconcile	0.9077	0.9077	1.0086	1.1484	0.9905	1.0358	13.94	discard	shrinking exit VWAP length vwap_n-age (min 3), max_hold 20
+v4-5	reconcile	0.8925	0.8925	1.0219	1.1713	1.0008	1.0523	13.98	discard	shrinking exit VWAP length vwap_n-age (min 1), max_hold 10000
+v4-5	reconcile	0.8925	0.8925	1.0083	1.1713	0.9928	1.0424	13.98	discard	shrinking exit VWAP length vwap_n-age (min 2), max_hold 10000
+v4-5	reconcile	0.9077	0.9077	1.0086	1.1484	0.9905	1.0358	13.94	discard	shrinking exit VWAP length vwap_n-age (min 3), max_hold 10000
+v4-5	reconcile	1.063	1.0729	1.063	1.0869	1.0363	1.0517	13.87	discard	market-conditional exit: sell on close>VWAP10, or close>VWAP6 while NIFTYBEES below its VWAP10
+v4-5	reconcile	0.9339	1.1747	1.0978	0.9339	1.0381	1.0282	13.61	discard	market-conditional exit: sell on close>VWAP10, or close>VWAP7 while NIFTYBEES below its VWAP10
+v4-5	reconcile	0.9185	1.0694	1.1081	0.9185	1.0203	1.0316	13.42	discard	market-conditional exit: sell on close>VWAP10, or close>VWAP8 while NIFTYBEES below its VWAP10
+v4-5	reconcile	0.9549	1.196	1.0777	0.9549	1.0369	1.0212	13.59	discard	market-conditional exit VWAP7 + no time stop
+v4-5	reconcile	0.9232	1.4205	0.9232	1.0009	1.0279	0.9274	11.74	discard	combo: VWAP7 exit (fixed) + cap 5 new/day
+v4-5	reconcile	0.976	1.3426	0.976	1.0739	1.0537	0.9852	11.7	discard	combo: market-conditional VWAP7 exit + cap 5 new/day
+v4-5	reconcile	0.6437	1.0727	1.1119	0.6437	0.9676	0.945	10.04	discard	cap as share 0.5 of eligible names (ceil), exit inc1
+v4-5	reconcile	0.8153	1.3366	1.0532	0.8153	1.0352	0.9607	10.36	discard	cap as share 0.5 of eligible names (ceil) + VWAP7 exit
+v4-5	reconcile	0.803	1.0927	1.056	0.803	0.9808	0.9604	12.02	discard	cap as share 0.67 of eligible names (ceil), exit inc1
+v4-5	reconcile	0.9163	1.4229	1.036	0.9163	1.0625	0.98	12.61	discard	cap as share 0.67 of eligible names (ceil) + VWAP7 exit
+v4-5	reconcile	0.9418	1.0074	1.0622	0.9418	0.9922	1.0092	13.47	discard	inc1 with time stop max_hold=8
+v4-5	reconcile	0.7915	0.8564	1.0886	0.7915	0.9394	0.9783	13.18	discard	inc1 with time stop max_hold=10
+v4-5	reconcile	0.8198	0.8198	1.1201	0.8949	0.9745	1.0331	13.07	discard	inc1 with time stop max_hold=12
+v4-5	reconcile	0.8229	0.8229	1.146	0.8703	0.9824	1.0421	13.09	discard	inc1 with time stop max_hold=15
+v4-5	reconcile	0.8598	0.9882	1.0417	0.8598	0.9633	0.9697	13.93	discard	relative exit: sell when close/VWAP10 > min(1, NIFTYBEES close/its VWAP10) (name no deeper than the market)
+v4-5	reconcile	0.8578	0.9886	1.0086	0.8578	0.9458	0.947	13.91	discard	relative exit, no time stop
+v4-5	reconcile	0.9246	0.9246	1.0402	0.9951	0.9777	1.0111	13.52	discard	breadth-conditional exit: sell on close>VWAP10, or close>VWAP6 while the pullback is still broad (breadth>cut)
+v4-5	reconcile	0.9577	1.0103	1.0509	0.9577	0.9923	1.0055	13.4	discard	breadth-conditional exit: sell on close>VWAP10, or close>VWAP7 while the pullback is still broad (breadth>cut)
+v4-5	reconcile	0.9057	0.9326	1.0642	0.9057	0.9704	0.9984	13.3	discard	breadth-conditional exit: sell on close>VWAP10, or close>VWAP8 while the pullback is still broad (breadth>cut)
+v4-5	reconcile	0.8007	0.8007	1.0998	0.9855	0.9807	1.0472	13.69	discard	market-conditional exit tied lengths: close>VWAP10, or close>VWAP6 while NIFTYBEES below its own VWAP6
+v4-5	reconcile	0.9026	0.9449	1.0731	0.9026	0.9748	1.0024	13.54	discard	market-conditional exit tied lengths: close>VWAP10, or close>VWAP7 while NIFTYBEES below its own VWAP7
+v4-5	reconcile	0.8852	0.8852	1.1025	0.9036	0.979	1.023	13.41	discard	market-conditional exit tied lengths: close>VWAP10, or close>VWAP8 while NIFTYBEES below its own VWAP8
+v4-5	reconcile	0.9339	1.1747	1.0978	0.9339	1.0381	1.0282	13.61	discard	c_mkt.py draft (market-conditional VWAP7 exit, time stop 20) file check
+v4-5	reconcile	0.9105	0.9105	1.0894	0.9908	0.9998	1.0433	13.48	discard	since-entry market exit: close>VWAP10, or close>VWAP7 while NIFTY is below its close on the entry day
+v4-5	reconcile	0.9339	1.1747	1.0978	0.9339	1.0381	1.0282	13.61	discard	explore check: mkt VWAP7 (no handover) = c_mkt
+v4-5	reconcile	0.7016	0.7745	1.0904	0.7016	0.901	0.9496	15.79	discard	mkt VWAP7 exit + handover: an early-exited slot moves to NIFTYBEES until NIFTYBEES closes above its VWAP10
+v4-5	reconcile	0.6981	0.9538	1.1243	0.6981	0.953	0.9716	14.64	discard	relative-strength bank: close>VWAP10, or (close > entry-day close while NIFTY below its entry-day close); no new param
+v4-5	reconcile	0.8494	0.8494	1.1176	1.099	1.0304	1.097	13.53	discard	laggard exit: close>VWAP10, or close>VWAP6 while the name lags NIFTY since entry (close/entry close < NIFTY/NIFTY at entry)
+v4-5	reconcile	0.8218	0.8218	1.1391	0.9921	1.0097	1.0773	13.32	discard	laggard exit: close>VWAP10, or close>VWAP7 while the name lags NIFTY since entry (close/entry close < NIFTY/NIFTY at entry)
+v4-5	reconcile	0.8201	0.8201	1.178	0.8923	1.0041	1.0705	13.22	discard	laggard exit: close>VWAP10, or close>VWAP8 while the name lags NIFTY since entry (close/entry close < NIFTY/NIFTY at entry)
+v4-5	reconcile	0.9132	0.9132	1.0958	0.9846	1.0015	1.045	13.48	discard	exit: close>VWAP10, or close>VWAP7 while NIFTYBEES below its VWAP10 AND NIFTY below its entry-day close
+v4-5	reconcile	0.9117	0.9117	1.0676	1.0792	1.0094	1.0571	13.67	discard	since-entry market exit VWAP6
+v4-5	reconcile	0.8089	0.8089	1.1493	0.9005	0.9876	1.0539	13.37	discard	since-entry market exit VWAP8
+v4-5	reconcile	0.9105	0.9105	1.0894	0.9908	0.9998	1.0433	13.48	discard	c_since.py draft (VWAP7 exit while NIFTY below entry-day close) file check
+v4-5	reconcile	0.9549	1.196	1.0777	0.9549	1.0369	1.0212	13.59	discard	c_mkt_nots.py: market-conditional VWAP7 exit, time stop removed (7 params)
+v4-5	reconcile	0.8984	1.0665	0.935	0.8984	0.9345	0.9093	10.97	discard	pyramid entry: each trigger day uses at most half (ceil) of the free slots, inc1 exit
+v4-5	reconcile	0.9601	1.4025	0.9601	1.1213	1.0594	0.9903	11.38	discard	pyramid entry half free slots + market-conditional VWAP7 exit
+v4-5	reconcile	0.9339	1.1747	1.0978	0.9339	1.0381	1.0282	13.61	candidate	CANDIDATE candidate.py: inc1 + market-conditional VWAP7 exit (best attempt; fails years w/o 2020 and plateau4)
+v4-5	reconcile	0.4683	0.4683	0.5787	0.9236	0.6477	0.7081	26.24	perturb	candidate.py joint +-20 pct draw 0: trend_n=115, breadth_cut=0.4874, rsi_n=2, rsi_max=18.3307, vwap_n=11, exit_n=6, max_hold=19, slots=11
+v4-5	reconcile	0.4854	0.4854	0.9639	0.6852	0.7694	0.8599	14.12	perturb	candidate.py joint +-20 pct draw 1: trend_n=94, breadth_cut=0.5893, rsi_n=3, rsi_max=19.2532, vwap_n=8, exit_n=7, max_hold=21, slots=13
+v4-5	reconcile	0.7866	1.3928	0.7866	1.2087	0.9025	0.8349	4.74	perturb	candidate.py joint +-20 pct draw 2: trend_n=86, breadth_cut=0.5667, rsi_n=4, rsi_max=16.9953, vwap_n=12, exit_n=6, max_hold=19, slots=14
+v4-5	reconcile	0.4989	1.1149	0.6856	0.4989	0.7242	0.6158	6.25	perturb	candidate.py joint +-20 pct draw 3: trend_n=106, breadth_cut=0.7155, rsi_n=3, rsi_max=16.78, vwap_n=10, exit_n=8, max_hold=22, slots=11
+v4-5	reconcile	0.5924	1.0741	0.5924	0.8818	0.7161	0.6431	7.22	perturb	candidate.py joint +-20 pct draw 4: trend_n=98, breadth_cut=0.707, rsi_n=3, rsi_max=23.8126, vwap_n=11, exit_n=6, max_hold=18, slots=14
+v4-5	reconcile	0.7926	0.9426	0.7926	0.9807	0.8571	0.8476	18.37	perturb	candidate.py joint +-20 pct draw 5: trend_n=116, breadth_cut=0.5331, rsi_n=3, rsi_max=21.3759, vwap_n=10, exit_n=7, max_hold=23, slots=14
+v4-5	reconcile	0.2875	0.2875	0.8667	0.9329	0.7326	0.8763	19.92	perturb	candidate.py joint +-20 pct draw 6: trend_n=109, breadth_cut=0.5033, rsi_n=3, rsi_max=20.0001, vwap_n=8, exit_n=7, max_hold=18, slots=13
+v4-5	reconcile	0.4371	0.4371	1.1048	1.4241	1.0177	1.1931	17.83	perturb	candidate.py joint +-20 pct draw 7: trend_n=81, breadth_cut=0.5473, rsi_n=3, rsi_max=20.6821, vwap_n=9, exit_n=6, max_hold=17, slots=10
+v4-5	reconcile	0.7061	0.9847	0.7358	0.7061	0.7643	0.7176	16.11	perturb	candidate.py joint +-20 pct draw 8: trend_n=118, breadth_cut=0.5471, rsi_n=3, rsi_max=19.164, vwap_n=10, exit_n=8, max_hold=23, slots=13
+v4-5	reconcile	0.6631	1.0427	0.6631	0.7223	0.7318	0.6556	10.53	perturb	candidate.py joint +-20 pct draw 9: trend_n=102, breadth_cut=0.6601, rsi_n=3, rsi_max=23.3308, vwap_n=11, exit_n=8, max_hold=18, slots=12
+v4-5	reconcile	0.9921	1.0383	0.9921	1.0224	0.9724	0.9743	12.57	perturb	candidate.py joint +-20 pct draw 10: trend_n=98, breadth_cut=0.6381, rsi_n=3, rsi_max=22.0159, vwap_n=10, exit_n=7, max_hold=20, slots=13
+v4-5	reconcile	0.8189	0.8488	0.8189	0.939	0.8339	0.8456	14.97	perturb	candidate.py joint +-20 pct draw 11: trend_n=88, breadth_cut=0.5263, rsi_n=3, rsi_max=21.2112, vwap_n=11, exit_n=8, max_hold=21, slots=14
+v4-5	reconcile	0.7953	0.8243	0.7953	0.8559	0.7885	0.796	16.34	perturb	candidate.py joint +-20 pct draw 12: trend_n=109, breadth_cut=0.5802, rsi_n=3, rsi_max=21.3931, vwap_n=11, exit_n=6, max_hold=16, slots=12
+v4-5	reconcile	0.6109	1.1756	0.8579	0.6109	0.8517	0.7654	9.54	perturb	candidate.py joint +-20 pct draw 13: trend_n=109, breadth_cut=0.6577, rsi_n=3, rsi_max=16.9778, vwap_n=11, exit_n=7, max_hold=19, slots=10
+v4-5	reconcile	0.7733	1.1363	0.7811	0.7733	0.8324	0.772	17.45	perturb	candidate.py joint +-20 pct draw 14: trend_n=111, breadth_cut=0.5738, rsi_n=3, rsi_max=21.4854, vwap_n=11, exit_n=7, max_hold=19, slots=10
+v4-5	reconcile	0.9543	1.0817	0.9758	0.9543	0.9622	0.9477	11.3	perturb	candidate.py joint +-20 pct draw 15: trend_n=94, breadth_cut=0.5529, rsi_n=3, rsi_max=17.8354, vwap_n=12, exit_n=8, max_hold=22, slots=14
+v4-5	reconcile	0.5837	0.5837	0.9093	0.8	0.7956	0.8664	20.2	perturb	candidate.py joint +-20 pct draw 16: trend_n=91, breadth_cut=0.4808, rsi_n=3, rsi_max=23.7287, vwap_n=11, exit_n=7, max_hold=21, slots=12
+v4-5	reconcile	0.6448	0.6448	0.8767	1.2592	0.9161	1.005	19.02	perturb	candidate.py joint +-20 pct draw 17: trend_n=95, breadth_cut=0.5102, rsi_n=3, rsi_max=21.0688, vwap_n=11, exit_n=7, max_hold=23, slots=10
+v4-5	reconcile	0.642	0.642	0.8749	1.1248	0.8701	0.9479	16.64	perturb	candidate.py joint +-20 pct draw 18: trend_n=99, breadth_cut=0.5502, rsi_n=3, rsi_max=19.4986, vwap_n=11, exit_n=6, max_hold=18, slots=10
+v4-5	reconcile	0.6002	0.6002	0.8374	1.0211	0.8154	0.8874	16.82	perturb	candidate.py joint +-20 pct draw 19: trend_n=89, breadth_cut=0.5216, rsi_n=3, rsi_max=17.8499, vwap_n=9, exit_n=8, max_hold=19, slots=10
+v4-5	reconcile	0.6635	0.6635	0.7521	0.9627	0.7771	0.8205	20.52	perturb	candidate.py joint +-20 pct draw 20: trend_n=116, breadth_cut=0.4863, rsi_n=3, rsi_max=22.1913, vwap_n=12, exit_n=7, max_hold=17, slots=12
+v4-5	reconcile	0.2672	0.2672	1.0283	0.7066	0.748	0.9107	16.23	perturb	candidate.py joint +-20 pct draw 21: trend_n=95, breadth_cut=0.5026, rsi_n=4, rsi_max=22.7195, vwap_n=8, exit_n=8, max_hold=20, slots=10
+v4-5	reconcile	0.794	0.9275	0.9513	0.794	0.8807	0.8823	11.52	perturb	candidate.py joint +-20 pct draw 22: trend_n=110, breadth_cut=0.6078, rsi_n=3, rsi_max=16.2962, vwap_n=11, exit_n=7, max_hold=21, slots=11
+v4-5	reconcile	0.8472	1.1151	0.8472	0.9508	0.8955	0.8518	9.45	perturb	candidate.py joint +-20 pct draw 23: trend_n=101, breadth_cut=0.6519, rsi_n=3, rsi_max=18.3535, vwap_n=11, exit_n=6, max_hold=22, slots=11
+v4-5	reconcile	0.8879	1.0895	0.8879	0.9848	0.9324	0.8972	8.42	perturb	candidate.py joint +-20 pct draw 24: trend_n=117, breadth_cut=0.6923, rsi_n=3, rsi_max=16.6529, vwap_n=10, exit_n=8, max_hold=19, slots=11
+v4-5	reconcile	0.5936	0.5936	0.9382	0.9458	0.8458	0.9282	16.99	perturb	candidate.py joint +-20 pct draw 25: trend_n=90, breadth_cut=0.5483, rsi_n=3, rsi_max=21.824, vwap_n=9, exit_n=8, max_hold=18, slots=13
+v4-5	reconcile	0.6944	0.9249	0.6944	0.7723	0.7223	0.6894	7.0	perturb	candidate.py joint +-20 pct draw 26: trend_n=94, breadth_cut=0.6596, rsi_n=3, rsi_max=16.965, vwap_n=12, exit_n=6, max_hold=18, slots=13
+v4-5	reconcile	0.715	0.9245	0.921	0.715	0.8515	0.8379	8.97	perturb	candidate.py joint +-20 pct draw 27: trend_n=114, breadth_cut=0.6802, rsi_n=3, rsi_max=20.0305, vwap_n=11, exit_n=8, max_hold=16, slots=11
+v4-5	reconcile	0.7255	1.0588	0.7255	0.9378	0.8293	0.7902	18.37	perturb	candidate.py joint +-20 pct draw 28: trend_n=111, breadth_cut=0.5555, rsi_n=3, rsi_max=23.6082, vwap_n=11, exit_n=7, max_hold=18, slots=13
+v4-5	reconcile	0.5255	0.5255	0.7166	0.9471	0.7258	0.7923	20.08	perturb	candidate.py joint +-20 pct draw 29: trend_n=108, breadth_cut=0.537, rsi_n=3, rsi_max=21.4669, vwap_n=9, exit_n=8, max_hold=22, slots=11
+v4-5	reconcile	0.7289	1.4309	0.7289	0.9295	0.8915	0.7589	7.94	perturb	candidate.py joint +-20 pct draw 30: trend_n=91, breadth_cut=0.6766, rsi_n=3, rsi_max=20.2312, vwap_n=12, exit_n=7, max_hold=23, slots=11
+v4-5	reconcile	0.8161	0.8161	1.055	1.0231	0.9666	1.0281	13.67	perturb	candidate.py joint +-20 pct draw 31: trend_n=94, breadth_cut=0.5515, rsi_n=3, rsi_max=16.5095, vwap_n=10, exit_n=6, max_hold=22, slots=12
+v4-5	reconcile	0.3301	0.3301	0.8518	1.0759	0.7707	0.9083	15.22	perturb	candidate.py joint +-20 pct draw 32: trend_n=91, breadth_cut=0.4961, rsi_n=3, rsi_max=16.5856, vwap_n=8, exit_n=6, max_hold=19, slots=13
+v4-5	reconcile	0.636	0.636	0.839	1.0685	0.8306	0.898	18.35	perturb	candidate.py joint +-20 pct draw 33: trend_n=110, breadth_cut=0.5582, rsi_n=3, rsi_max=21.6041, vwap_n=9, exit_n=6, max_hold=18, slots=14
+v4-5	reconcile	1.0091	1.0091	1.0481	1.1193	1.0248	1.049	13.85	perturb	candidate.py joint +-20 pct draw 34: trend_n=94, breadth_cut=0.59, rsi_n=3, rsi_max=18.0838, vwap_n=9, exit_n=6, max_hold=17, slots=12
+v4-5	reconcile	0.584	0.584	0.876	1.0606	0.8401	0.9233	18.09	perturb	candidate.py joint +-20 pct draw 35: trend_n=110, breadth_cut=0.5764, rsi_n=3, rsi_max=20.2208, vwap_n=9, exit_n=6, max_hold=22, slots=11
+v4-5	reconcile	0.7201	1.0504	0.7201	1.082	0.816	0.7715	11.09	perturb	candidate.py joint +-20 pct draw 36: trend_n=94, breadth_cut=0.6608, rsi_n=3, rsi_max=23.3279, vwap_n=10, exit_n=6, max_hold=21, slots=13
+v4-5	reconcile	0.8327	1.4516	0.8327	0.9234	0.9498	0.837	8.81	perturb	candidate.py joint +-20 pct draw 37: trend_n=96, breadth_cut=0.6804, rsi_n=3, rsi_max=22.4707, vwap_n=11, exit_n=8, max_hold=17, slots=10
+v4-5	reconcile	0.2533	0.2533	0.8378	0.9329	0.7118	0.8589	20.08	perturb	candidate.py joint +-20 pct draw 38: trend_n=107, breadth_cut=0.5131, rsi_n=3, rsi_max=19.8505, vwap_n=8, exit_n=8, max_hold=21, slots=12
+v4-5	reconcile	0.8228	1.0679	0.8228	0.8643	0.853	0.8062	12.91	perturb	candidate.py joint +-20 pct draw 39: trend_n=96, breadth_cut=0.6061, rsi_n=3, rsi_max=21.6425, vwap_n=11, exit_n=7, max_hold=22, slots=12
+v4-5	reconcile	0.7067	0.9427	0.7067	0.8369	0.7659	0.7381	11.57	perturb	candidate.py joint +-20 pct draw 40: trend_n=114, breadth_cut=0.6915, rsi_n=3, rsi_max=21.0782, vwap_n=8, exit_n=8, max_hold=22, slots=11
+v4-5	reconcile	0.5241	1.3691	1.048	0.5241	0.9623	0.8726	8.63	perturb	candidate.py joint +-20 pct draw 41: trend_n=91, breadth_cut=0.6405, rsi_n=4, rsi_max=23.7089, vwap_n=10, exit_n=7, max_hold=18, slots=14
+v4-5	reconcile	0.7425	0.9413	0.7425	1.0044	0.837	0.8243	19.29	perturb	candidate.py joint +-20 pct draw 42: trend_n=116, breadth_cut=0.5108, rsi_n=3, rsi_max=19.2701, vwap_n=10, exit_n=8, max_hold=18, slots=11
+v4-5	reconcile	0.8856	0.8926	0.8856	1.0229	0.8951	0.9108	11.06	perturb	candidate.py joint +-20 pct draw 43: trend_n=100, breadth_cut=0.5549, rsi_n=3, rsi_max=17.4048, vwap_n=12, exit_n=8, max_hold=19, slots=14
+v4-5	reconcile	0.6584	1.0979	0.817	0.6584	0.7987	0.7432	7.66	perturb	candidate.py joint +-20 pct draw 44: trend_n=105, breadth_cut=0.6721, rsi_n=3, rsi_max=16.1496, vwap_n=10, exit_n=6, max_hold=18, slots=14
+v4-5	reconcile	0.4362	0.4362	0.7933	0.8692	0.7233	0.8153	20.02	perturb	candidate.py joint +-20 pct draw 45: trend_n=106, breadth_cut=0.5532, rsi_n=3, rsi_max=22.2279, vwap_n=9, exit_n=8, max_hold=19, slots=10
+v4-5	reconcile	1.0013	1.0928	1.0013	1.1184	1.0129	1.0149	12.75	perturb	candidate.py joint +-20 pct draw 46: trend_n=111, breadth_cut=0.6438, rsi_n=3, rsi_max=20.2814, vwap_n=10, exit_n=8, max_hold=22, slots=11
+v4-5	reconcile	0.2492	0.2492	0.896	1.2149	0.8129	0.9914	19.3	perturb	candidate.py joint +-20 pct draw 47: trend_n=97, breadth_cut=0.4919, rsi_n=3, rsi_max=18.241, vwap_n=9, exit_n=6, max_hold=17, slots=11
+v4-5	reconcile	0.8309	1.133	1.0864	0.8309	1.0039	0.9879	10.6	perturb	candidate.py joint +-20 pct draw 48: trend_n=106, breadth_cut=0.558, rsi_n=4, rsi_max=19.9478, vwap_n=9, exit_n=8, max_hold=17, slots=13
+v4-5	reconcile	0.4682	1.5363	0.4682	0.7072	0.7176	0.5153	8.05	perturb	candidate.py joint +-20 pct draw 49: trend_n=84, breadth_cut=0.6395, rsi_n=3, rsi_max=18.2715, vwap_n=12, exit_n=7, max_hold=18, slots=11
+v4-5	reconcile	0.7386	0.8717	0.7386	0.9381	0.7993	0.7971	16.06	perturb	candidate.py joint +-20 pct draw 50: trend_n=112, breadth_cut=0.5432, rsi_n=3, rsi_max=18.2002, vwap_n=11, exit_n=8, max_hold=18, slots=11
+v4-5	reconcile	0.6746	1.3111	0.9222	0.6746	0.9125	0.8259	10.32	perturb	candidate.py joint +-20 pct draw 51: trend_n=92, breadth_cut=0.5775, rsi_n=3, rsi_max=18.2316, vwap_n=12, exit_n=7, max_hold=20, slots=14
+v4-5	reconcile	0.6981	0.6981	0.788	0.7518	0.7471	0.7723	19.8	perturb	candidate.py joint +-20 pct draw 52: trend_n=94, breadth_cut=0.4921, rsi_n=3, rsi_max=23.3505, vwap_n=11, exit_n=7, max_hold=18, slots=12
+v4-5	reconcile	0.7219	1.0531	0.7973	0.7219	0.8063	0.7513	9.98	perturb	candidate.py joint +-20 pct draw 53: trend_n=119, breadth_cut=0.6744, rsi_n=3, rsi_max=19.4611, vwap_n=10, exit_n=7, max_hold=20, slots=14
+v4-5	reconcile	0.4907	0.9523	0.4907	0.8499	0.6669	0.5949	8.49	perturb	candidate.py joint +-20 pct draw 54: trend_n=106, breadth_cut=0.6993, rsi_n=2, rsi_max=20.5066, vwap_n=10, exit_n=8, max_hold=24, slots=12
+v4-5	reconcile	0.8951	1.083	0.9995	0.8951	0.966	0.9494	13.37	perturb	candidate.py joint +-20 pct draw 55: trend_n=88, breadth_cut=0.6141, rsi_n=3, rsi_max=18.773, vwap_n=9, exit_n=7, max_hold=19, slots=10
+v4-5	reconcile	0.7486	0.9922	0.7486	0.9005	0.8283	0.7951	18.32	perturb	candidate.py joint +-20 pct draw 56: trend_n=115, breadth_cut=0.5966, rsi_n=3, rsi_max=21.0846, vwap_n=9, exit_n=7, max_hold=19, slots=10
+v4-5	reconcile	0.6882	1.4378	0.8374	0.6882	0.8753	0.7679	5.29	perturb	candidate.py joint +-20 pct draw 57: trend_n=99, breadth_cut=0.7168, rsi_n=4, rsi_max=21.3344, vwap_n=9, exit_n=7, max_hold=23, slots=13
+v4-5	reconcile	0.5082	1.0761	0.5082	1.0469	0.7078	0.6157	5.56	perturb	candidate.py joint +-20 pct draw 58: trend_n=80, breadth_cut=0.7165, rsi_n=3, rsi_max=19.1491, vwap_n=10, exit_n=6, max_hold=17, slots=10
+v4-5	reconcile	0.1709	0.1709	0.6698	0.9797	0.6313	0.7832	26.48	perturb	candidate.py joint +-20 pct draw 59: trend_n=116, breadth_cut=0.5217, rsi_n=2, rsi_max=22.3844, vwap_n=9, exit_n=7, max_hold=17, slots=13
+v4-5	reconcile	0.7979	0.7979	1.0776	1.0152	0.9713	1.0349	11.72	plateau	c_since.py plateau4 neighbour trend_n=80
+v4-5	reconcile	0.8358	0.8358	1.0782	0.9057	0.9603	1.0105	14.87	plateau	c_since.py plateau4 neighbour trend_n=120
+v4-5	reconcile	0.5375	0.5375	0.9016	1.0816	0.8556	0.9561	18.97	plateau	c_since.py plateau4 neighbour breadth_cut=0.48
+v4-5	reconcile	0.6146	1.2783	0.6146	0.9525	0.8062	0.7026	6.42	plateau	c_since.py plateau4 neighbour breadth_cut=0.72
+v4-5	reconcile	0.7045	0.7045	0.7815	1.184	0.8622	0.919	16.36	plateau	c_since.py plateau4 neighbour rsi_n=2
+v4-5	reconcile	0.9345	1.4981	1.2201	0.9345	1.1728	1.1123	8.85	plateau	c_since.py plateau4 neighbour rsi_n=4
+v4-5	reconcile	0.8664	1.1389	1.0882	0.8664	1.0123	1.0023	11.08	plateau	c_since.py plateau4 neighbour rsi_max=16.0
+v4-5	reconcile	0.9779	0.9779	1.0169	0.9964	0.982	1.0013	15.51	plateau	c_since.py plateau4 neighbour rsi_max=24.0
+v4-5	reconcile	0.855	0.855	0.9527	0.9112	0.8931	0.9232	15.06	plateau	c_since.py plateau4 neighbour vwap_n=8
+v4-5	reconcile	0.5678	0.5678	0.7392	0.856	0.7064	0.7557	11.36	plateau	c_since.py plateau4 neighbour vwap_n=12
+v4-5	reconcile	0.9117	0.9117	1.0676	1.0792	1.0094	1.0571	13.67	plateau	c_since.py plateau4 neighbour exit_n=6
+v4-5	reconcile	0.8089	0.8089	1.1493	0.9005	0.9876	1.0539	13.37	plateau	c_since.py plateau4 neighbour exit_n=8
+v4-5	reconcile	0.8664	0.8664	1.122	1.005	1.0118	1.0701	13.49	plateau	c_since.py plateau4 neighbour max_hold=16
+v4-5	reconcile	0.879	0.879	1.0945	1.012	1.0017	1.0535	13.47	plateau	c_since.py plateau4 neighbour max_hold=24
+v4-5	reconcile	0.9276	0.9276	1.1238	1.0431	1.0372	1.086	14.44	plateau	c_since.py plateau4 neighbour slots=10
+v4-5	reconcile	0.8939	0.8939	1.0528	0.9281	0.9607	0.9979	12.52	plateau	c_since.py plateau4 neighbour slots=14
+v4-5	reconcile	0.8526	1.0042	1.0802	0.8526	0.9765	0.9867	11.81	plateau	c_mkt_nots.py plateau4 neighbour trend_n=80
+v4-5	reconcile	0.9254	1.0658	1.0308	0.9254	0.9876	0.9853	14.99	plateau	c_mkt_nots.py plateau4 neighbour trend_n=120
+v4-5	reconcile	0.7432	0.7432	0.9274	1.0646	0.9071	0.9666	19.03	plateau	c_mkt_nots.py plateau4 neighbour breadth_cut=0.48
+v4-5	reconcile	0.6043	1.3068	0.6043	0.9468	0.7987	0.6821	6.45	plateau	c_mkt_nots.py plateau4 neighbour breadth_cut=0.72
+v4-5	reconcile	0.733	0.9683	0.733	1.0326	0.8498	0.8335	16.61	plateau	c_mkt_nots.py plateau4 neighbour rsi_n=2
+v4-5	reconcile	1.0117	1.5574	1.2597	1.0117	1.2241	1.1609	8.91	plateau	c_mkt_nots.py plateau4 neighbour rsi_n=4
+v4-5	reconcile	0.7762	1.2291	1.1232	0.7762	1.026	0.996	11.21	plateau	c_mkt_nots.py plateau4 neighbour rsi_max=16.0
+v4-5	reconcile	0.9538	1.237	0.9538	0.9652	0.9904	0.9477	15.64	plateau	c_mkt_nots.py plateau4 neighbour rsi_max=24.0
+v4-5	reconcile	0.8941	0.8941	0.9684	0.927	0.9126	0.938	15.09	plateau	c_mkt_nots.py plateau4 neighbour vwap_n=8
+v4-5	reconcile	0.7127	0.9747	0.8698	0.7127	0.8216	0.7981	11.53	plateau	c_mkt_nots.py plateau4 neighbour vwap_n=12
+v4-5	reconcile	1.0522	1.0978	1.0522	1.1084	1.0403	1.0509	13.86	plateau	c_mkt_nots.py plateau4 neighbour exit_n=6
+v4-5	reconcile	0.7725	1.0906	1.0883	0.7725	0.9775	0.9718	13.38	plateau	c_mkt_nots.py plateau4 neighbour exit_n=8
+v4-5	reconcile	1.0174	1.1973	1.1019	1.0174	1.0696	1.0607	14.63	plateau	c_mkt_nots.py plateau4 neighbour slots=10
+v4-5	reconcile	0.9172	1.1613	1.0758	0.9172	1.0191	1.0066	12.63	plateau	c_mkt_nots.py plateau4 neighbour slots=14
+v4-5	reconcile	0.8165	1.0051	1.0969	0.8165	0.9776	0.9879	11.81	plateau	candidate.py plateau4 neighbour trend_n=80
+v4-5	reconcile	0.9073	1.0408	1.06	0.9073	0.9925	0.9983	15.02	plateau	candidate.py plateau4 neighbour trend_n=120
+v4-5	reconcile	0.7187	0.7187	0.964	1.0225	0.9085	0.9754	19.11	plateau	candidate.py plateau4 neighbour breadth_cut=0.48
+v4-5	reconcile	0.5976	1.2808	0.5976	0.9007	0.7797	0.6645	6.45	plateau	candidate.py plateau4 neighbour breadth_cut=0.72
+v4-5	reconcile	0.7774	0.938	0.7774	0.9989	0.8569	0.8506	16.65	plateau	candidate.py plateau4 neighbour rsi_n=2
+v4-5	reconcile	0.9998	1.5584	1.2275	0.9998	1.2046	1.1357	8.91	plateau	candidate.py plateau4 neighbour rsi_n=4
+v4-5	reconcile	0.7424	1.2021	1.1223	0.7424	1.0121	0.985	11.22	plateau	candidate.py plateau4 neighbour rsi_max=16.0
+v4-5	reconcile	0.9256	1.2391	1.0013	0.9256	1.0044	0.9656	15.68	plateau	candidate.py plateau4 neighbour rsi_max=24.0
+v4-5	reconcile	0.8743	0.8743	0.9596	0.9147	0.901	0.9282	15.09	plateau	candidate.py plateau4 neighbour vwap_n=8
+v4-5	reconcile	0.6971	0.9313	0.8307	0.6971	0.7892	0.7672	11.56	plateau	candidate.py plateau4 neighbour vwap_n=12
+v4-5	reconcile	1.063	1.0729	1.063	1.0869	1.0363	1.0517	13.87	plateau	candidate.py plateau4 neighbour exit_n=6
+v4-5	reconcile	0.9185	1.0694	1.1081	0.9185	1.0203	1.0316	13.42	plateau	candidate.py plateau4 neighbour exit_n=8
+v4-5	reconcile	0.9489	1.187	1.1152	0.9489	1.0542	1.0449	13.63	plateau	candidate.py plateau4 neighbour max_hold=16
+v4-5	reconcile	0.9562	1.1652	1.0872	0.9562	1.0364	1.0279	13.6	plateau	candidate.py plateau4 neighbour max_hold=24
+v4-5	reconcile	0.9954	1.174	1.0983	0.9954	1.0572	1.0512	14.65	plateau	candidate.py plateau4 neighbour slots=10
+v4-5	reconcile	0.888	1.1405	1.0747	0.888	1.0075	0.997	12.63	plateau	candidate.py plateau4 neighbour slots=14
+v4-5	trigger	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	lab base = incumbent 1 (check)
+v4-5	trigger	0.3536	0.3536	0.954	0.8081	0.7708	0.895	15.17	discard	trig lens {n/2,n} avg breadth
+v4-5	trigger	0.0284	0.0284	0.8075	1.0283	0.6623	0.8759	20.23	discard	trig lens {n/2,n} avg breadth | nb breadth_cut=0.48
+v4-5	trigger	0.7011	0.8895	0.9588	0.7011	0.8558	0.863	7.82	discard	trig lens {n/2,n} avg breadth | nb breadth_cut=0.72
+v4-5	trigger	0.1886	0.1886	1.0044	1.09	0.8238	1.0182	16.99	discard	trig lens {n/2,n} avg breadth | nb vwap_n=8
+v4-5	trigger	0.3795	0.3795	0.8162	0.9914	0.7562	0.8672	13.54	discard	trig lens {n/2,n} avg breadth | nb vwap_n=12
+v4-5	trigger	0.6672	1.4458	0.9956	0.6672	1.0003	0.8763	8.44	discard	trig lens {n,2n} avg breadth
+v4-5	trigger	0.6878	0.8512	0.9385	0.6878	0.8344	0.8449	14.33	discard	trig lens {n,2n} avg breadth | nb breadth_cut=0.48
+v4-5	trigger	-0.1304	1.1325	0.7632	-0.1304	0.6532	0.4907	4.0	discard	trig lens {n,2n} avg breadth | nb breadth_cut=0.72
+v4-5	trigger	0.7558	1.0369	1.0641	0.7558	0.95	0.9478	11.39	discard	trig lens {n,2n} avg breadth | nb vwap_n=8
+v4-5	trigger	0.4302	1.3536	0.4513	0.4302	0.6733	0.4384	6.33	discard	trig lens {n,2n} avg breadth | nb vwap_n=12
+v4-5	trigger	0.5909	0.8643	1.0678	0.5909	0.8854	0.9032	10.48	discard	trig lens n/2..2n every length avg
+v4-5	trigger	0.1636	0.1636	1.0062	0.939	0.7834	0.9747	16.81	discard	trig lens n/2..2n every length avg | nb breadth_cut=0.48
+v4-5	trigger	-0.0273	1.1484	0.7945	-0.0273	0.6986	0.5414	4.39	discard	trig lens n/2..2n every length avg | nb breadth_cut=0.72
+v4-5	trigger	0.7601	1.0364	1.1692	0.7601	1.0065	1.0212	12.85	discard	trig lens n/2..2n every length avg | nb vwap_n=8
+v4-5	trigger	0.6911	1.0823	0.8527	0.6911	0.8436	0.7884	8.34	discard	trig lens n/2..2n every length avg | nb vwap_n=12
+v4-5	trigger	0.2847	0.2847	0.801	1.06	0.7351	0.8805	19.69	discard	base scan breadth_cut=0.45
+v4-5	trigger	0.4574	0.4574	0.8807	1.1345	0.84	0.9572	16.97	discard	base scan breadth_cut=0.5
+v4-5	trigger	0.5497	0.5497	0.8767	0.8904	0.7928	0.8718	15.76	discard	base scan breadth_cut=0.55
+v4-5	trigger	0.6482	0.6482	1.062	0.7601	0.8703	0.945	10.5	discard	base scan breadth_cut=0.65
+v4-5	trigger	0.5575	0.9125	0.8348	0.5575	0.7644	0.7344	6.93	discard	base scan breadth_cut=0.7
+v4-5	trigger	0.3883	1.0655	0.7639	0.3883	0.7363	0.6368	4.98	discard	base scan breadth_cut=0.75
+v4-5	trigger	-0.2158	-0.2158	0.3367	1.017	0.3727	0.5677	23.75	discard	all-live breadth (no uptrend restriction) cut=0.4
+v4-5	trigger	-0.1064	-0.1064	0.603	0.9953	0.5197	0.7269	21.26	discard	all-live breadth (no uptrend restriction) cut=0.5
+v4-5	trigger	0.456	0.456	0.8468	0.8325	0.7387	0.829	17.22	discard	all-live breadth (no uptrend restriction) cut=0.6
+v4-5	trigger	0.7413	1.1247	0.9036	0.7413	0.884	0.836	11.95	discard	all-live breadth (no uptrend restriction) cut=0.7
+v4-5	trigger	0.0522	0.0522	0.9424	1.0485	0.7507	0.968	15.29	discard	rsi50 momentum breadth (uptrend members RSI3<50) cut=0.6
+v4-5	trigger	0.6612	0.7542	1.1501	0.6612	0.9162	0.9758	10.48	discard	rsi50 momentum breadth (uptrend members RSI3<50) cut=0.7
+v4-5	trigger	0.5335	0.8231	1.0216	0.5335	0.8375	0.8538	5.54	discard	rsi50 momentum breadth (uptrend members RSI3<50) cut=0.8
+v4-5	trigger	-0.112	-0.112	0.5744	0.8487	0.4727	0.6631	20.52	discard	oversold breadth (uptrend members RSI3<rsi_max) cut=0.1
+v4-5	trigger	0.2229	0.2229	0.7332	1.1446	0.7091	0.8595	16.21	discard	oversold breadth (uptrend members RSI3<rsi_max) cut=0.15
+v4-5	trigger	0.6655	0.6655	1.051	0.8358	0.8916	0.9678	12.86	discard	oversold breadth (uptrend members RSI3<rsi_max) cut=0.2
+v4-5	trigger	0.6464	0.9471	0.8683	0.6464	0.8118	0.7853	9.83	discard	oversold breadth (uptrend members RSI3<rsi_max) cut=0.25
+v4-5	trigger	0.1968	1.0069	0.7888	0.1968	0.6692	0.5969	7.44	discard	oversold breadth (uptrend members RSI3<rsi_max) cut=0.3
+v4-5	trigger	0.521	0.521	0.8463	0.8858	0.7723	0.8536	15.46	discard	pctl: breadth percentile rank in trailing trend_n days > 0.8
+v4-5	trigger	0.5321	0.5321	1.1315	0.9654	0.9345	1.0644	13.56	discard	pctl: breadth percentile rank in trailing trend_n days > 0.85
+v4-5	trigger	0.5522	0.5522	1.0432	0.6413	0.8121	0.9009	10.99	discard	pctl: breadth percentile rank in trailing trend_n days > 0.9
+v4-5	trigger	0.3849	0.7187	1.1775	0.3849	0.8648	0.9183	7.52	discard	pctl: breadth percentile rank in trailing trend_n days > 0.95
+v4-5	trigger	0.2979	0.2979	0.8573	1.0587	0.7722	0.921	16.66	discard	z: breadth z-score vs trailing trend_n mean/std > 0.8
+v4-5	trigger	0.5029	0.5029	0.8906	0.9215	0.7988	0.8933	15.44	discard	z: breadth z-score vs trailing trend_n mean/std > 1.0
+v4-5	trigger	0.5195	0.5195	0.964	0.9999	0.8536	0.9603	13.62	discard	z: breadth z-score vs trailing trend_n mean/std > 1.2
+v4-5	trigger	0.4242	0.4242	1.0897	0.8059	0.8432	0.9799	10.17	discard	z: breadth z-score vs trailing trend_n mean/std > 1.5
+v4-5	trigger	0.3086	0.3086	0.6527	1.1399	0.6942	0.8152	17.07	discard	relmean: breadth minus trailing trend_n mean > 0.15
+v4-5	trigger	0.448	0.448	0.9731	0.909	0.8267	0.9432	15.4	discard	relmean: breadth minus trailing trend_n mean > 0.2
+v4-5	trigger	0.7144	0.7144	1.0447	0.9366	0.9255	0.9982	13.57	discard	relmean: breadth minus trailing trend_n mean > 0.25
+v4-5	trigger	0.755	0.755	1.0477	0.8589	0.9086	0.9643	10.29	discard	relmean: breadth minus trailing trend_n mean > 0.3
+v4-5	trigger	0.5725	0.5725	0.7403	0.8865	0.7243	0.7778	16.03	discard	smoothed breadth (2-day mean) > 0.5
+v4-5	trigger	0.573	0.7201	0.8196	0.573	0.7175	0.729	13.67	discard	smoothed breadth (2-day mean) > 0.55
+v4-5	trigger	0.5262	1.2134	0.9104	0.5262	0.8632	0.7758	10.33	discard	smoothed breadth (2-day mean) > 0.6
+v4-5	trigger	0.5052	1.1629	0.618	0.5052	0.7155	0.5717	7.61	discard	smoothed breadth (2-day mean) > 0.65
+v4-5	trigger	0.5668	0.8271	0.8393	0.5668	0.7525	0.739	13.82	discard	smoothed breadth (3-day mean) > 0.5
+v4-5	trigger	0.4084	1.2699	0.9476	0.4084	0.8787	0.7688	10.96	discard	smoothed breadth (3-day mean) > 0.55
+v4-5	trigger	0.3503	1.3376	0.6777	0.3503	0.7416	0.5667	8.5	discard	smoothed breadth (3-day mean) > 0.6
+v4-5	trigger	0.602	1.3272	0.602	0.6451	0.7806	0.5971	6.25	discard	smoothed breadth (3-day mean) > 0.65
+v4-5	trigger	0.2736	0.6328	0.8254	0.2736	0.6295	0.6388	8.72	discard	turn0: breadth turn trigger cut=0.48
+v4-5	trigger	-0.0834	0.5053	0.6393	-0.0834	0.4426	0.4301	4.68	discard	turn0: breadth turn trigger cut=0.6
+v4-5	trigger	-1.1481	0.7446	0.6774	-1.1481	0.3505	0.2405	2.02	discard	turn0: breadth turn trigger cut=0.72
+v4-5	trigger	0.308	0.308	0.8003	0.7006	0.6503	0.76	11.44	discard	turn1: breadth turn trigger cut=0.48
+v4-5	trigger	0.3346	0.4451	0.7221	0.3346	0.5494	0.5875	7.97	discard	turn1: breadth turn trigger cut=0.6
+v4-5	trigger	-0.0525	0.5756	0.6082	-0.0525	0.4451	0.4202	3.66	discard	turn1: breadth turn trigger cut=0.72
+v4-5	trigger	0.5578	0.5578	0.9634	0.8979	0.842	0.9342	16.31	discard	rise: breadth turn trigger cut=0.48
+v4-5	trigger	0.742	0.8233	1.1531	0.742	0.9524	1.0028	12.21	discard	rise: breadth turn trigger cut=0.6
+v4-5	trigger	0.7021	1.1188	0.7021	0.7274	0.7817	0.6995	6.01	discard	rise: breadth turn trigger cut=0.72
+v4-5	trigger	0.5634	0.5634	1.0292	0.9397	0.8844	0.9873	16.87	discard	confirm bees: breadth>cut AND index-level pullback; cut=0.48
+v4-5	trigger	0.8467	0.8495	1.1212	0.8467	0.9691	1.0179	13.02	discard	confirm bees: breadth>cut AND index-level pullback; cut=0.6
+v4-5	trigger	0.6839	1.084	0.6839	0.6928	0.7518	0.6745	6.31	discard	confirm bees: breadth>cut AND index-level pullback; cut=0.72
+v4-5	trigger	0.5829	0.5829	0.9498	0.9422	0.8507	0.9381	17.3	discard	confirm ixrsi50: breadth>cut AND index-level pullback; cut=0.48
+v4-5	trigger	0.7887	0.7887	1.1491	0.8868	0.9812	1.0497	13.02	discard	confirm ixrsi50: breadth>cut AND index-level pullback; cut=0.6
+v4-5	trigger	0.6833	1.084	0.6833	0.6928	0.7515	0.6741	6.29	discard	confirm ixrsi50: breadth>cut AND index-level pullback; cut=0.72
+v4-5	trigger	0.5794	0.5794	0.9272	0.8789	0.8211	0.9006	16.91	discard	confirm ixtp: breadth>cut AND index-level pullback; cut=0.48
+v4-5	trigger	0.8467	0.8639	1.1212	0.8467	0.9721	1.0179	13.06	discard	confirm ixtp: breadth>cut AND index-level pullback; cut=0.6
+v4-5	trigger	0.6839	1.084	0.6839	0.6928	0.7518	0.6745	6.31	discard	confirm ixtp: breadth>cut AND index-level pullback; cut=0.72
+v4-5	trigger	0.7535	0.7535	1.0127	0.9541	0.9199	0.9805	12.33	discard	ENS explore: avg book over cut {.5,.6,.7}
+v4-5	trigger	0.7561	0.7561	0.9968	0.8494	0.8824	0.9316	12.93	discard	ENS explore: avg book over vwap_n {8,10,12}
+v4-5	trigger	0.6826	0.6826	1.0381	0.8903	0.8991	0.9728	13.11	discard	ENS explore: avg book over cut {.55,.6,.65}
+v4-5	trigger	0.7004	0.7004	1.0076	0.9343	0.8988	0.9677	12.65	discard	ENS explore: avg book over cut {.5..0.7 step .05}
+v4-5	trigger	0.707	0.8055	0.7733	0.707	0.7371	0.7287	9.62	discard	depthmed: median depth below VWAP of uptrend members > 0.008
+v4-5	trigger	0.7308	0.8947	0.8373	0.7308	0.7953	0.7805	8.48	discard	depthmed: median depth below VWAP of uptrend members > 0.01
+v4-5	trigger	0.2498	0.8528	0.9187	0.2498	0.7341	0.7093	7.37	discard	depthmed: median depth below VWAP of uptrend members > 0.012
+v4-5	trigger	0.4937	0.5452	0.7312	0.4937	0.6091	0.6405	5.45	discard	depthmed: median depth below VWAP of uptrend members > 0.015
+v4-5	trigger	-0.0216	0.6422	0.7442	-0.0216	0.544	0.526	3.21	discard	depthmed: median depth below VWAP of uptrend members > 0.018
+v4-5	trigger	0.019	0.019	1.3053	1.0322	0.906	1.1966	8.91	discard	chg: breadth rise over 1 day(s) > 0.2
+v4-5	trigger	-0.354	-0.354	1.0769	1.3262	0.8855	1.1854	2.6	discard	chg: breadth rise over 1 day(s) > 0.3
+v4-5	trigger	0.0	0.0	1.2406	0.0	0.8044	0.953	0.29	discard	chg: breadth rise over 1 day(s) > 0.4
+v4-5	trigger	0.3343	0.3343	0.673	1.3016	0.7423	0.8694	15.93	discard	chg: breadth rise over 3 day(s) > 0.2
+v4-5	trigger	0.4172	0.4172	0.7593	1.2187	0.7788	0.8876	10.39	discard	chg: breadth rise over 3 day(s) > 0.3
+v4-5	trigger	0.636	0.7516	0.636	0.9105	0.7444	0.7451	6.38	discard	chg: breadth rise over 3 day(s) > 0.4
+v4-5	trigger	0.7887	0.7887	1.2063	1.1517	1.0771	1.1735	14.22	discard	level>cut OR 1-day breadth jump>0.25
+v4-5	trigger	0.7921	0.7921	1.1908	1.0403	1.0428	1.1283	13.79	discard	level>cut OR 1-day breadth jump>0.3
+v4-5	trigger	0.8231	0.8231	1.1212	1.0033	1.0043	1.0702	13.33	discard	level>cut OR 1-day breadth jump>0.35
+v4-5	trigger	0.1771	0.1771	0.9677	0.963	0.766	0.956	17.18	discard	lvl2: max(b, 2b-b_prev) > 0.6
+v4-5	trigger	0.6616	0.6616	1.0801	0.9622	0.9399	1.0313	15.56	discard	lvl2: max(b, 2b-b_prev) > 0.66
+v4-5	trigger	0.6248	0.6248	1.1771	1.1446	1.0251	1.1521	13.56	discard	lvl2: max(b, 2b-b_prev) > 0.72
+v4-5	trigger	0.5544	0.5544	1.3227	1.3644	1.1347	1.3234	9.82	discard	cshock: share of uptrend members above VWAP yesterday that closed below today > 0.4
+v4-5	trigger	0.784	0.784	1.1715	0.7943	0.9672	1.0317	5.84	discard	cshock: share of uptrend members above VWAP yesterday that closed below today > 0.5
+v4-5	trigger	0.4891	0.9441	0.7461	0.4891	0.7467	0.6525	3.2	discard	cshock: share of uptrend members above VWAP yesterday that closed below today > 0.6
+v4-5	trigger	0.5783	0.5783	0.899	1.0565	0.8559	0.946	18.11	discard	lvl_or_cshock: max(breadth, conditional shock breadth) > 0.48
+v4-5	trigger	0.5647	0.5647	0.8626	0.917	0.796	0.8719	16.2	discard	lvl_or_cshock: max(breadth, conditional shock breadth) > 0.54
+v4-5	trigger	0.7887	0.7887	1.1208	0.8467	0.9563	1.0177	13.04	discard	lvl_or_cshock: max(breadth, conditional shock breadth) > 0.6
+v4-5	trigger	0.6532	0.8289	0.9738	0.6532	0.8409	0.8553	9.85	discard	lvl_or_cshock: max(breadth, conditional shock breadth) > 0.66
+v4-5	trigger	0.6827	1.084	0.6827	0.6928	0.7512	0.6736	6.27	discard	lvl_or_cshock: max(breadth, conditional shock breadth) > 0.72
+v4-5	trigger	0.5831	0.5831	0.9119	1.0974	0.8735	0.9674	18.31	discard	level>0.48 OR 1-day breadth jump>0.25
+v4-5	trigger	0.5853	0.5853	0.8947	1.1	0.8667	0.9581	18.24	discard	level>0.48 OR 1-day breadth jump>0.3
+v4-5	trigger	0.6858	0.6858	1.2025	1.3519	1.0988	1.2296	11.97	discard	level>0.66 OR 1-day breadth jump>0.25
+v4-5	trigger	0.6893	0.6893	1.0482	1.1935	0.9794	1.0751	11.0	discard	level>0.66 OR 1-day breadth jump>0.3
+v4-5	trigger	0.8424	0.8424	1.0585	1.2599	1.0424	1.1158	9.02	discard	level>0.72 OR 1-day breadth jump>0.25
+v4-5	trigger	0.8108	0.9416	0.8108	1.2386	0.9406	0.9562	7.57	discard	level>0.72 OR 1-day breadth jump>0.3
+v4-5	trigger	0.6149	0.6149	1.0522	1.045	0.9342	1.0383	16.25	discard	belowdown: share of uptrend members below VWAP AND down on the day > 0.4
+v4-5	trigger	0.5167	0.5167	1.2392	0.8856	0.9691	1.108	13.3	discard	belowdown: share of uptrend members below VWAP AND down on the day > 0.48
+v4-5	trigger	0.6991	0.6991	1.1021	0.9293	0.9455	1.0302	7.68	discard	belowdown: share of uptrend members below VWAP AND down on the day > 0.6
+v4-5	trigger	0.0168	0.0168	0.6506	0.2034	0.4126	0.5154	2.69	discard	belowdown: share of uptrend members below VWAP AND down on the day > 0.72
+v4-5	trigger	0.3667	0.3667	0.7479	0.9875	0.7159	0.8244	17.28	discard	tp: share of uptrend members with typical price below VWAP > 0.48
+v4-5	trigger	0.7424	0.7424	0.9604	0.9317	0.884	0.937	12.15	discard	tp: share of uptrend members with typical price below VWAP > 0.6
+v4-5	trigger	0.1107	0.8866	0.869	0.1107	0.6904	0.6348	6.1	discard	tp: share of uptrend members with typical price below VWAP > 0.72
+v4-5	trigger	0.8467	0.8495	1.1212	0.8467	0.9691	1.0179	13.02	best-attempt	CANDIDATE candidate.py: incumbent 1 + rule 1c NIFTYBEES close < its VWAP(vwap_n) (no new param); fails years, consistency, plateau4
+v4-5	trigger	0.772	0.8685	1.0733	0.772	0.9301	0.9606	11.41	plateau	candidate plateau neighbour trend_n=80
+v4-5	trigger	0.8021	0.8397	1.1028	0.8021	0.9463	0.9906	14.08	plateau	candidate plateau neighbour trend_n=120
+v4-5	trigger	0.5634	0.5634	1.0292	0.9397	0.8844	0.9873	16.87	plateau	candidate plateau neighbour breadth_cut=0.48
+v4-5	trigger	0.6839	1.084	0.6839	0.6928	0.7518	0.6745	6.31	plateau	candidate plateau neighbour breadth_cut=0.72
+v4-5	trigger	0.6015	0.6015	0.8222	1.1443	0.8496	0.9316	15.22	plateau	candidate plateau neighbour rsi_n=2
+v4-5	trigger	0.7702	1.4618	1.2542	0.7702	1.1452	1.0798	8.74	plateau	candidate plateau neighbour rsi_n=4
+v4-5	trigger	0.7531	1.0798	1.136	0.7531	0.9998	0.997	10.85	plateau	candidate plateau neighbour rsi_max=16.0
+v4-5	trigger	0.9318	0.9901	1.0327	0.9318	0.9771	0.9902	14.53	plateau	candidate plateau neighbour rsi_max=24.0
+v4-5	trigger	0.6735	0.7961	0.9635	0.6735	0.8298	0.8568	14.61	plateau	candidate plateau neighbour vwap_n=8
+v4-5	trigger	0.6624	0.7002	0.7844	0.6624	0.7165	0.7305	10.51	plateau	candidate plateau neighbour vwap_n=12
+v4-5	trigger	0.8222	0.8222	1.1494	0.8572	0.9804	1.0401	13.04	plateau	candidate plateau neighbour max_hold=16
+v4-5	trigger	0.7403	0.8187	1.1059	0.7403	0.9278	0.9728	13.01	plateau	candidate plateau neighbour max_hold=24
+v4-5	trigger	0.8429	0.953	1.1419	0.8429	1.0011	1.0302	13.75	plateau	candidate plateau neighbour slots=10
+v4-5	trigger	0.8347	0.8776	1.0935	0.8347	0.9573	0.9955	12.19	plateau	candidate plateau neighbour slots=14
+v4-5	trigger	0.2639	0.2639	0.6501	0.8526				joint	candidate joint+-0.2 draw 0: trend_n=115,breadth_cut=0.4874,rsi_n=2,rsi_max=18.3307,vwap_n=11,max_hold=17,slots=11
+v4-5	trigger	0.6929	0.6929	0.9146	0.7675				joint	candidate joint+-0.2 draw 1: trend_n=90,breadth_cut=0.5614,rsi_n=3,rsi_max=18.8655,vwap_n=10,max_hold=16,slots=12
+v4-5	trigger	0.6896	0.833	0.7955	0.6896				joint	candidate joint+-0.2 draw 2: trend_n=107,breadth_cut=0.6336,rsi_n=3,rsi_max=18.8888,vwap_n=12,max_hold=17,slots=14
+v4-5	trigger	0.5008	1.2061	1.0199	0.5008				joint	candidate joint+-0.2 draw 3: trend_n=91,breadth_cut=0.5785,rsi_n=4,rsi_max=21.1286,vwap_n=12,max_hold=21,slots=10
+v4-5	trigger	0.4384	0.8781	0.8056	0.4384				joint	candidate joint+-0.2 draw 4: trend_n=96,breadth_cut=0.6739,rsi_n=3,rsi_max=19.1426,vwap_n=10,max_hold=24,slots=12
+v4-5	trigger	0.7927	0.8055	0.7927	0.9014				joint	candidate joint+-0.2 draw 5: trend_n=119,breadth_cut=0.6476,rsi_n=3,rsi_max=18.0966,vwap_n=12,max_hold=23,slots=11
+v4-5	trigger	0.5842	0.9069	0.6708	0.5842				joint	candidate joint+-0.2 draw 6: trend_n=105,breadth_cut=0.6413,rsi_n=3,rsi_max=20.1584,vwap_n=12,max_hold=23,slots=13
+v4-5	trigger	0.699	1.1314	1.1288	0.699				joint	candidate joint+-0.2 draw 7: trend_n=84,breadth_cut=0.5906,rsi_n=3,rsi_max=16.0145,vwap_n=10,max_hold=18,slots=13
+v4-5	trigger	0.7244	0.7244	1.1083	1.0986				joint	candidate joint+-0.2 draw 8: trend_n=81,breadth_cut=0.5473,rsi_n=3,rsi_max=20.6821,vwap_n=9,max_hold=18,slots=10
+v4-5	trigger	0.5174	1.1223	0.5174	0.544				joint	candidate joint+-0.2 draw 9: trend_n=85,breadth_cut=0.7078,rsi_n=3,rsi_max=22.5963,vwap_n=10,max_hold=20,slots=13
+v4-5	trigger	0.8303	0.8395	0.8303	0.9483				joint	candidate joint+-0.2 draw 10: trend_n=117,breadth_cut=0.6488,rsi_n=3,rsi_max=22.0027,vwap_n=11,max_hold=23,slots=13
+v4-5	trigger	0.7263	0.7263	0.8757	0.7301				joint	candidate joint+-0.2 draw 11: trend_n=111,breadth_cut=0.5363,rsi_n=3,rsi_max=19.6512,vwap_n=11,max_hold=23,slots=13
+v4-5	trigger	0.6897	0.6897	1.0307	0.8827				joint	candidate joint+-0.2 draw 12: trend_n=104,breadth_cut=0.5621,rsi_n=3,rsi_max=21.5342,vwap_n=9,max_hold=18,slots=12
+v4-5	trigger	0.6965	0.9217	0.6965	0.754				joint	candidate joint+-0.2 draw 13: trend_n=106,breadth_cut=0.6398,rsi_n=3,rsi_max=20.8298,vwap_n=12,max_hold=22,slots=12
+v4-5	trigger	0.6715	1.2794	0.8131	0.6715				joint	candidate joint+-0.2 draw 14: trend_n=89,breadth_cut=0.6418,rsi_n=3,rsi_max=16.7042,vwap_n=8,max_hold=20,slots=13
+v4-5	trigger	0.5678	0.5678	0.6792	0.6626				joint	candidate joint+-0.2 draw 15: trend_n=110,breadth_cut=0.5393,rsi_n=3,rsi_max=21.4147,vwap_n=10,max_hold=19,slots=10
+v4-5	trigger	0.7131	0.8203	0.8838	0.7131				joint	candidate joint+-0.2 draw 16: trend_n=111,breadth_cut=0.5738,rsi_n=3,rsi_max=21.4854,vwap_n=11,max_hold=21,slots=12
+v4-5	trigger	0.6479	1.2941	1.0203	0.6479				joint	candidate joint+-0.2 draw 17: trend_n=82,breadth_cut=0.5635,rsi_n=3,rsi_max=16.9344,vwap_n=9,max_hold=23,slots=14
+v4-5	trigger	0.4427	1.0686	0.8379	0.4427				joint	candidate joint+-0.2 draw 18: trend_n=112,breadth_cut=0.7031,rsi_n=3,rsi_max=16.0265,vwap_n=10,max_hold=24,slots=14
+v4-5	trigger	0.6312	0.9116	0.9849	0.6312				joint	candidate joint+-0.2 draw 19: trend_n=103,breadth_cut=0.6202,rsi_n=3,rsi_max=19.0097,vwap_n=9,max_hold=22,slots=13
+v4-5	trigger	0.4025	1.0527	0.913	0.4025				joint	candidate joint+-0.2 draw 20: trend_n=114,breadth_cut=0.5944,rsi_n=3,rsi_max=17.4779,vwap_n=10,max_hold=18,slots=13
+v4-5	trigger	0.8933	1.2813	1.0075	0.8933				joint	candidate joint+-0.2 draw 21: trend_n=97,breadth_cut=0.6882,rsi_n=3,rsi_max=18.4248,vwap_n=9,max_hold=18,slots=10
+v4-5	trigger	0.6903	0.6903	0.8771	0.7752				joint	candidate joint+-0.2 draw 22: trend_n=92,breadth_cut=0.5355,rsi_n=3,rsi_max=21.689,vwap_n=10,max_hold=16,slots=14
+v4-5	trigger	0.6387	0.6387	1.0206	0.9399				joint	candidate joint+-0.2 draw 23: trend_n=81,breadth_cut=0.5969,rsi_n=3,rsi_max=23.2099,vwap_n=9,max_hold=17,slots=12
+v4-5	trigger	0.3326	0.3326	1.0964	0.6312				joint	candidate joint+-0.2 draw 24: trend_n=95,breadth_cut=0.5026,rsi_n=4,rsi_max=22.7195,vwap_n=8,max_hold=22,slots=12
+v4-5	trigger	0.6955	0.7408	0.6955	0.7503				joint	candidate joint+-0.2 draw 25: trend_n=85,breadth_cut=0.6614,rsi_n=3,rsi_max=22.3678,vwap_n=8,max_hold=22,slots=12
+v4-5	trigger	0.7214	0.7214	0.8589	0.737				joint	candidate joint+-0.2 draw 26: trend_n=106,breadth_cut=0.5565,rsi_n=3,rsi_max=21.7292,vwap_n=8,max_hold=18,slots=13
+v4-5	trigger	0.376	1.1038	0.376	0.7214				joint	candidate joint+-0.2 draw 27: trend_n=85,breadth_cut=0.6568,rsi_n=3,rsi_max=23.3048,vwap_n=12,max_hold=22,slots=10
+v4-5	trigger	0.5038	1.2498	0.8774	0.5038				joint	candidate joint+-0.2 draw 28: trend_n=101,breadth_cut=0.7056,rsi_n=3,rsi_max=18.519,vwap_n=9,max_hold=18,slots=14
+v4-5	trigger	0.5555	0.5555	0.9123	0.7198				joint	candidate joint+-0.2 draw 29: trend_n=109,breadth_cut=0.513,rsi_n=3,rsi_max=18.1271,vwap_n=11,max_hold=19,slots=13
+v4-5	trigger	0.0595	1.1409	0.9887	0.0595				joint	candidate joint+-0.2 draw 30: trend_n=84,breadth_cut=0.509,rsi_n=4,rsi_max=16.3109,vwap_n=9,max_hold=22,slots=14
+v4-5	trigger	0.5974	0.5974	0.789	0.858				joint	candidate joint+-0.2 draw 31: trend_n=113,breadth_cut=0.5226,rsi_n=3,rsi_max=22.8717,vwap_n=11,max_hold=16,slots=11
+v4-5	trigger	0.7514	0.7514	0.8579	0.8279				joint	candidate joint+-0.2 draw 32: trend_n=111,breadth_cut=0.5555,rsi_n=3,rsi_max=23.6082,vwap_n=11,max_hold=21,slots=11
+v4-5	trigger	0.5457	0.8065	0.8841	0.5457				joint	candidate joint+-0.2 draw 33: trend_n=105,breadth_cut=0.6453,rsi_n=3,rsi_max=18.9076,vwap_n=11,max_hold=18,slots=14
+v4-5	trigger	0.7173	0.7173	0.9595	0.7488				joint	candidate joint+-0.2 draw 34: trend_n=111,breadth_cut=0.5637,rsi_n=3,rsi_max=22.5538,vwap_n=10,max_hold=20,slots=14
+v4-5	trigger	0.9805	1.2958	1.2034	0.9805				joint	candidate joint+-0.2 draw 35: trend_n=105,breadth_cut=0.6761,rsi_n=3,rsi_max=18.8358,vwap_n=9,max_hold=17,slots=10
+v4-5	trigger	0.6639	0.6639	1.0672	1.0079				joint	candidate joint+-0.2 draw 36: trend_n=100,breadth_cut=0.5074,rsi_n=3,rsi_max=19.6244,vwap_n=9,max_hold=17,slots=11
+v4-5	trigger	0.3668	0.3668	0.8193	1.0983				joint	candidate joint+-0.2 draw 37: trend_n=83,breadth_cut=0.5076,rsi_n=2,rsi_max=19.1447,vwap_n=11,max_hold=22,slots=11
+v4-5	trigger	0.847	1.5286	1.1045	0.847				joint	candidate joint+-0.2 draw 38: trend_n=90,breadth_cut=0.6481,rsi_n=3,rsi_max=18.0921,vwap_n=9,max_hold=23,slots=11
+v4-5	trigger	0.771	1.2003	0.8383	0.771				joint	candidate joint+-0.2 draw 39: trend_n=98,breadth_cut=0.6847,rsi_n=3,rsi_max=17.6496,vwap_n=8,max_hold=17,slots=12
+v4-5	trigger	0.7397	0.7868	0.9008	0.7397				joint	candidate joint+-0.2 draw 40: trend_n=110,breadth_cut=0.5764,rsi_n=3,rsi_max=20.2208,vwap_n=9,max_hold=18,slots=13
+v4-5	trigger	0.8088	0.8466	0.8088	0.8277				joint	candidate joint+-0.2 draw 41: trend_n=95,breadth_cut=0.5624,rsi_n=3,rsi_max=17.2079,vwap_n=12,max_hold=20,slots=11
+v4-5	trigger	0.5761	0.9752	0.883	0.5761				joint	candidate joint+-0.2 draw 42: trend_n=107,breadth_cut=0.6653,rsi_n=3,rsi_max=22.6813,vwap_n=10,max_hold=22,slots=13
+v4-5	trigger	0.2948	0.2948	0.9324	0.9047				joint	candidate joint+-0.2 draw 43: trend_n=112,breadth_cut=0.4995,rsi_n=3,rsi_max=21.3605,vwap_n=9,max_hold=21,slots=12
+v4-5	trigger	0.3797	1.269	0.623	0.3797				joint	candidate joint+-0.2 draw 44: trend_n=82,breadth_cut=0.7173,rsi_n=3,rsi_max=19.2788,vwap_n=10,max_hold=20,slots=13
+v4-5	trigger	0.7079	0.7707	0.9479	0.7079				joint	candidate joint+-0.2 draw 45: trend_n=108,breadth_cut=0.6512,rsi_n=3,rsi_max=21.629,vwap_n=10,max_hold=23,slots=14
+v4-5	trigger	0.4976	0.4976	0.8617	0.5482				joint	candidate joint+-0.2 draw 46: trend_n=83,breadth_cut=0.6323,rsi_n=2,rsi_max=23.8906,vwap_n=11,max_hold=18,slots=11
+v4-5	trigger	0.6045	1.2338	0.9169	0.6045				joint	candidate joint+-0.2 draw 47: trend_n=107,breadth_cut=0.7061,rsi_n=4,rsi_max=19.6671,vwap_n=10,max_hold=18,slots=14
+v4-5	trigger	0.7985	0.8233	0.8174	0.7985				joint	candidate joint+-0.2 draw 48: trend_n=116,breadth_cut=0.5108,rsi_n=3,rsi_max=19.2701,vwap_n=10,max_hold=23,slots=11
+v4-5	trigger	0.6005	1.5671	1.0057	0.6005				joint	candidate joint+-0.2 draw 49: trend_n=91,breadth_cut=0.5985,rsi_n=3,rsi_max=17.1443,vwap_n=9,max_hold=23,slots=14
+v4-5	trigger	0.5169	0.9398	0.77	0.5169				joint	candidate joint+-0.2 draw 50: trend_n=93,breadth_cut=0.6857,rsi_n=3,rsi_max=22.4041,vwap_n=10,max_hold=16,slots=11
+v4-5	trigger	0.7747	0.7747	1.1169	0.8589				joint	candidate joint+-0.2 draw 51: trend_n=84,breadth_cut=0.5509,rsi_n=3,rsi_max=21.1029,vwap_n=9,max_hold=21,slots=13
+v4-5	trigger	0.6217	1.1436	0.7686	0.6217				joint	candidate joint+-0.2 draw 52: trend_n=90,breadth_cut=0.6618,rsi_n=3,rsi_max=16.5888,vwap_n=11,max_hold=21,slots=10
+v4-5	trigger	0.8579	0.994	0.9049	0.8579				joint	candidate joint+-0.2 draw 53: trend_n=101,breadth_cut=0.5906,rsi_n=3,rsi_max=21.5488,vwap_n=9,max_hold=19,slots=10
+v4-5	trigger	0.2853	0.2853	0.937	0.8617				joint	candidate joint+-0.2 draw 54: trend_n=97,breadth_cut=0.5472,rsi_n=3,rsi_max=16.6223,vwap_n=8,max_hold=18,slots=13
+v4-5	trigger	0.5111	1.1944	0.5111	0.6004				joint	candidate joint+-0.2 draw 55: trend_n=93,breadth_cut=0.7014,rsi_n=3,rsi_max=18.9667,vwap_n=12,max_hold=17,slots=13
+v4-5	trigger	0.538	1.3341	0.538	0.879				joint	candidate joint+-0.2 draw 56: trend_n=84,breadth_cut=0.6395,rsi_n=3,rsi_max=18.2715,vwap_n=12,max_hold=19,slots=11
+v4-5	trigger	0.5495	1.4654	1.1543	0.5495				joint	candidate joint+-0.2 draw 57: trend_n=92,breadth_cut=0.6716,rsi_n=3,rsi_max=18.8757,vwap_n=9,max_hold=23,slots=14
+v4-5	trigger	0.5927	0.8019	0.9719	0.5927				joint	candidate joint+-0.2 draw 58: trend_n=92,breadth_cut=0.5682,rsi_n=3,rsi_max=19.2503,vwap_n=10,max_hold=18,slots=14
+v4-5	trigger	0.8511	1.3791	1.2066	0.8511				joint	candidate joint+-0.2 draw 59: trend_n=103,breadth_cut=0.6055,rsi_n=4,rsi_max=18.7708,vwap_n=8,max_hold=23,slots=14
