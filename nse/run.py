@@ -1,14 +1,12 @@
 """
 Run one experiment: load data, build target weights from strategy.py, verify no lookahead,
-evaluate and print a summary block. Usage: python run.py [--cost 15] [--report]
+evaluate and print a summary block. Usage: python run.py [--cost 15] [--report] [--strategy strategy.py]   (the v1 final: --strategy v4/v1_final.py)
 
 By default only in-sample (2020-2023) information is printed and written to runs/latest/: the
 research loop must never see the 2024-2026 hold-out. `--report` (used by the lead/merge step and
 the final report, never by researchers) also prints and writes the OOS and FULL metrics.
 """
 import argparse, json, os, sys, time
-import numpy as np
-import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -35,16 +33,19 @@ def main():
     ap.add_argument("--out", default=os.path.join(HERE, "runs", "latest"))
     ap.add_argument("--no-lookahead-check", action="store_true")
     ap.add_argument("--report", action="store_true", help="also show OOS/FULL metrics (lead/report use only)")
+    ap.add_argument("--strategy", default=os.path.join(HERE, "strategy.py"))
     args = ap.parse_args()
     t0 = time.time()
-    src = open(os.path.join(HERE, "strategy.py")).read()
+    src = open(args.strategy).read()
     banned = ["open(", "read_csv", "read_parquet", "read_pickle", "load_data", "os.", "glob", "pathlib", "subprocess",
               "pickle", "np.load", "__import__", "importlib", "urllib", "requests", "socket"]
     hits = [b for b in banned if b in src]
     if hits:
-        print(f"strategy.py must not access files/network/the loader; found: {hits}", file=sys.stderr)
+        print(f"{args.strategy} must not access files/network/the loader; found: {hits}", file=sys.stderr)
         sys.exit(3)
-    import strategy
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("strategy", args.strategy)
+    strategy = importlib.util.module_from_spec(spec); spec.loader.exec_module(strategy)
     md = P.load_data()
     W = strategy.compute_target_weights(md)
     la = {"ok": True, "max_abs_diff": 0.0, "first_bad_date": None, "n_checks": 0, "n_checks_with_holdings": 0}

@@ -22,7 +22,7 @@ def main():
     tsv = pd.read_csv(os.path.join(HERE, "results.tsv"), sep="\t")
     keeps = tsv[tsv.status == "keep"].reset_index(drop=True)
     m = final["metrics"]; b = base["metrics"] if base else None
-    src = open(os.path.join(HERE, "strategy.py")).read()
+    src = open(os.path.join(HERE, "v4", "v1_final.py")).read()
     doc = re.search(r'"""(.*?)"""', src, re.S).group(1).strip()
     L = []
     L += ["# RSI + EMA + VWAP on the Nifty 50 universe, 2020-2026: final report", "",

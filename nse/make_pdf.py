@@ -56,6 +56,8 @@ DOC_TITLE = "RSI + EMA + VWAP on the Nifty 50"
 DOC_SUBTITLE = "An autonomous research loop, the strategy it produced, and why we would not trade it"
 DESK = "Quant Desk"
 DEFAULT_OUT = os.path.join(R, f"{DOC_ID}_RSI-EMA-VWAP_Nifty50.pdf")
+V1_STRATEGY = os.path.join(HERE, "v4", "v1_final.py")   # this note documents the v1 final (strategy.py now holds v4)
+V1_REL = "v4/v1_final.py"
 
 # ---------------------------------------------------------------------------------------------------------
 # Geometry and colour
@@ -1132,7 +1134,7 @@ PARAM_DOC = [
 
 
 def strategy_provenance(final_commit):
-    """Which commit the listed strategy.py is, and whether its code (docstring aside) equals the final strategy's."""
+    """Which commit the listed v1 file is, and whether its code (docstring aside) equals the final strategy's."""
     import ast
     import subprocess
 
@@ -1141,11 +1143,11 @@ def strategy_provenance(final_commit):
         if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(getattr(tree.body[0], "value", None), ast.Constant):
             tree.body = tree.body[1:]
         return ast.dump(tree)
-    cur = open(os.path.join(HERE, "strategy.py")).read()
+    cur = open(V1_STRATEGY).read()
     try:
         git = lambda *a: subprocess.run(["git", "-C", HERE, *a], capture_output=True, text=True, check=True).stdout  # noqa: E731
-        head = git("log", "-1", "--format=%h", "--", "strategy.py").strip()
-        dirty = bool(git("status", "--porcelain", "--", "strategy.py").strip())
+        head = git("log", "-1", "--format=%h", "--", V1_REL).strip()
+        dirty = bool(git("status", "--porcelain", "--", V1_REL).strip())
         final_src = git("show", f"{final_commit}:nse/strategy.py")
     except Exception:                                    # no git: describe the file only
         return dict(listed="working tree", same_code=None, dirty=None)
@@ -1185,7 +1187,9 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     ST = styles()
 
     import prepare as Pp
-    import strategy as S_mod
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("strategy_v1", V1_STRATEGY)
+    S_mod = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(S_mod)
     p = S_mod.PARAMS
     v, lin, dg, eq, hold, tsv = load_inputs()
     m = v["metrics"]
@@ -1198,14 +1202,14 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     commit = final["commit"]
     prov = strategy_provenance(commit)
     if prov["listed"] == commit:
-        prov_txt = f"{code('strategy.py')} at commit {code(commit)}, the final strategy"
+        prov_txt = f"{code(V1_REL)} at commit {code(commit)}, the final strategy"
     elif prov["same_code"]:
-        prov_txt = (f"{code('strategy.py')} at commit {code(prov['listed'])}; its code is identical to the final "
-                    f"strategy, commit {code(commit)} (only the docstring changed)")
+        prov_txt = (f"{code(V1_REL)}, the frozen copy of the v1 {code('strategy.py')} (committed in {code(prov['listed'])}); "
+                    f"its code is identical to the final strategy, commit {code(commit)} (only the docstring changed)")
     elif prov["same_code"] is None:
-        prov_txt = f"{code('strategy.py')} from the working tree (final strategy: commit {code(commit)})"
+        prov_txt = f"{code(V1_REL)} from the working tree (final strategy: commit {code(commit)})"
     else:
-        raise RuntimeError(f"strategy.py differs from the final strategy {commit}; the reports describe {commit}")
+        raise RuntimeError(f"{V1_REL} differs from the final strategy {commit}; the reports describe {commit}")
     data_end = str(md.calendar[-1].date())
     meta = dict(sharpe_is=m["sharpe_is"], sharpe_oos=m["sharpe_oos"], sharpe_pre=final["sharpe_pre"],
                 bench_pre=final["bench_sharpe_pre"], date_long=date.strftime("%d %B %Y").lstrip("0"),
@@ -1689,7 +1693,7 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     assert documented == set(p), f"parameter register out of date: {set(p) ^ documented}"
     story.append(data_table(["Block", "Parameter", "Value", "Meaning"], prow, [18 * mm, 30 * mm, 20 * mm, FW - 68 * mm],
                             compact=True, keep=False))
-    story.append(P(f"All {len(p)} entries of PARAMS in strategy.py, checked against the code at build time.", "source"))
+    story.append(P(f"All {len(p)} entries of PARAMS in the strategy, checked against the code at build time.", "source"))
     story.append(CondPageBreak(90 * mm))
     story.append(h2("4.7  A cohort traced through the backtest"))
     form = trace["formation"]
@@ -1963,10 +1967,10 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
 
     story += [NextPageTemplate("code"), PageBreak()]
     story += appendix("Appendix A", "The strategy", "Appendix A  ·  The strategy",
-                      f"{code('strategy.py')}: the only file the research loop edited. "
+                      f"{code('strategy.py')} as the v1 loop left it, the only file that loop edited. "
                       f"{code('compute_target_weights(md)')} returns the target weights for every close; the harness "
                       "executes them at the next open. Complete and unedited: " + prov_txt + ".", first=True)
-    story.append(CodeBlock.from_source(open(os.path.join(HERE, "strategy.py")).read(), LFW))
+    story.append(CodeBlock.from_source(open(V1_STRATEGY).read(), LFW))
     story += appendix("Appendix B", "The indicators", "Appendix B  ·  The indicators",
                       f"{code('indicators.py')}: a fixed harness file. Every indicator is causal: the value at a "
                       "date uses data up to that date only.")
@@ -1996,7 +2000,7 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     story.append(h2("Reproduce every number in this note"))
     cmds = ("cd nse\n"
             "python -m pytest -q tests                      # harness, indicators, calendar, hold-out, signals, PDF\n"
-            "python run.py --report                         # metrics + lookahead check for strategy.py\n"
+            "python run.py --report --strategy v4/v1_final.py   # metrics + lookahead check\n"
             "python validate.py --boot 2000 --out reports   # costs, bootstrap, DSR, perturbations, walk-forward\n"
             "python lineage.py --holdout                    # every kept strategy on every window (logged)\n"
             "python diagnose.py                             # spells and selection edge\n"
@@ -2004,7 +2008,8 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     story.append(CodeBlock.from_source(cmds, FW))
     story.append(Spacer(1, 8))
     story.append(data_table(["File", "Role"], [
-        ["strategy.py", "the strategy (Appendix A)"], ["indicators.py", "indicator library (Appendix B)"],
+        ["v4/v1_final.py", "the strategy (Appendix A); strategy.py now holds the protocol-v4 strategy"],
+        ["indicators.py", "indicator library (Appendix B)"],
         ["prepare.py", "fixed harness: data, universe, calendar, engine, metrics, lookahead detector"],
         ["run.py / compare.py", "one experiment / candidate against incumbent under the gates"],
         ["validate.py, lineage.py, holdout.py, diagnose.py", "the evidence in Parts 5–7"],

@@ -142,7 +142,9 @@ def test_headline_numbers_match_the_reports(built):
 
 @needs_build
 def test_full_strategy_source_and_parameter_register_are_included(built):
-    import strategy
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("strategy_v1", os.path.join(NSE, "v4", "v1_final.py"))
+    strategy = importlib.util.module_from_spec(spec); spec.loader.exec_module(strategy)
     full = built["full"]
     for name in strategy.PARAMS:
         assert name in full, name
@@ -155,7 +157,7 @@ def test_full_strategy_source_and_parameter_register_are_included(built):
             t = t.replace(f, "")
         pages.append("\n".join(ln for ln in t.splitlines() if not ln.strip().isdigit()).replace("↪", ""))
     text = squash("\n".join(pages))
-    for fname in ["strategy.py", "indicators.py", "signals.py"]:      # Appendices A, B, D: complete listings
+    for fname in ["v4/v1_final.py", "indicators.py", "signals.py"]:   # Appendices A, B, D: complete listings
         lines = [ln for ln in open(os.path.join(NSE, fname)).read().splitlines() if ln.strip()]
         missing = [ln for ln in lines if squash(ln) not in text]
         assert not missing, f"{fname}: {len(missing)} of {len(lines)} lines missing, e.g. {missing[:3]}"

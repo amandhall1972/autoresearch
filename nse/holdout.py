@@ -9,10 +9,9 @@ pre-registered lineage of incumbents (the baseline, every merged round winner, t
 Every invocation is appended to reports/holdout_log.tsv (UTC time, git commit, sha256 of the strategy
 file, results) so the number of looks at the hold-out is auditable.
 
-Usage: python holdout.py [--strategy strategy.py] [--label final] [--cost 15]
+Usage: python holdout.py [--strategy v4/v1_final.py] [--label final] [--cost 15]
 """
-import argparse, datetime, hashlib, importlib.util, json, os, subprocess, sys
-import numpy as np
+import argparse, datetime, hashlib, importlib.util, os, subprocess, sys
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -81,7 +80,7 @@ def evaluate_and_log(path, label, md=None, cost_bps=P.COST_BPS_PER_SIDE, commit=
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--strategy", default=os.path.join(HERE, "strategy.py"))
+    ap.add_argument("--strategy", default=os.path.join(HERE, "v4", "v1_final.py"))
     ap.add_argument("--label", default="final")
     ap.add_argument("--cost", type=float, default=P.COST_BPS_PER_SIDE)
     args = ap.parse_args()

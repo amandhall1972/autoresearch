@@ -7,7 +7,7 @@ Gate 5: an invested spell is a maximal run of consecutive days on which either b
 each spell removed in turn from both daily return series, the candidate's in-sample Sharpe must still be
 above the incumbent's: an improvement that rests on a single episode is not a keep.
 
-Usage: python compare.py candidate.py [--incumbent strategy.py]   (prints in-sample numbers only)
+Usage: python compare.py candidate.py [--incumbent v4/v1_final.py]   (prints in-sample numbers only; the v1 protocol)
 """
 import argparse, importlib.util, os, sys
 import numpy as np
@@ -80,7 +80,7 @@ def gates(c, i, lo) -> dict:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("candidate")
-    ap.add_argument("--incumbent", default=os.path.join(HERE, "strategy.py"))
+    ap.add_argument("--incumbent", default=os.path.join(HERE, "v4", "v1_final.py"))
     ap.add_argument("--spells", action="store_true", help="print the leave-one-spell-out table")
     args = ap.parse_args()
     md = in_sample_data()

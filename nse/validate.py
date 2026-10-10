@@ -9,7 +9,8 @@ Final validation of strategy.py (run after the research loop):
   * walk-forward re-selection of parameters (expanding window, yearly) over the perturbation grid
   * Monte Carlo (block bootstrap) distribution of terminal wealth and max drawdown
   * charts under reports/
-Usage: python validate.py [--boot 2000] [--out reports] [--strategy path/to/strategy.py]
+Usage: python validate.py [--boot 2000] [--out reports] [--strategy path]   (default: the frozen v1 final
+v4/v1_final.py, which reports/validation.* describe; protocol v4 uses validate4.py)
 """
 import argparse, copy, json, math, os, sys, time
 import numpy as np
@@ -116,7 +117,8 @@ def main():
     ap.add_argument("--boot", type=int, default=2000)
     ap.add_argument("--out", default=os.path.join(HERE, "reports"))
     ap.add_argument("--no-charts", action="store_true")
-    ap.add_argument("--strategy", default=None, help="validate this strategy file instead of strategy.py")
+    ap.add_argument("--strategy", default=os.path.join(HERE, "v4", "v1_final.py"),
+                    help="strategy file (default: the frozen v1 final)")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     t0 = time.time(); rng = np.random.default_rng(42)

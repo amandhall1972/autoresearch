@@ -153,7 +153,7 @@ def main():
     hf = os.path.join(R, "holdout_final_returns.csv")
     hold = pd.read_csv(hf, index_col=0, parse_dates=True) if os.path.exists(hf) else None
     import importlib.util
-    spec = importlib.util.spec_from_file_location("strategy_page", os.path.join(HERE, "strategy.py"))
+    spec = importlib.util.spec_from_file_location("strategy_page", os.path.join(HERE, "v4", "v1_final.py"))
     S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
 
     hero_cards = [

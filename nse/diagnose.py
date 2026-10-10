@@ -44,7 +44,13 @@ def spells_table(res, md, W):
 
 
 def main():
-    import strategy
+    import argparse, importlib.util
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--strategy", default=os.path.join(HERE, "v4", "v1_final.py"),
+                    help="strategy file (default: the frozen v1 final, which reports/diagnostics.* describe)")
+    args = ap.parse_args()
+    spec = importlib.util.spec_from_file_location("strategy_diag", args.strategy)
+    strategy = importlib.util.module_from_spec(spec); spec.loader.exec_module(strategy)
     md = P.load_data()
     W = strategy.compute_target_weights(md).reindex(index=md.calendar, columns=md.tickers).fillna(0.0)
     res = P.run_backtest(W, md)
