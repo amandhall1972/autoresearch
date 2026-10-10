@@ -463,3 +463,11 @@ def test_holdout_evaluate_and_log_appends_one_row(tmp_path, md_pre, monkeypatch)
     assert lines[0].split("\t") == holdout.COLS and len(lines) == 3
     assert row["lookahead_ok"] and row["sharpe_pre"] == row2["sharpe_pre"]
     assert row["strategy_sha256"] == holdout.strategy_sha(str(strat))
+
+
+def test_validate_perturbations_treat_bands_below_one_by_their_gap():
+    import validate
+    pert = {(k, f): p[k] for k, f, p in validate.perturbations({"vwap_exit": 0.985, "rsi_hi": 70.0, "vwap_n": 20, "name": "x"})}
+    assert abs(pert[("vwap_exit", 1.2)] - 0.982) < 1e-12 and abs(pert[("vwap_exit", 0.8)] - 0.988) < 1e-12
+    assert pert[("rsi_hi", 1.2)] == 84.0 and pert[("vwap_n", 0.8)] == 16
+    assert not any(k == "name" for k, _ in pert)

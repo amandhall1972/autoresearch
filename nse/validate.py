@@ -82,13 +82,15 @@ def yearly_table(ret: pd.Series, rf: pd.Series, bench: pd.Series, bees: pd.Serie
 
 
 def perturbations(params: dict):
-    """One-at-a-time +-10% / +-20% perturbations of numeric parameters (ints stay ints, min 2)."""
+    """One-at-a-time +-10% / +-20% perturbations of numeric parameters (ints stay ints, min 2). A band just below 1
+    (0.9 < v < 1, e.g. a 0.985 x VWAP stop) is perturbed through its distance from 1 (0.985 -> 0.982 / 0.988), since
+    1.2 x 0.985 would be a meaningless stop above the price."""
     out = []
     for k, v in params.items():
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             continue
         for f in (0.8, 0.9, 1.1, 1.2):
-            nv = v * f
+            nv = 1.0 - (1.0 - v) * f if (isinstance(v, float) and 0.9 < v < 1.0) else v * f
             if isinstance(v, int):
                 nv = max(2, int(round(nv)))
                 if nv == v:
