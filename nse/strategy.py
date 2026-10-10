@@ -35,6 +35,14 @@ Rules (textbook confluence):
              replacement entries until the regime switches off and on again, so exposure decays as
              the move matures and the only trades are the cohort buy, single-name exits and the
              regime-off liquidation.
+  exits    : besides the VWAP stop, a held name is sold when it stops being a calm trend: (a) an
+             idiosyncratic shock, i.e. its return net of beta x the NIFTY 50 return falls more than
+             shock_k residual sigmas (beta and residual vol from the previous day's vol_n/corr_n windows);
+             (b) a volume spike, i.e. the day's volume exceeds vspike_k times its average over the previous
+             vwap_n days (up or down day alike: a news or block-trade day ends the orderly trend); (c) its
+             vol_n/vol_long_n vol expansion ranks in the top 5 % of members (vol_exit_q, the exit-side
+             twin of the calm entry filter). A name the exit rules would sell today is not bought into a
+             new cohort either.
 Names with no fresh bar on a day stay held (they cannot be traded that day anyway).
 """
 import numpy as np
@@ -45,8 +53,8 @@ from prepare import ETF_TICKER
 PARAMS = dict(
     rsi_n=14, rsi_smooth=3, rsi_hi=70.0, rsi_peak=80.0, rsi_peak_n=20, rsi_lag=12.0,
     ema_fast=20, ema_slow=50, ema_spread=0.06,
-    vwap_n=20, vwap_exit=0.985,
-    vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0, corr_n=20,
+    vwap_n=20, vwap_exit=0.985, shock_k=2.5, vspike_k=4.0,
+    vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0, vol_exit_q=0.95, corr_n=20,
     regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
     gross=1.0,
 )
@@ -84,7 +92,13 @@ def compute_target_weights(md) -> pd.DataFrame:
     vol_rank = (vol / realized_vol(c, p["vol_long_n"])).where(stock).rank(axis=1, pct=True)   # NaN -> no entry
     entry = (eligible & trend & (c > vw) & (r < p["rsi_hi"]) & (r_peak < p["rsi_peak"])
              & (r.sub(r_idx, axis=0) > -p["rsi_lag"]) & (vol_rank < p["vol_calm_q"]))
-    hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]))
+    ret, idx_ret = c.pct_change(), md.index_close["NIFTY50"].pct_change()
+    corr = ret.rolling(p["corr_n"], min_periods=p["corr_n"]).corr(idx_ret)
+    ivol = vol * np.sqrt((1.0 - corr ** 2).clip(lower=0.0))          # residual (idiosyncratic) vol vs the NIFTY 50
+    beta = corr * vol.div(realized_vol(md.index_close[["NIFTY50"]], p["vol_n"])["NIFTY50"], axis=0)
+    shock = (ret - beta.shift(1).mul(idx_ret, axis=0)) < -p["shock_k"] * ivol.shift(1) / np.sqrt(252)   # NaN -> no shock
+    spike = v > p["vspike_k"] * v.rolling(p["vwap_n"], min_periods=p["vwap_n"]).mean().shift(1)   # NaN -> no spike
+    hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]) & ~shock & ~(vol_rank >= p["vol_exit_q"]) & ~spike)
 
     dates = md.calendar
     N = len(md.tickers)
@@ -93,15 +107,13 @@ def compute_target_weights(md) -> pd.DataFrame:
     w = np.zeros(N)                                         # yesterday's target weights
     entry_v, hold_v = entry.values, hold.values
     g_v = (c / c.shift(1)).fillna(1.0).values               # close-to-close growth (1 when unknown)
-    corr = c.pct_change().rolling(p["corr_n"], min_periods=p["corr_n"]).corr(md.index_close["NIFTY50"].pct_change())
-    ivol = vol * np.sqrt((1.0 - corr ** 2).clip(lower=0.0))          # residual (idiosyncratic) vol vs the NIFTY 50
     iv_v = (1.0 / ivol.where(ivol > 0) ** p["vol_power"]).fillna(0.0).values   # inverse idio variance (0 when unknown)
     for t in range(len(dates)):
         if not regime_v[t]:                                 # regime off: fully in cash
             held[:] = False
             w = np.zeros(N)
         elif t == 0 or not regime_v[t - 1]:                 # regime switches on: buy the cohort
-            held = entry_v[t] & (iv_v[t] > 0)
+            held = entry_v[t] & hold_v[t] & (iv_v[t] > 0)     # never buy a name the exit rules would sell today
             w = np.where(held, iv_v[t], 0.0)
             w = p["gross"] * w / w.sum() if held.any() else np.zeros(N)
         else:                                               # hold the cohort, weights ride, no top-ups
