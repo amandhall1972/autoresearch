@@ -446,3 +446,20 @@ def test_compare_uses_only_in_sample_data():
     import compare
     md_is = compare.in_sample_data()
     assert md_is.calendar[-1] <= pd.Timestamp(P.IS_END)
+
+
+def test_holdout_evaluate_and_log_appends_one_row(tmp_path, md_pre, monkeypatch):
+    import holdout
+    strat = tmp_path / "buyhold.py"
+    strat.write_text("import pandas as pd\nfrom prepare import ETF_TICKER\nPARAMS = {}\n"
+                     "def compute_target_weights(md):\n"
+                     "    W = pd.DataFrame(0.0, index=md.calendar, columns=md.tickers); W[ETF_TICKER] = 1.0\n"
+                     "    return W\n")
+    log = tmp_path / "holdout_log.tsv"
+    monkeypatch.setattr(holdout, "LOG", str(log))
+    row = holdout.evaluate_and_log(str(strat), "test", md=md_pre, commit="test")
+    row2 = holdout.evaluate_and_log(str(strat), "test2", md=md_pre, commit="test")
+    lines = log.read_text().strip().split("\n")
+    assert lines[0].split("\t") == holdout.COLS and len(lines) == 3
+    assert row["lookahead_ok"] and row["sharpe_pre"] == row2["sharpe_pre"]
+    assert row["strategy_sha256"] == holdout.strategy_sha(str(strat))

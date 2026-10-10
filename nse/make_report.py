@@ -7,6 +7,8 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 R = os.path.join(HERE, "reports")
+if "--dir" in sys.argv:                       # alternative report directory (dry runs)
+    R = sys.argv[sys.argv.index("--dir") + 1]
 
 
 def load(p):
