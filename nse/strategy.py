@@ -25,16 +25,16 @@ Rules (textbook confluence):
              when it falls below regime_rsi_mid - regime_rsi_band (hysteresis avoids whipsaw); the book
              also stands aside while the index RSI is extremely overbought (above regime_rsi_max)
   cohort   : the book is bought once, on the day the regime switches on: every member in confluence,
-             weighted by beta^beta_power / idiosyncratic variance. The idiosyncratic vol is the vol_n-day
+             weighted by beta / idiosyncratic variance. The idiosyncratic vol is the vol_n-day
              realised vol with the part explained by the NIFTY 50 removed (vol * sqrt(1 - corr^2), corr over
              w_corr_n days), raised to vol_power (2: variance); beta is the same window's market beta
              (corr * vol / NIFTY vol), Blume-adjusted toward 1 (beta_shrink = 1/3) and floored at 0. The
              book is a timed bet on the market's up-leg: in a single-index model where each name earns its
-             beta times that move, the mean-variance weights are beta / idiosyncratic variance; the square
-             root (beta_power 0.5) hedges between that and equal expected returns (plain inverse
-             idiosyncratic variance). No name may hold more than w_cap (40 %) of the cohort: the share above
-             the cap is parked in NIFTYBEES (index exposure, held until the regime switches off), so a
-             one- or two-name cohort or a near-1 correlation cannot put the book into a single stock.
+             beta times that move, the mean-variance weights are exactly beta / idiosyncratic variance (a
+             square-root beta tilt was used before the vol budget below existed; with the riding book's
+             risk budgeted, the full single-index weights are better). No name may hold more than w_cap
+             (40 %) of the cohort: the share above the cap is parked in NIFTYBEES (index exposure, held
+             until the regime switches off), so a one- or two-name cohort or a near-1 correlation cannot put the book into a single stock.
              Each name is then held while a looser exit condition is not triggered
              (hysteresis: close above vwap_exit * VWAP) and its weight rides with its own price (no
              rebalancing trades); a name that exits leaves its weight in cash. There are no
@@ -45,12 +45,19 @@ Rules (textbook confluence):
              idiosyncratic shock, i.e. its return net of beta x the NIFTY 50 return falls more than
              shock_k residual sigmas (beta and residual vol from the previous day's vol_n/corr_n windows);
              (b) a volume spike, i.e. the day's volume exceeds vspike_k times its average over the previous
-             vwap_n days (up or down day alike: a news or block-trade day ends the orderly trend); (c) its
-             vol_n/vol_long_n vol expansion ranks in the top 5 % of members (vol_exit_q, the exit-side
-             twin of the calm entry filter). A name the exit rules would sell today is not bought into a
-             new cohort either. (d) A VWAP-ladder break: close below the vwap_short_n-day VWAP while that VWAP is
+             vwap_n days (up or down day alike: a news or block-trade day ends the orderly trend); (c) a
+             VWAP-ladder break: close below the vwap_short_n-day VWAP while that VWAP is
              below the vwap_long_n-day VWAP (the short-term volume-weighted price has slipped under the
-             longer one and the stock trades below both: the trend has broken; no tuned band).
+             longer one and the stock trades below both: the trend has broken; no tuned band). A name the
+             exit rules would sell today is not bought into a new cohort either. (A top-5 % vol-expansion
+             exit was deleted once the vol budget below was in place: it no longer added anything.)
+  vol budget: the riding book is trimmed (never topped up) so that its single-index model vol,
+             sqrt((sum w*beta)^2 x NIFTY vol_n-day variance + sum w^2 x idiosyncratic variance), with the
+             same Blume betas and idiosyncratic vols as the weights (NIFTYBEES: beta 1, no idio risk), stays
+             at or below vol_cap (10 % a year). The first vol_cap_delay days after a cohort is bought are
+             left untrimmed: the switch-on thrust is the bet itself, and the NIFTY vol at a switch-on still
+             carries the sell-off that preceded it. As names exit, drift or market vol rises, the trims
+             keep the remaining book inside the budget; when vol falls the book is not re-levered.
   sizing   : a cohort bought at a FRESH regime start (not the re-entry after an RSI>80 stand-aside) is
              scaled by the BANK NIFTY's variance ratio, min(1, (vol_long_n-day vol / vol_n-day vol)^size_power):
              when the market's most liquid, most leveraged sector has just become more volatile than its
@@ -58,7 +65,7 @@ Rules (textbook confluence):
              re-cross after only whipsaw_days or fewer days off (a whipsaw) is bought at whipsaw_size of that.
              A re-entry cohort after the RSI>80 stand-aside is bought EQUAL weighted: on those hot days the
              idiosyncratic-variance estimates are least reliable and the cohorts are small.
-  weights  : cohort weight = sqrt(Blume-adjusted beta) / idiosyncratic variance (w_corr_n-day correlation),
+  weights  : cohort weight = Blume-adjusted beta / idiosyncratic variance (w_corr_n-day correlation),
              times min(1, days since the name's last shock or volume-spike day / vwap_n): names that were
              in the news recently are bought small and earn their full weight back over one VWAP window.
              No single name may exceed w_cap of the cohort; the excess is parked in NIFTYBEES.
@@ -73,10 +80,10 @@ PARAMS = dict(
     rsi_n=14, rsi_smooth=3, rsi_hi=70.0, rsi_peak=80.0, rsi_peak_n=20, rsi_lag=12.0,
     ema_fast=20, ema_slow=50, ema_spread=0.06,
     vwap_n=20, vwap_exit=0.985, shock_k=2.5, vspike_k=4.0, vwap_long_n=50, vwap_short_n=3,
-    vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0, vol_exit_q=0.95, corr_n=20,
-    w_corr_n=15, beta_power=0.5, beta_shrink=1.0 / 3.0, w_cap=0.4,
+    vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0, corr_n=20,
+    w_corr_n=15, beta_shrink=1.0 / 3.0, w_cap=0.4,
     regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
-    size_index="BANKNIFTY", size_power=2.0, whipsaw_days=3, whipsaw_size=0.5,
+    size_index="BANKNIFTY", size_power=2.0, whipsaw_days=3, whipsaw_size=0.5, vol_cap=0.10, vol_cap_delay=2,
     gross=1.0,
 )
 
@@ -119,13 +126,14 @@ def compute_target_weights(md) -> pd.DataFrame:
     ret, idx_ret = c.pct_change(), md.index_close["NIFTY50"].pct_change()
     corr = ret.rolling(p["corr_n"], min_periods=p["corr_n"]).corr(idx_ret)
     ivol = vol * np.sqrt((1.0 - corr ** 2).clip(lower=0.0))          # residual (idiosyncratic) vol vs the NIFTY 50
-    vol_ratio = vol.div(realized_vol(md.index_close[["NIFTY50"]], p["vol_n"])["NIFTY50"], axis=0)
+    nvol = realized_vol(md.index_close[["NIFTY50"]], p["vol_n"])["NIFTY50"]
+    vol_ratio = vol.div(nvol, axis=0)
     beta = corr * vol_ratio
     shock = (ret - beta.shift(1).mul(idx_ret, axis=0)) < -p["shock_k"] * ivol.shift(1) / np.sqrt(252)   # NaN -> no shock
     spike = v > p["vspike_k"] * v.rolling(p["vwap_n"], min_periods=p["vwap_n"]).mean().shift(1)   # NaN -> no spike
     vw_short = rolling_vwap(h, l, c, v, p["vwap_short_n"])
     ladder_break = (c < vw_short) & (vw_short < rolling_vwap(h, l, c, v, p["vwap_long_n"]))   # NaN -> no break
-    hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]) & ~shock & ~(vol_rank >= p["vol_exit_q"]) & ~spike
+    hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]) & ~shock & ~spike
                                      & ~ladder_break)
     hold[ETF_TICKER] = True                                 # a parked index slot rides until the regime switches off
     e = md.tickers.index(ETF_TICKER)
@@ -140,16 +148,20 @@ def compute_target_weights(md) -> pd.DataFrame:
     corr_w = ret.rolling(p["w_corr_n"], min_periods=p["w_corr_n"]).corr(idx_ret)   # faster correlation for the weights
     ivol_w = vol * np.sqrt((1.0 - corr_w ** 2).clip(lower=0.0))
     beta_w = ((1.0 - p["beta_shrink"]) * corr_w * vol_ratio + p["beta_shrink"]).clip(lower=0.0)   # Blume-adjusted beta
-    iv_v = (beta_w ** p["beta_power"] / ivol_w.where(ivol_w > 0) ** p["vol_power"]).fillna(0.0).values   # 0 when unknown
+    iv_v = (beta_w / ivol_w.where(ivol_w > 0) ** p["vol_power"]).fillna(0.0).values   # 0 when unknown
     i_v = np.arange(len(dates))[:, None]                    # days since the name's last abnormal day (shock or spike)
     age = i_v - pd.DataFrame(np.where((shock | spike).values, i_v, np.nan)).ffill().values   # NaN: none on record
     iv_v = iv_v * np.nan_to_num(np.minimum(1.0, age / p["vwap_n"]), nan=1.0)   # weight ramps back over vwap_n days
-    last_on = -10 ** 6                                      # last day the regime was on
+    b_v = beta_w.fillna(0.0).to_numpy(copy=True); b_v[:, e] = 1.0          # single-index model of the riding book: betas (ETF 1)
+    s2_v = (ivol_w ** 2).fillna(0.0).to_numpy(copy=True); s2_v[:, e] = 0.0  # ... idiosyncratic variances (ETF 0)
+    nv_v = nvol.values                                       # ... and the NIFTY 50 vol (NaN -> no trim)
+    last_on, t_form = -10 ** 6, -10 ** 6                    # last day the regime was on; the cohort's formation day
     for t in range(len(dates)):
         if not regime_v[t]:                                 # regime off: fully in cash
             held[:] = False
             w = np.zeros(N)
         elif t == 0 or not regime_v[t - 1]:                 # regime switches on: buy the cohort
+            t_form = t
             held = entry_v[t] & hold_v[t] & (iv_v[t] > 0)     # never buy a name the exit rules would sell today
             w = np.where(held, iv_v[t], 0.0)
             g = p["gross"]
@@ -170,6 +182,9 @@ def compute_target_weights(md) -> pd.DataFrame:
             held &= hold_v[t]
             wg = w * g_v[t]
             w = np.where(held, wg, 0.0) / (wg.sum() + 1.0 - w.sum())
+            mv = np.sqrt((w @ b_v[t]) ** 2 * nv_v[t] ** 2 + w ** 2 @ s2_v[t])   # the riding book's model vol
+            if mv > p["vol_cap"] and t - t_form > p["vol_cap_delay"]:   # the first days of the up-leg run untrimmed
+                w = w * (p["vol_cap"] / mv)                 # trim (never add) back to the vol budget
         if regime_v[t]:
             last_on = t
         W[t] = w
