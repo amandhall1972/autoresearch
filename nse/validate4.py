@@ -14,7 +14,8 @@ Protocol-v4 validation of a strategy file on the 2016-2026 data (every window se
   * the protocol's robustness checks: plateau4 against the incumbent the strategy was merged over, the joint +-20 %
     perturbation (60 draws, numpy default_rng(20261010)) and each window with its own 5 / 10 best days removed,
     for the strategy and for R0
-Writes reports/v4/validation.json, validation.md and equity_curves.csv.
+Writes reports/v4/validation.json, validation.md and equity_curves.csv (strategy, R0, the v1 final, NIFTYBEES,
+NIFTY 50, exposure).
 
 Usage: python validate4.py --strategy FILE [--boot 2000] [--out reports/v4]
 """
@@ -29,6 +30,7 @@ import validate as V
 from run4 import load_strategy
 
 R0_PATH = os.path.join(HERE, "v4", "r0_ema_timer.py")
+V1_PATH = os.path.join(HERE, "v4", "v1_final.py")          # the v1 final, for the equity-curve comparison
 WINDOWS = [(lab, a, b) for lab, a, b in P.V4_WINDOWS] + [("span", P.V4_START, P.END), ("full", P.START, P.END)]
 
 
@@ -190,7 +192,9 @@ def main():
 
     with open(os.path.join(args.out, "validation.json"), "w") as f:
         json.dump(rep, f, indent=2, default=str)
+    v1_res = P.run_backtest(load_strategy(V1_PATH).compute_target_weights(md), md)
     pd.DataFrame({"strategy": (1 + span).cumprod(), "r0_ema_timer": (1 + r0_res["ret"].loc[span.index]).cumprod(),
+                  "v1_final": (1 + v1_res["ret"].loc[span.index]).cumprod(),
                   "niftybees": (1 + bees.loc[span.index]).cumprod(), "nifty50": (1 + nifty.loc[span.index]).cumprod(),
                   "exposure": res["exposure"].loc[span.index]}).to_csv(os.path.join(args.out, "equity_curves.csv"))
 

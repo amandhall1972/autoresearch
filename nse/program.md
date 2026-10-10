@@ -345,3 +345,26 @@ changed (objective 0.7887, lookahead_ok, as before).
 Deep hold-out set, as registered: v1 baseline and final, R0, the six round-1 candidates and `v4/r3_clean.py`
 (information), incumbent 1 = the final (scored once; `deep4.py` scores identical file contents once). The round-4
 and round-5 candidates were not registered and are not scored.
+
+## Deep hold-out result (scored once, 2026-10-10, commit 3a9453e)
+
+`python deep4.py --final strategy.py --incumbents v4/inc1_pullback.py` scored the registered set once on
+2011-04-01..2016-05-31 (1,268 sessions; `reports/v4/deep_holdout.md`, every look in `reports/deep_holdout_log.tsv`).
+`strategy.py` and `v4/inc1_pullback.py` are the same file and were scored once. The data checks
+(`deep_holdout.py --data-report`) and the deep-loader tests passed before the look.
+
+| strategy | role | Sharpe | CAGR | max DD |
+|---|---|---|---|---|
+| `v4/inc1_pullback.py` = `strategy.py` | incumbent / final | 0.683 | 13.5 % | -5.0 % |
+| `v4/r3_clean.py` (with the 20 % R0 core) | information | 0.467 | 11.7 % | -4.7 % |
+| `v4/r1_pullback.py` (round-1 pullback lens) | information | 0.435 | 11.6 % | -6.6 % |
+| `v4/v1_final.py` | information | -0.088 | 7.4 % | -5.2 % |
+| `v4/r0_ema_timer.py` (R0) | information | -0.277 | 4.2 % | -17.3 % |
+| other round-1 lenses (timing, trend basket, relative strength, repair, overlay) | information | -0.53 to -0.22 | | |
+| `v4/v1_baseline.py` | information | -0.606 | -0.8 % | -23.9 % |
+| NIFTY 50 price index | benchmark | 0.012 | | |
+
+Reading: the final strategy held up on data no rule was chosen on (0.68 against 0.79 on the worst seen window,
+with the NIFTY itself flat over cash). The structural finding is sharper than the single number: the three
+pullback strategies are the only positive ones, and every trend-timing family, including the EMA timer R0 that
+v4.1 made the bar, is negative over 2011-2016. As registered, these scores cannot change which strategy is final.
