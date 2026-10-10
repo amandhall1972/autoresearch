@@ -25,8 +25,11 @@ Rules (textbook confluence):
              when it falls below regime_rsi_mid - regime_rsi_band (hysteresis avoids whipsaw); the book
              also stands aside while the index RSI is extremely overbought (above regime_rsi_max)
   cohort   : the book is bought once, on the day the regime switches on: every member in confluence,
-             weighted by inverse vol_n-day realised variance (vol ** -vol_power, vol_power = 2: minimum
-             variance if names were uncorrelated). Each name is then held while a looser exit condition is not triggered
+             weighted by inverse idiosyncratic variance: the vol_n-day realised vol with the part
+             explained by the NIFTY 50 removed (vol * sqrt(1 - corr^2), corr over corr_n days), raised to
+             -vol_power (2: inverse variance). The market risk is common to every name and is already
+             timed by the regime, so names are sized by their own, stock-specific risk.
+             Each name is then held while a looser exit condition is not triggered
              (hysteresis: close above vwap_exit * VWAP) and its weight rides with its own price (no
              rebalancing trades); a name that exits leaves its weight in cash. There are no
              replacement entries until the regime switches off and on again, so exposure decays as
@@ -43,7 +46,7 @@ PARAMS = dict(
     rsi_n=14, rsi_smooth=3, rsi_hi=70.0, rsi_peak=80.0, rsi_peak_n=20, rsi_lag=12.0,
     ema_fast=20, ema_slow=50, ema_spread=0.06,
     vwap_n=20, vwap_exit=0.985,
-    vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0,
+    vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0, corr_n=20,
     regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
     gross=1.0,
 )
@@ -90,7 +93,9 @@ def compute_target_weights(md) -> pd.DataFrame:
     w = np.zeros(N)                                         # yesterday's target weights
     entry_v, hold_v = entry.values, hold.values
     g_v = (c / c.shift(1)).fillna(1.0).values               # close-to-close growth (1 when unknown)
-    iv_v = (1.0 / vol.where(vol > 0) ** p["vol_power"]).fillna(0.0).values   # inverse variance (0 when unknown)
+    corr = c.pct_change().rolling(p["corr_n"], min_periods=p["corr_n"]).corr(md.index_close["NIFTY50"].pct_change())
+    ivol = vol * np.sqrt((1.0 - corr ** 2).clip(lower=0.0))          # residual (idiosyncratic) vol vs the NIFTY 50
+    iv_v = (1.0 / ivol.where(ivol > 0) ** p["vol_power"]).fillna(0.0).values   # inverse idio variance (0 when unknown)
     for t in range(len(dates)):
         if not regime_v[t]:                                 # regime off: fully in cash
             held[:] = False
