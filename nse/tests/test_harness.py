@@ -434,7 +434,7 @@ def test_compare_spells_and_gate5_logic():
     assert (lo2.gain <= 1e-12).any()
     c = dict(sharpe_is=2.0, sharpe_is_h1=2.0, sharpe_is_h2=1.9, sharpe_is_drop5=1.5, pct_days_invested_is=0.5,
              n_names_avg_is=6, turnover_yr_is=10, maxdd_is=-0.1, n_harness_fixes=0)
-    i = dict(c, sharpe_is=1.8, sharpe_is_h1=1.85, sharpe_is_h2=2.05, sharpe_is_drop5=1.4)
+    i = dict(c, sharpe_is=1.8, sharpe_is_h1=1.85, sharpe_is_h2=1.95, sharpe_is_drop5=1.4)   # h2 1.9 >= 1.95 - 0.10
     g = compare.gates(c, i, lo)
     assert g["improves"] and g["gate1_halves"] and g["gate2_drop5"] and g["gate5_spells"] and g["all_mechanical_gates"]
     g2 = compare.gates(dict(c, sharpe_is_h2=1.9), dict(i, sharpe_is_h2=2.1), lo)
