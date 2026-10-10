@@ -171,7 +171,21 @@ def test_every_trade_is_explained_by_a_rule(built):
 @needs_build
 def test_no_placeholder_text(built):
     texts = built["texts"]
-    first_code = next(i for i, t in enumerate(texts) if "complete and unedited" in t)
+    first_code = next(i for i, t in enumerate(texts) if "Appendix A" in t and "complete" in t)
     prose = "\n".join(texts[:first_code])                    # the code appendices legitimately hold None
     for bad in ["see program.md", "TODO", "TBD", "DEV_PLACEHOLDER", "nan", "None", "inf"]:
         assert re.search(rf"\b{re.escape(bad)}\b", prose) is None, bad
+
+
+@needs_build
+def test_review_corrections_hold(built):
+    """Statements the adversarial review corrected stay corrected."""
+    texts = built["texts"]
+    first_code = next(i for i, t in enumerate(texts) if "Appendix A" in t and "complete" in t)
+    prose = re.sub(r"\s+", " ", "\n".join(texts[:first_code]))
+    assert "lost money" not in prose                                      # v1 lagged cash; it did not lose money
+    assert "probability, not a Sharpe" in prose                            # the deflated Sharpe ratio is a probability
+    assert "Worst in the backtest" in prose                                # kill rules are calibrated on the backtest
+    assert "beat the EMA timer in every window" not in prose and "beats the EMA timer in every window" not in prose
+    assert "not out of sample either" in prose                             # walk-forward reuses the chosen-on years
+    assert "interval" in prose and "t-statistic" in prose                  # the deep result carries its sampling error

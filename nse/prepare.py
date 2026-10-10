@@ -459,6 +459,7 @@ def cagr(ret: pd.Series) -> float:
 
 
 def summarize(res: dict, md: MarketData, start, end, label="") -> dict:
+    # ratios and returns are stored to 6 dp (shares to 4 dp) so a report never rounds an already-rounded number
     r = res["ret"].loc[start:end]
     rf = md.rf.loc[start:end]
     ex = r - rf
@@ -471,21 +472,21 @@ def summarize(res: dict, md: MarketData, start, end, label="") -> dict:
     n_names = (W > 0).sum(axis=1)
     mdd = max_drawdown(r)
     return {
-        f"sharpe{label}": round(sharpe(r, rf), 4),
-        f"cagr{label}": round(cagr(r), 4),
-        f"vol{label}": round(float(r.std(ddof=1) * np.sqrt(TRADING_DAYS)), 4),
-        f"maxdd{label}": round(mdd, 4),
-        f"sortino{label}": round(sortino(r, rf), 4),
-        f"calmar{label}": round(cagr(r) / abs(mdd), 4) if mdd < 0 else 0.0,
-        f"hit{label}": round(float((ex > 0).mean()), 4),
+        f"sharpe{label}": round(sharpe(r, rf), 6),
+        f"cagr{label}": round(cagr(r), 6),
+        f"vol{label}": round(float(r.std(ddof=1) * np.sqrt(TRADING_DAYS)), 6),
+        f"maxdd{label}": round(mdd, 6),
+        f"sortino{label}": round(sortino(r, rf), 6),
+        f"calmar{label}": round(cagr(r) / abs(mdd), 6) if mdd < 0 else 0.0,
+        f"hit{label}": round(float((ex > 0).mean()), 6),
         f"beta{label}": round(beta, 3),
-        f"alpha_ann{label}": round(alpha_ann, 4),
+        f"alpha_ann{label}": round(alpha_ann, 6),
         f"turnover_yr{label}": round(float(res["turnover"].loc[start:end].sum() / yrs), 2),
-        f"exposure{label}": round(float(res["exposure"].loc[start:end].mean()), 3),
+        f"exposure{label}": round(float(res["exposure"].loc[start:end].mean()), 4),
         f"n_names_avg{label}": round(float(n_names[n_names > 0].mean()) if (n_names > 0).any() else 0.0, 2),
-        f"pct_days_invested{label}": round(float((n_names > 0).mean()), 3),
-        f"bench_sharpe{label}": round(sharpe(bench, rf), 4),
-        f"bench_cagr{label}": round(cagr(bench.dropna()), 4),
+        f"pct_days_invested{label}": round(float((n_names > 0).mean()), 4),
+        f"bench_sharpe{label}": round(sharpe(bench, rf), 6),
+        f"bench_cagr{label}": round(cagr(bench.dropna()), 6),
         f"tstat{label}": round(float(ex.mean() / ex.std(ddof=1) * np.sqrt(len(ex))), 2),
         f"days{label}": int(len(r)),
     }
@@ -552,19 +553,19 @@ def evaluate_v4(weights: pd.DataFrame, md: MarketData, cost_bps=COST_BPS_PER_SID
     out.update(summarize(res, md, V4_START, END, "_span"))
     out.update(summarize(res, md, START, END, "_full"))
     r = res["ret"].loc[V4_START:END]; rf = md.rf.loc[V4_START:END]
-    out["objective"] = round(v4_objective(r, rf), 4)
+    out["objective"] = round(v4_objective(r, rf), 6)
     ex = (r - rf).dropna()
     ex_d = ex.drop(ex.nlargest(V4_DROP_BEST_DAYS).index)
     s_d = ex_d.std(ddof=1)
-    out["sharpe_span_drop10"] = round(float(ex_d.mean() / s_d * np.sqrt(TRADING_DAYS)) if s_d > 1e-12 else 0.0, 4)
-    out["sharpe_span_gross"] = round(sharpe(res["ret_gross"].loc[V4_START:END], rf), 4)
+    out["sharpe_span_drop10"] = round(float(ex_d.mean() / s_d * np.sqrt(TRADING_DAYS)) if s_d > 1e-12 else 0.0, 6)
+    out["sharpe_span_gross"] = round(sharpe(res["ret_gross"].loc[V4_START:END], rf), 6)
     years = sorted(set(r.index.year))
     yearly = {y: sharpe(r[r.index.year == y], rf[rf.index.year == y]) for y in years}
     for y, v in yearly.items():
-        out[f"sharpe_{y}"] = round(v, 4)
+        out[f"sharpe_{y}"] = round(v, 6)
     out["years_positive"] = int(sum(1 for y in years if (r[r.index.year == y] - rf[rf.index.year == y]).sum() > 0))
     out["years"] = len(years)
-    out["worst_year_sharpe"] = round(min(yearly.values()), 4)
+    out["worst_year_sharpe"] = round(min(yearly.values()), 6)
     W = res["weights"].loc[V4_START:END]
     gross = W.sum(axis=1)
     inv = gross > 1e-9

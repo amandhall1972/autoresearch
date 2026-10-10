@@ -64,22 +64,39 @@ def v4_section():
         L.append(f"| {lab} | {b['pre']} | {b['is']} | {b['oos']} | {b['span']} | {b['full']} | "
                  f"{min(b['pre'], b['is'], b['oos'])} | {dfin['bench_sharpe_deep'] if (dfin and k == 'nifty50') else '-'} |")
     L += ["", f"The v2 strategy: CAGR {m['cagr_span']:.1%} over 2017-2026 (repo rate included), maximum drawdown "
-          f"{m['maxdd_span']:.1%}, average exposure {m['exposure_span']:.0%}, turnover {m['turnover_yr_span']}x a year, "
-          f"{m['years_positive']} of 10 calendar years with a positive excess return.", "",
+          f"{m['maxdd_span']:.1%}, average exposure {m['exposure_span']:.0%}, turnover {m['turnover_yr_span']:.1f}x a year; "
+          f"it beat cash in {sum(1 for r in v['yearly'] if r['strat_ret'] - r['rf'] > 0.0025)} of 10 calendar years"
+          + "".join(f", was level with it in {r['year']}" for r in v["yearly"] if abs(r["strat_ret"] - r["rf"]) <= 0.0025)
+          + "".join(f" and trailed it in {r['year']}" for r in v["yearly"] if r["strat_ret"] - r["rf"] < -0.0025)
+          + " (2017 from April, 2026 to October).", "",
           "## The v2 strategy", "", "```", doc, "```", "", f"Parameters: `{json.dumps(v['params'])}`", "",
           "## Every protocol-v4 strategy on every seen window", "", md_body(os.path.join(R4, "lineage.md")), ""]
     if deep:
         L += ["## Deep hold-out, scored once", "", md_body(os.path.join(R4, "deep_holdout.md")), "",
               f"Data checks: {deep['data']['sessions_scored']:,} sessions scored, {deep['data']['members_with_bars_min']} to "
               f"{deep['data']['members_with_bars_max']} members with bars on any day; the look log is `reports/deep_holdout_log.tsv`.", ""]
+        smp = deep.get("sampling")
+        if smp and dfin:
+            fs = smp["strategies"][dfin["file"]]
+            d_r0 = smp["differences"][f"{dfin['file']} - v4/r0_ema_timer.py"]
+            d_nx = smp["differences"][f"{dfin['file']} - NIFTY50"]
+            L += [f"Sampling error (stationary bootstrap, mean block {smp['mean_block']} sessions, {smp['paths']} paired paths): the "
+                  f"final's Sharpe {fs['sharpe']:.2f} has a 95 % interval of {fs['ci95'][0]:.2f} to {fs['ci95'][1]:.2f}; its lead over R0 "
+                  f"{d_r0['ci95'][0]:.2f} to {d_r0['ci95'][1]:.2f}; over the NIFTY 50 {d_nx['ci95'][0]:.2f} to {d_nx['ci95'][1]:.2f} (not "
+                  f"established). Daily t-statistic {fs['tstat_daily']:.2f}, monthly {fs['tstat_monthly']:.2f}: the strategy's days are "
+                  f"negatively autocorrelated (variance ratio of 20-day sums {fs['variance_ratio_20d']:.2f}).", ""]
     L += ["## Validation of the v2 strategy", "", md_body(os.path.join(R4, "validation.md")), "",
           "## How to read the v2 numbers", "",
           "* All three seen windows were used to choose the rules, so none of them is out of sample any more; the "
-          "worst-window objective is a selection statistic. The deflated Sharpe ratio charges for every logged trial.",
+          "worst-window objective is a selection statistic. The deflated Sharpe ratio is a probability, not a Sharpe: the "
+          "chance that the true 2017-26 Sharpe beats what the best of all logged tries (every row of results_v4.tsv with a "
+          "2017-26 Sharpe) would reach by luck. Below 0.95 it means the 2017-26 Sharpe is not significant once the search "
+          "is charged for.",
           "* The deep hold-out (2011-2016) is the only test no rule was chosen on; it was scored once, after the final "
           "was fixed, on a set of strategies registered in `program.md` before the look.",
-          "* The joint perturbation (every parameter moved at random by up to 20 % at once) is the more honest point "
-          "estimate of the worst-window Sharpe than the optimised value.",
+          "* The joint perturbation (every parameter moved at random by up to 20 % at once) and the walk-forward "
+          "re-selection run on the same years the rules were chosen on: they measure how fragile the fit is, not how it "
+          "will do on new data. The joint mean is still a better guide than the optimised worst-window Sharpe.",
           "* Stock returns are price returns (no dividends); cash earns the RBI repo rate.", "", "---", ""]
     return L
 

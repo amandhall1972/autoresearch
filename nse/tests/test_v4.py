@@ -239,3 +239,47 @@ def test_live_signal_loader_gives_the_research_weights(md):
     assert np.allclose(Wl.loc[idx, cols].values, Wr.reindex(index=idx, columns=cols).fillna(0.0).values)
     assert Wr.reindex(index=idx).drop(columns=cols).abs().to_numpy().sum() == 0.0
     assert (Wr.loc[idx].sum(axis=1) > 0).any()                 # the check is not vacuous: the book trades
+
+
+def test_strategy_has_the_code_scored_on_the_deep_holdout():
+    """strategy.py may differ from the scored file only in docstrings; and a docstring edit cannot buy a second look."""
+    import deep_holdout as D
+    a, b = os.path.join(NSE, "strategy.py"), os.path.join(NSE, "v4", "inc1_pullback.py")
+    assert D.code_fingerprint(a) == D.code_fingerprint(b)
+    if os.path.exists(D.LOG):
+        assert D.looked_at(a) and D.looked_at(b)
+
+
+def test_code_fingerprint_ignores_docstrings_only(tmp_path):
+    import deep_holdout as D
+    f1, f2, f3 = tmp_path / "a.py", tmp_path / "b.py", tmp_path / "c.py"
+    f1.write_text('"""one"""\ndef f(x):\n    """doc"""\n    return x + 1\n')
+    f2.write_text('"""two, longer"""\ndef f(x):\n    return x + 1\n')
+    f3.write_text('"""one"""\ndef f(x):\n    """doc"""\n    return x + 2\n')
+    assert D.code_fingerprint(str(f1)) == D.code_fingerprint(str(f2)) != D.code_fingerprint(str(f3))
+
+
+def test_deep_report_matches_the_logged_looks():
+    """Every figure in reports/v4/deep_holdout.json is recomputed from the saved daily returns and rounds to the value
+    logged at the look; the stored sampling error belongs to the same returns."""
+    import json
+    import deep4
+    import deep_holdout as D
+    rep_p = os.path.join(NSE, "reports", "v4", "deep_holdout.json")
+    if not (os.path.exists(rep_p) and os.path.exists(D.LOG)):
+        pytest.skip("deep hold-out not scored in this checkout")
+    rep = json.load(open(rep_p))
+    log = pd.read_csv(D.LOG, sep="\t")
+    log["base"] = log["label"].str.split(":").str[-1]
+    assert len(log) == len(rep["rows"])                          # one look per registered file content, no more
+    for row in rep["rows"]:
+        base = os.path.basename(row["file"])
+        new = deep4.metrics_from_saved(os.path.join(NSE, "reports", "v4", "deep", base[:-3] + ".csv"))
+        logged = log[log["base"] == base].iloc[0]
+        for k in ("sharpe_deep", "cagr_deep", "maxdd_deep", "bench_sharpe_deep"):
+            assert row[k] == pytest.approx(new[k], abs=1e-6)
+            assert round(new[k], 4) == pytest.approx(float(logged[k]), abs=6e-5)
+    final = next(r for r in rep["rows"] if "final" in r["roles"])
+    st = rep["sampling"]["strategies"][final["file"]]
+    assert st["sharpe"] == pytest.approx(final["sharpe_deep"], abs=1e-6)
+    assert st["ci95"][0] < st["sharpe"] < st["ci95"][1]

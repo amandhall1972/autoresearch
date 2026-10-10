@@ -35,7 +35,7 @@ WINDOWS = [(lab, a, b) for lab, a, b in P.V4_WINDOWS] + [("span", P.V4_START, P.
 
 
 def window_sharpes(ret, rf):
-    return {lab: round(P.sharpe(ret.loc[a:b], rf.loc[a:b]), 4) for lab, a, b in WINDOWS}
+    return {lab: round(P.sharpe(ret.loc[a:b], rf.loc[a:b]), 6) for lab, a, b in WINDOWS}
 
 
 def main():
@@ -88,8 +88,8 @@ def main():
         ex = (ret.loc[a:b] - rf.loc[a:b]).values
         bs = V.block_bootstrap(ex, args.boot, 20, rng)
         srs = np.array([V.sharpe_ann(x) for x in bs])
-        d = {"sharpe": round(V.sharpe_ann(ex), 4), "ci95": [round(float(np.percentile(srs, 2.5)), 4), round(float(np.percentile(srs, 97.5)), 4)],
-             "p_sharpe_gt_0": round(float((srs > 0).mean()), 4), "psr_vs_0": round(V.psr(ex, 0.0), 4),
+        d = {"sharpe": round(V.sharpe_ann(ex), 6), "ci95": [round(float(np.percentile(srs, 2.5)), 6), round(float(np.percentile(srs, 97.5)), 6)],
+             "p_sharpe_gt_0": round(float((srs > 0).mean()), 6), "psr_vs_0": round(V.psr(ex, 0.0), 6),
              "tstat": round(float(ex.mean() / ex.std(ddof=1) * math.sqrt(len(ex))), 2)}
         if lab == "span":
             d["deflated"] = V.deflated_sharpe(ex, trials)
@@ -110,7 +110,7 @@ def main():
             skipped.append(f"{k}x{f}: {e}"); continue
         rets[(k, f)] = r
         w = window_sharpes(r, rf)
-        sens.append({"param": k, "factor": f, "value": p.get(k), "objective": round(min(w["pre"], w["is"], w["oos"]), 4), **w})
+        sens.append({"param": k, "factor": f, "value": p.get(k), "objective": round(min(w["pre"], w["is"], w["oos"]), 6), **w})
     sdf = pd.DataFrame(sens)
     base_obj = float(sdf.loc[sdf.param == "base", "objective"].iloc[0])
     pert = sdf.iloc[1:]
@@ -132,22 +132,22 @@ def main():
                    "sharpe_test": round(P.sharpe(r_te, rf.loc[r_te.index]), 3), "ret_test": round(float((1 + r_te).prod() - 1), 4)})
         wf_ret.append(r_te)
     wf_all = pd.concat(wf_ret)
-    rep["walk_forward"] = {"years": wf, "sharpe_concat": round(P.sharpe(wf_all, rf.loc[wf_all.index]), 4),
-                           "sharpe_concat_2024_26": round(P.sharpe(wf_all.loc[P.OOS_START:], rf.loc[wf_all.loc[P.OOS_START:].index]), 4),
-                           "cagr_concat": round(P.cagr(wf_all), 4), "maxdd_concat": round(P.max_drawdown(wf_all), 4)}
+    rep["walk_forward"] = {"years": wf, "sharpe_concat": round(P.sharpe(wf_all, rf.loc[wf_all.index]), 6),
+                           "sharpe_concat_2024_26": round(P.sharpe(wf_all.loc[P.OOS_START:], rf.loc[wf_all.loc[P.OOS_START:].index]), 6),
+                           "cagr_concat": round(P.cagr(wf_all), 6), "maxdd_concat": round(P.max_drawdown(wf_all), 6)}
 
     # ---- Monte Carlo and regime split on the span
     x = span.values; bs = V.block_bootstrap(x, min(args.boot, 2000), 20, rng)
     term = (1 + bs).prod(axis=1); mdd = np.array([P.max_drawdown(pd.Series(b)) for b in bs[:500]])
-    rep["monte_carlo"] = {"terminal_wealth_p5": round(float(np.percentile(term, 5)), 3), "terminal_wealth_p50": round(float(np.percentile(term, 50)), 3),
-                          "terminal_wealth_p95": round(float(np.percentile(term, 95)), 3), "p_loss": round(float((term < 1).mean()), 4),
-                          "maxdd_p50": round(float(np.percentile(mdd, 50)), 4), "maxdd_p95_worst": round(float(np.percentile(mdd, 5)), 4)}
+    rep["monte_carlo"] = {"terminal_wealth_p5": round(float(np.percentile(term, 5)), 6), "terminal_wealth_p50": round(float(np.percentile(term, 50)), 6),
+                          "terminal_wealth_p95": round(float(np.percentile(term, 95)), 6), "p_loss": round(float((term < 1).mean()), 6),
+                          "maxdd_p50": round(float(np.percentile(mdd, 50)), 6), "maxdd_p95_worst": round(float(np.percentile(mdd, 5)), 6)}
     nx = md.index_close["NIFTY50"]
     above = (nx > nx.ewm(span=200, adjust=False).mean()).shift(1).reindex(span.index).fillna(False).astype(bool)
     rfs = rf.loc[span.index]; ns = nifty.loc[span.index]
-    rep["regime"] = {"days_above": int(above.sum()), "sharpe_above": round(P.sharpe(span[above], rfs[above]), 3),
-                     "days_below": int((~above).sum()), "sharpe_below": round(P.sharpe(span[~above], rfs[~above]), 3),
-                     "nifty_sharpe_above": round(P.sharpe(ns[above], rfs[above]), 3), "nifty_sharpe_below": round(P.sharpe(ns[~above], rfs[~above]), 3)}
+    rep["regime"] = {"days_above": int(above.sum()), "sharpe_above": round(P.sharpe(span[above], rfs[above]), 6),
+                     "days_below": int((~above).sum()), "sharpe_below": round(P.sharpe(span[~above], rfs[~above]), 6),
+                     "nifty_sharpe_above": round(P.sharpe(ns[above], rfs[above]), 6), "nifty_sharpe_below": round(P.sharpe(ns[~above], rfs[~above]), 6)}
     # ---- protocol robustness checks
     import plateau4
     inc = os.path.join(HERE, args.incumbent) if not os.path.isabs(args.incumbent) else args.incumbent
@@ -169,24 +169,24 @@ def main():
         jo.append(P.v4_objective(r2.loc[P.V4_START:P.END], rf.loc[P.V4_START:P.END]))
     jo = np.array(jo)
     r0_obj = rep["benchmarks"]["r0_ema_timer"]
-    rep["joint_perturbation"] = {"draws": 60, "seed": 20261010, "mean": round(float(jo.mean()), 4),
-                                 "median": round(float(np.median(jo)), 4), "p10": round(float(np.percentile(jo, 10)), 4),
-                                 "min": round(float(jo.min()), 4), "max": round(float(jo.max()), 4),
-                                 "share_above_r0": round(float((jo > min(r0_obj["pre"], r0_obj["is"], r0_obj["oos"])).mean()), 3),
-                                 "values": [round(float(x), 4) for x in jo]}
+    rep["joint_perturbation"] = {"draws": 60, "seed": 20261010, "mean": round(float(jo.mean()), 6),
+                                 "median": round(float(np.median(jo)), 6), "p10": round(float(np.percentile(jo, 10)), 6),
+                                 "min": round(float(jo.min()), 6), "max": round(float(jo.max()), 6),
+                                 "share_above_r0": round(float((jo > min(r0_obj["pre"], r0_obj["is"], r0_obj["oos"])).mean()), 6),
+                                 "values": [round(float(x), 6) for x in jo]}
 
     def own_best_removed(ret, k):
         out = {}
         for lab, a, b in P.V4_WINDOWS:
             r = ret.loc[a:b]; ex = r - rf.loc[r.index]
             keep = ex.drop(ex.nlargest(k).index).index
-            out[lab] = round(P.sharpe(r.loc[keep], rf.loc[keep]), 4)
+            out[lab] = round(P.sharpe(r.loc[keep], rf.loc[keep]), 6)
         out["worst"] = min(out[w] for w, _, _ in P.V4_WINDOWS)
         return out
     rep["event_days"] = {name: {str(k): own_best_removed(r, k) for k in (0, 5, 10)}
                          for name, r in (("strategy", ret), ("r0_ema_timer", r0_res["ret"]), ("niftybees", bees))}
     spn = (ret.loc[P.V4_START:P.END] - rf.loc[P.V4_START:P.END])
-    rep["event_days"]["concentration"] = {"top10_share_of_span_excess": round(float(spn.nlargest(10).sum() / spn.sum()), 3),
+    rep["event_days"]["concentration"] = {"top10_share_of_span_excess": round(float(spn.nlargest(10).sum() / spn.sum()), 6),
                                           "top10_days": [str(d.date()) for d in spn.nlargest(10).index]}
     rep["runtime_s"] = round(time.time() - t0, 1)
 

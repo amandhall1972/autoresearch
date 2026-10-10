@@ -60,6 +60,32 @@ def strategy_sha(path) -> str:
     return hashlib.sha256(open(path, "rb").read()).hexdigest()[:16]
 
 
+def code_fingerprint(path) -> str:
+    """sha256 of the file's syntax tree without docstrings: equal for files whose code is the same."""
+    import ast
+    tree = ast.parse(open(path).read())
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.body \
+                and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant) \
+                and isinstance(n.body[0].value.value, str):
+            n.body = n.body[1:]
+    return hashlib.sha256(ast.dump(tree).encode()).hexdigest()[:16]
+
+
+def looked_at(path) -> bool:
+    """True when this file, or any repository strategy file with the same code, was already scored. The log keys
+    each look by the file's content hash; matching on code as well means a docstring edit cannot buy a second look."""
+    if not os.path.exists(LOG):
+        return False
+    shas = set(pd.read_csv(LOG, sep="\t")["strategy_sha256"].astype(str))
+    if strategy_sha(path) in shas:
+        return True
+    import glob
+    looked = {code_fingerprint(f) for f in [os.path.join(HERE, "strategy.py")] + glob.glob(os.path.join(HERE, "v4", "*.py"))
+              if strategy_sha(f) in shas}
+    return code_fingerprint(path) in looked
+
+
 def evaluate_and_log(path, label, md=None, cost_bps=P.COST_BPS_PER_SIDE, commit=None, returns_out=None) -> dict:
     """Score one strategy file on the deep hold-out and append the look to reports/deep_holdout_log.tsv."""
     if commit is None:
@@ -134,6 +160,8 @@ def main():
         return
     if not args.strategy:
         ap.error("--strategy is required (or --data-report)")
+    if looked_at(args.strategy):
+        raise SystemExit(f"{args.strategy}: this code was already scored on the deep hold-out; refusing a second look")
     row = evaluate_and_log(args.strategy, args.label, cost_bps=args.cost)
     print(f"--- DEEP HOLD-OUT {P.DEEP_START}..{P.DEEP_END} (logged to reports/deep_holdout_log.tsv)")
     for c in COLS[3:]:

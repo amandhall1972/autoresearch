@@ -368,3 +368,40 @@ Reading: the final strategy held up on data no rule was chosen on (0.68 against 
 with the NIFTY itself flat over cash). The structural finding is sharper than the single number: the three
 pullback strategies are the only positive ones, and every trend-timing family, including the EMA timer R0 that
 v4.1 made the bar, is negative over 2011-2016. As registered, these scores cannot change which strategy is final.
+
+## Review of the v2 deliverables and the changes it led to (after the deep look; no strategy change)
+
+An adversarial review of the research note, REPORT.md and the results page (five lenses, every finding put to an
+independent refutation attempt; 64 of 67 findings confirmed or partly confirmed) led to these changes. None
+changes a rule, a parameter, a gate or a scored result.
+
+* **Precision.** Stored results were rounded to 4 dp and then rounded again for display, which put some figures
+  one unit off in the last digit and made the PDF and the page disagree. `prepare.summarize`, `evaluate_v4`,
+  `validate.yearly_table` and `validate4.py` now store 6 dp (shares 4 dp); `validation.json` and `lineage.json`
+  were rebuilt. `deep4.py --rebuild-report` rewrote `deep_holdout.json` at full precision from the saved daily
+  returns of the looks already taken: it runs no strategy and loads no deep market data, and it refuses to write
+  unless every recomputed value rounds to the value logged at the look. It also stores the deep window's sampling
+  error (paired stationary bootstrap, 2,000 paths, mean block 20 sessions): the final's 0.68 has a 95 % interval
+  of 0.13 to 1.28; its lead over R0 0.15 to 1.79; its lead over the NIFTY 50 -0.17 to 1.50 (not established).
+* **`strategy.py` docstring corrected** (code unchanged; `v4/inc1_pullback.py` stays byte-identical to the scored
+  file and the note's build checks that the two have the same code). Three statements were wrong for the final
+  book: switching the RSI filter off raises 2024-26 to 1.06 but lowers 2017-19 to 0.65 and 2020-23 to 0.71 (the
+  "0.02" was measured on the round-3 book with the R0 core); untied, the trigger's VWAP length keeps only 45 % (8)
+  or 57 % (12) of the margin over R0; and cash at the repo rate lifts the CAGR, not the Sharpe. It now also says
+  that held names are traded back to 1/12 at every open.
+* **One look per code, not per file.** Because the docstring edit changed the file hash, `deep_holdout.py` and
+  `deep4.py` now also fingerprint the code (syntax tree without docstrings) and refuse any file whose code matches
+  one already scored.
+* **Paper-trial and kill rules recalibrated.** As first written, two of them fired on the backtest itself (a
+  trailing 12-month excess return below zero on 12.5 % of sessions; a 30-trade win rate down to 33 %), and the pass
+  bands were narrower than a year's sampling error. They are now computed at build time from the backtest
+  (2011-2026 for drawdown and 12-month excess, 2017-2026 trades for the win rate), each set beyond anything the
+  backtest did, and the build fails if the backtest would trigger one.
+* **Statements corrected**: the deflated Sharpe ratio is a probability (0.77, below 0.95: the 2017-26 Sharpe is not
+  significant once the search is charged for), not a Sharpe; the walk-forward and joint-perturbation checks reuse
+  the chosen-on years, so only the deep hold-out is selection-free; v1 lagged cash in 2017-19 and 2024-26 rather than
+  losing money; 2018 was level with cash (8 of 10 years beat it); the round-2 sleeve did not beat R0 in every
+  window; deleting the R0 core at the round-3 merge moved Sharpe from the strong windows into the weak one
+  (against R0 every gate passed; against the with-core version the windows gate would not have, and the with-core
+  version was registered for the deep look because the choice hinged on the simplification rule); the traced trigger day had 17 eligible names for 12 slots; and the compliance
+  gate counts sessions on which the weights change.

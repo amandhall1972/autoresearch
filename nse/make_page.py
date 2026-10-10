@@ -235,6 +235,12 @@ def main_v4(R4):
     cs = {r["cost_bps"]: r for r in v["cost_sensitivity"]}
     bs, jp, evd, wf = v["bootstrap"], v["joint_perturbation"], v["event_days"], v["walk_forward"]
     dsr = bs["span"]["deflated"]
+    smp = deep.get("sampling")
+    if smp is None:
+        raise SystemExit("reports/v4/deep_holdout.json has no sampling error: run python deep4.py --rebuild-report")
+    fs = smp["strategies"][dfin["file"]]
+    dr0 = smp["differences"][f"{dfin['file']} - v4/r0_ema_timer.py"]
+    dnx = smp["differences"][f"{dfin['file']} - NIFTY50"]
     W = {"pre": "2017–19", "is": "2020–23", "oos": "2024–26", "span": "2017–26", "full": "2020–26"}
 
     cards = "".join(
@@ -263,9 +269,10 @@ def main_v4(R4):
     costs = table(["One-way cost (bps)", "2017–19", "2020–23", "2024–26", "Worst window", "CAGR 2017–26"],
                   [[k, fmt(r["sharpe_pre"]), fmt(r["sharpe_is"]), fmt(r["sharpe_oos"]), (fmt(r["objective"]), cls(r["objective"])),
                     fmt(r["cagr_span"], 1, pct=True)] for k, r in sorted(cs.items())])
-    boot = table(["Window", "Sharpe", "t-stat", "95% bootstrap interval", "P(Sharpe > 0)"],
+    boot = table(["Window", "Sharpe", "t-stat", "95% bootstrap interval", "Resamples > 0"],
                  [[W[k], fmt(bs[k]["sharpe"]), fmt(bs[k]["tstat"]), f'{fmt(bs[k]["ci95"][0])} to {fmt(bs[k]["ci95"][1])}',
-                   fmt(bs[k]["p_sharpe_gt_0"], 0, pct=True)] for k in ("pre", "is", "oos", "span", "full")])
+                   (fmt(bs[k]["p_sharpe_gt_0"], 1, pct=True) if bs[k]["p_sharpe_gt_0"] < 0.9995 else "> 99.9%")]
+                  for k in ("pre", "is", "oos", "span", "full")])
     events = table(["Best days removed", "2017–19", "2020–23", "2024–26", "Worst", "R0 worst"],
                    [[f"{k} per window", fmt(evd["strategy"][k]["pre"]), fmt(evd["strategy"][k]["is"]), fmt(evd["strategy"][k]["oos"]),
                      (fmt(evd["strategy"][k]["worst"]), cls(evd["strategy"][k]["worst"])), fmt(evd["r0_ema_timer"][k]["worst"])]
@@ -278,10 +285,13 @@ def main_v4(R4):
                       for r in order], num_from=2)
     outcomes = {
         "v4-1": "every lens beat v1; the one effect present in every window was the NIFTY's EMA trend, so the plain EMA timer R0 became the bar (v4.1)",
-        "v4-2": "a pullback sleeve on top of R0 beat it in every window; all rejected in audit, which exposed two rule flaws (v4.2)",
-        "v4-3": "merge: the pullback strategy alone, after the audits showed the R0 core lowered the objective",
+        "v4-2": f"a pullback sleeve on top of R0 lifted its worst window from {fmt(r0['objective'])} to {fmt(by['v4/r2_pullbackcombo.py']['objective'])} "
+                "(2020–23 slightly lower, inside the 0.10 tolerance); all rejected in audit, which exposed two rule flaws (v4.2)",
+        "v4-3": "merge: the pullback strategy alone. Deleting the R0 core raised the worst window and lowered the other two; "
+                "the with-core version was registered for the deep hold-out",
         "v4-4": "dry: each lever raised the objective but failed the year-by-year or plateau gates",
-        "v4-5": "dry: no change passed every gate; the strategy was fixed and the deep hold-out scored",
+        "v4-5": "dry: no change passed every gate (a market-conditional exit reached 0.93 but failed the year-by-year and plateau "
+                "gates); the strategy was fixed and the deep hold-out scored",
     }
     rounds_tab = table(["Round", "Lenses", "Logged rows", "Outcome"],
                        [[k[-1], lenses.get(k, 0), f"{by_round.get(k, 0):,}", (esc(outcomes[k]), "tx")]
@@ -291,7 +301,8 @@ def main_v4(R4):
                                  f"{p['breadth_cut'] * 100:.0f}% of the members in their own uptrend (close above their {p['trend_n']}-day EMA) "
                                  f"close below their {p['vwap_n']}-day VWAP: a broad pullback inside a long uptrend."),
         ("Name filter", "EMA, RSI", f"On a trigger day, a member in its own uptrend whose Wilder RSI({p['rsi_n']}) is below {p['rsi_max']:g}: it was sold hard."),
-        ("Selection", "VWAP", f"Free slots ({p['slots']}, each 1/{p['slots']} of the book) go to the eligible names deepest below their {p['vwap_n']}-day VWAP."),
+        ("Selection", "VWAP", f"Free slots ({p['slots']}, each 1/{p['slots']} of the book) go to the eligible names deepest below their {p['vwap_n']}-day VWAP. "
+                              f"Held names are traded back to 1/{p['slots']} at every open, so positions do not drift."),
         ("Exit", "VWAP", f"Sell as soon as the name closes back above its {p['vwap_n']}-day VWAP, or after {p['max_hold']} sessions; "
                          "names leaving the index are sold by the harness."),
         ("Execution", "", "Signals on the close, orders at the next open, 15 bps one-way cost (STT, fees, slippage); idle capital earns the RBI repo rate."),
@@ -318,8 +329,8 @@ def main_v4(R4):
   <div class="rule" aria-hidden="true"></div>
   <div class="eyebrow">RAAS Capital · Quant Desk · RCG-RN-REV-002 · NSE Nifty 50 · daily bars</div>
   <h1>RSI + EMA + VWAP on the Nifty 50, v2</h1>
-  <p class="lede">The v1 strategy was chosen on 2020–2023 alone and lost money in every other window ({fmt(v1['sharpe_pre'])} on 2017–2019,
-  {fmt(v1['sharpe_oos'])} on 2024–2026). The v2 strategy keeps RSI, EMA and VWAP but uses them for a different trade, buying broad pullbacks
+  <p class="lede">The v1 strategy was chosen on 2020–2023 alone and lagged cash in every other window (Sharpe over cash {fmt(v1['sharpe_pre'])} on
+  2017–2019 and {fmt(v1['sharpe_oos'])} on 2024–2026). The v2 strategy keeps RSI, EMA and VWAP but uses them for a different trade, buying broad pullbacks
   inside uptrends, and was chosen on the worst of all three windows: <b class="{cls(m['sharpe_pre'])}">{fmt(m['sharpe_pre'])}</b>,
   <b class="{cls(m['sharpe_is'])}">{fmt(m['sharpe_is'])}</b> and <b class="{cls(m['sharpe_oos'])}">{fmt(m['sharpe_oos'])}</b>. {deep_line}</p>
 </header>
@@ -343,30 +354,41 @@ The source is <code>nse/strategy.py</code>; the research note RCG-RN-REV-002 exp
 <section><h2>Robustness</h2>
 <p><b>Costs.</b> Turnover is {fmt(m['turnover_yr_span'], 1)}x a year, so costs matter: the worst window falls from {fmt(cs[15]['objective'])} at 15 bps to
 {fmt(cs[25]['objective'])} at 25 bps and {fmt(cs[40]['objective'])} at 40 bps.</p>{costs}
-<p style="margin-top:16px"><b>Sampling error and multiple testing.</b> Stationary block bootstrap, mean block 20 sessions. The deflated Sharpe ratio over 2017–2026,
-charging for all {dsr['n_trials']:,} protocol-v4 trials, is {fmt(dsr['dsr'])}.</p>{boot}
+<p style="margin-top:16px"><b>Sampling error.</b> Stationary block bootstrap, mean block 20 sessions; the last column is the share of resamples with a
+positive Sharpe, which is not the probability that the true Sharpe is positive.</p>{boot}
+<p style="margin-top:16px"><b>Multiple testing.</b> The deflated Sharpe ratio for 2017–2026 is {fmt(dsr['dsr'])}. It is a probability, not a Sharpe: the
+chance that the true Sharpe exceeds {fmt(dsr['sr0_ann'])}, the Sharpe the best of {dsr['n_trials']:,} logged tries would reach by luck alone. It is below the
+conventional 0.95, so once the search is charged for, the 2017–2026 Sharpe of {fmt(bs['span']['sharpe'])} is not statistically distinguishable from the best of
+that many tries.</p>
 <p style="margin-top:16px"><b>Parameters.</b> Moving every parameter at once by a random factor between 0.8 and 1.2 ({jp['draws']} draws) gives a mean
-worst-window Sharpe of {fmt(jp['mean'])} (10th percentile {fmt(jp['p10'])}); read {fmt(jp['mean'])}, not {fmt(m['objective'])}, as the point estimate.
-Re-selecting the parameters each year from 2019 on the years before gives {fmt(wf['sharpe_concat'])} over 2019–2026 and
-{fmt(wf['sharpe_concat_2024_26'])} on 2024–2026.</p>
+worst-window Sharpe of {fmt(jp['mean'])} (10th percentile {fmt(jp['p10'])}), a better guide than the optimised {fmt(m['objective'])}. Re-selecting the
+parameters each year from 2019 on the years before gives {fmt(wf['sharpe_concat'])} over 2019–2026 and {fmt(wf['sharpe_concat_2024_26'])} on 2024–2026.
+Both checks run on the years the rules were chosen on, so they show how fragile the fit is, not how it will do on new data.</p>
 <p><b>Event days.</b> A dip buyer is paid on rebound days: {fmt(evd['concentration']['top10_share_of_span_excess'], 0, pct=True)} of the
 2017–2026 excess return came on its 10 best days. Without each window's own best days:</p>{events}</section>
 <section><h2>Deep hold-out, April 2011 – May 2016</h2>
 <p>The point-in-time Nifty 50 of 2008–2016 ({deep['data']['members_with_bars_min']}–{deep['data']['members_with_bars_max']} members with bars on any day),
 {deep['data']['sessions_scored']:,} sessions, scored once for a set of strategies registered before the look. NIFTY 50 over the same window:
-Sharpe {fmt(dfin['bench_sharpe_deep'])}, CAGR {fmt(dfin['bench_cagr_deep'], 1, pct=True)}.</p>{deep_tab}</section>
+Sharpe {fmt(dfin['bench_sharpe_deep'])}, CAGR {fmt(dfin['bench_cagr_deep'], 1, pct=True)}. Strategy CAGRs include the repo rate earned on idle capital.</p>{deep_tab}
+<p style="margin-top:12px">Five years is a short sample. The v2 strategy's 95% bootstrap interval runs from {fmt(fs['ci95'][0])} to {fmt(fs['ci95'][1])}
+(stationary bootstrap, mean block 20 sessions), and its lead over R0 from {fmt(dr0['ci95'][0])} to {fmt(dr0['ci95'][1])}; its lead over the NIFTY 50
+({fmt(dnx['ci95'][0])} to {fmt(dnx['ci95'][1])}) is not established on this window alone. The daily t-statistic ({fmt(fs['tstat_daily'], 1)}) is lower
+because a dip buyer's days are negatively autocorrelated; on monthly sums it is {fmt(fs['tstat_monthly'], 1)}.</p></section>
 <section><h2>How the research ran</h2>
 <ul>
 <li>One objective for every regime: the lowest of the three window Sharpe ratios, so a rule that buys one regime at the cost of another does not raise it.</li>
 <li>Keep gates against the incumbent: no window more than 0.10 worse, the 10 best days removed, every single calendar year removed, positive years,
-0.05 of objective per added parameter, ±20% parameter plateaus, and RSI, EMA and VWAP each measurably used.</li>
-<li>Researchers worked in parallel with one lens each; every candidate was re-run and audited by an independent agent before the lead decided.</li>
+0.05 of objective per added parameter, ±20% parameter plateaus; and, for the final strategy, switching off RSI, EMA or VWAP must change the
+target weights on at least 5% of sessions.</li>
+<li>Researchers worked in parallel with one lens each; each lens's best candidate was re-run and audited by an independent agent before the lead decided.</li>
 <li>Two amendments and one merge were written into <code>program.md</code> before the next round, and before any look at 2011–2016.</li>
 </ul>
 <div style="margin-top:14px">{rounds_tab}</div></section>
 <section class="callout"><h2>Bottom line</h2>
 <p>2024–2026 is now positive ({fmt(m['sharpe_oos'])}) and 2020–2026 strong ({fmt(m['sharpe_full'])}), but both windows were used to choose the rules.
-The evidence that was not is the deep hold-out ({fmt(dfin['sharpe_deep'])}), the walk-forward re-selection and the joint parameter moves.
+The only evidence that was not is the deep hold-out ({fmt(dfin['sharpe_deep'])}, 95% interval {fmt(fs['ci95'][0])} to {fmt(fs['ci95'][1])}), where the
+pullback strategies are the only positive ones. After charging for every logged try, the 2017–2026 Sharpe is not statistically significant
+(deflated Sharpe ratio {fmt(dsr['dsr'])}).
 The strategy is a low-exposure liquidity-provision sleeve, sensitive to costs and to a few rebound days. Paper-trade it with the kill rules
 of RCG-RN-REV-002 fixed before the first trade.</p></section>
 <section><h2>Reproduce</h2>

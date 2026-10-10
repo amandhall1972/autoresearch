@@ -68,17 +68,17 @@ def deflated_sharpe(ex: np.ndarray, trial_sharpes_ann) -> dict:
         return {"n_trials": N, "sr0_ann": 0.0, "dsr": psr(ex, 0.0)}
     v = trials.var(ddof=1)
     sr0 = math.sqrt(v) * ((1 - EULER) * norm_ppf(1 - 1.0 / N) + EULER * norm_ppf(1 - 1.0 / (N * math.e)))
-    return {"n_trials": int(N), "sr0_ann": round(sr0 * math.sqrt(P.TRADING_DAYS), 4), "dsr": round(psr(ex, sr0), 4)}
+    return {"n_trials": int(N), "sr0_ann": round(sr0 * math.sqrt(P.TRADING_DAYS), 6), "dsr": round(psr(ex, sr0), 6)}
 
 
 def yearly_table(ret: pd.Series, rf: pd.Series, bench: pd.Series, bees: pd.Series, expo: pd.Series) -> pd.DataFrame:
     rows = []
     for y, r in ret.groupby(ret.index.year):
         rfy = rf.loc[r.index]; b = bench.loc[r.index]; e = bees.loc[r.index]
-        rows.append(dict(year=y, strat_ret=round((1 + r).prod() - 1, 4), strat_sharpe=round(P.sharpe(r, rfy), 2),
-                         strat_maxdd=round(P.max_drawdown(r), 4), exposure=round(float(expo.loc[r.index].mean()), 2),
-                         nifty_ret=round((1 + b).prod() - 1, 4), nifty_sharpe=round(P.sharpe(b, rfy), 2),
-                         bees_ret=round((1 + e).prod() - 1, 4), rf=round((1 + rfy).prod() - 1, 4)))
+        rows.append(dict(year=y, strat_ret=round((1 + r).prod() - 1, 6), strat_sharpe=round(P.sharpe(r, rfy), 4),
+                         strat_maxdd=round(P.max_drawdown(r), 6), exposure=round(float(expo.loc[r.index].mean()), 4),
+                         nifty_ret=round((1 + b).prod() - 1, 6), nifty_sharpe=round(P.sharpe(b, rfy), 4),
+                         bees_ret=round((1 + e).prod() - 1, 6), rf=round((1 + rfy).prod() - 1, 6)))
     return pd.DataFrame(rows)
 
 

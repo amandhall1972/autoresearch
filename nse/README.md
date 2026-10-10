@@ -9,7 +9,7 @@ The question after v1: which changes make 2024-2026 positive as well, and the st
 2020-2026? Protocol v4 (`program.md`) researched on every window seen so far at once and maximised the **worst** of
 the three window Sharpes, gated against regime trading, best-day dependence, single calendar years, parameter peaks
 and non-use of RSI/EMA/VWAP. Five rounds, 3,559 logged variants and 20 independent audits later, the final strategy
-(`strategy.py`, identical to `v4/inc1_pullback.py`) buys broad pullbacks inside uptrends:
+(`strategy.py`, the same code as `v4/inc1_pullback.py`) buys broad pullbacks inside uptrends:
 
 1. **Trigger** (EMA, VWAP): the NIFTY 50 closes above its EMA(100) and more than 60 % of the members in their own
    uptrend (close above their EMA(100)) close below their 10-day VWAP.
@@ -26,17 +26,19 @@ and non-use of RSI/EMA/VWAP. Five rounds, 3,559 logged variants and 20 independe
 | 2011-04 → 2016-05 | **deep hold-out, sealed, scored once at the end** | **0.68** | 13.5 % | −5.0 % | 0.01 | −0.09 |
 
 CAGR includes the repo rate earned on idle capital: the book averages 16 % invested (stocks held on 35 % of
-sessions, 5.7 names when invested), turnover 13x a year, 9 of 10 calendar years with a positive excess return.
+sessions, 5.7 names when invested), turnover 13x a year; it beat cash in 8 of 10 calendar years, was level with it in
+2018 and trailed it in 2026 (to October).
 
 **What this means.** 2024-2026 is positive and 2020-2026 strong, but all three research windows were used to
-choose the rules, so those numbers are selection statistics. The evidence that is not: on the deep hold-out
-(2011-2016, built for this study and scored once for a registered set) the final scores 0.68 while the NIFTY was
-flat over cash (0.01); only the three pullback strategies are positive there and every trend-timing strategy,
-v1 and the EMA timer included, is negative. Walk-forward re-selection gives 1.01 over 2019-2026 (0.77 on
-2024-26). Read the point estimate lower than 0.79: moving every parameter by up to ±20 % at once gives a mean
-worst-window Sharpe of 0.60, the deflated Sharpe over 3,490 trials is 0.77, and costs bite (worst window 0.56 at
-25 bps, 0.21 at 40 bps). It earns much of its return on a few rebound days (48 % of the 2017-2026 excess in its 10
-best days). Paper-trade it with `signals.py` under the kill rules of RCG-RN-REV-002 before any allocation.
+choose the rules, so those numbers are selection statistics. The only evidence that is not: on the deep hold-out
+(2011-2016, built for this study and scored once for a registered set) the final scores 0.68 (95 % bootstrap
+interval 0.13 to 1.28) while the NIFTY was flat over cash (0.01); only the three pullback strategies are positive
+there and every trend-timing strategy, v1 and the EMA timer included, is negative. Expect less than 0.79: moving
+every parameter by up to ±20 % at once gives a mean worst-window Sharpe of 0.60 (a measure of how fragile the fit
+is, on the same years), costs bite (worst window 0.56 at 25 bps, 0.21 at 40 bps), and the deflated Sharpe ratio, the
+probability that the true 2017-2026 Sharpe beats what the best of 3,490 logged tries would reach by luck, is 0.77,
+below the conventional 0.95. It earns much of its return on a few rebound days (48 % of the 2017-2026 excess in its
+10 best days). Paper-trade it with `signals.py` under the kill rules of RCG-RN-REV-002 before any allocation.
 
 ## The v1 record (protocol v1-v3, RCG-RN-REV-001)
 
@@ -94,7 +96,8 @@ python validate4.py --strategy strategy.py     # costs, bootstrap, DSR, sensitiv
 python lineage4.py                             # every protocol-v4 strategy on every seen window
 python compare4.py CANDIDATE --incumbent strategy.py --years   # the keep gates for a new candidate
 python deep_holdout.py --data-report           # deep hold-out data checks (runs no strategy)
-python deep4.py --final strategy.py            # the one deep look (refuses a second look at any file content)
+python deep4.py --final strategy.py            # the one deep look (refuses a second look at any code already scored)
+python deep4.py --rebuild-report               # deep report + sampling error from the saved returns (no look)
 python make_report.py && python make_page.py   # reports/REPORT.md and reports/index.html
 python make_pdf_v4.py                          # reports/RCG-RN-REV-002_RSI-EMA-VWAP_Nifty50_v2.pdf (needs brand/)
 python signals.py --capital 1000000 --holdings my_holdings.csv   # next-open orders for paper trading
@@ -233,11 +236,13 @@ of the repo rate.
 * **Keep gates** (`compare4.py`, `plateau4.py`): improves the objective; no window more than 0.10 below the incumbent;
   2017-26 Sharpe without its 10 best days above the incumbent's; still better with any one calendar year left out;
   at least as many positive years; 0.05 of objective per added parameter; ±20 % neighbours of every parameter beat
-  the incumbent and keep 60 % of the margin; RSI, EMA and VWAP each move at least 5 % of sessions when switched off;
-  sanity floors (invested ≥ 30 % of days, diversified, turnover ≤ 40x, drawdown above −30 %, no lookahead).
+  the incumbent and keep 60 % of the margin;
+  sanity floors (invested ≥ 30 % of days, diversified, turnover ≤ 40x, drawdown above −30 %, no lookahead). The
+  final strategy must also be compliant: switching off RSI, EMA or VWAP changes its target weights on at least 5 %
+  of sessions.
 * **Audits**: every round's best candidate per lens was re-run by an independent agent that re-checked every gate,
-  moved all parameters at once (60 draws), removed each window's best days, tested 25 and 40 bps, ablated every rule
-  and read the code. Amendments (v4.1, v4.2) and merges were recorded in `program.md` before the next round.
+  removed each window's best days, tested 25 and 40 bps, ablated every rule and read the code; from round 3 the audits
+  also moved all parameters at once (60 draws). Amendments (v4.1, v4.2) and merges were recorded in `program.md` before the next round.
 * **Deep hold-out**: 2011-04-01 → 2016-05-31 on the point-in-time Nifty 50 of 2008-2016 (47-49 members with bars;
   documented corrections for the 2010 Grasim demerger, Bajaj Auto's 2008 demerger, a vendor gap in HDFC, one
   exchange holiday and the Muhurat sessions; NIFTY and BANK NIFTY gaps rebuilt from constituents). Built before
