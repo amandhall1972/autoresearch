@@ -26,20 +26,34 @@ def main():
     doc = re.search(r'"""(.*?)"""', src, re.S).group(1).strip()
     L = []
     L += ["# RSI + EMA + VWAP on the Nifty 50 universe, 2020-2026: final report", "",
-          f"Branch `autoresearch/oct9-nse`. {len(tsv)} experiments logged, {len(keeps)} kept. "
+          f"Branch `autoresearch/oct9-nse`. {len(tsv)} experiments logged, {len(keeps)} kept "
+          f"(including {(keeps.description.str.startswith('[harness]')).sum()} harness re-measurement of an incumbent). "
           f"Objective: in-sample Sharpe (2020-01-01..2023-12-31, net of 15 bps one-way costs, next-open execution). "
           f"The 2024-01-01..2026-10-09 window was never used by the loop (validation window, see below); the 2017-2019 "
           f"pre-sample hold-out was sealed until the end and scored once for the pre-registered incumbent lineage.", ""]
-    L += ["## Headline", "", "| | Sharpe IS | Sharpe OOS | Sharpe FULL | CAGR FULL | maxDD FULL | turnover/yr | exposure |", "|---|---|---|---|---|---|---|---|"]
-    L.append(f"| **final strategy** | {m['sharpe_is']} | {m['sharpe_oos']} | {m['sharpe_full']} | {m['cagr_full']} | {m['maxdd_full']} | {m['turnover_yr_full']} | {m['exposure_full']} |")
+    lin = load(os.path.join(R, "lineage.json"))
+    pre_f = lin[-1].get("sharpe_pre") if lin else None
+    pre_b = lin[0].get("sharpe_pre") if lin else None
+    pre_n = lin[-1].get("bench_sharpe_pre") if lin else None
+    pv = lambda x: "-" if x is None else x
+    L += ["## Headline", "", "| | Sharpe IS 2020-23 | Sharpe 2024-26 | Sharpe hold-out 2017-19 | Sharpe FULL 2020-26 | CAGR FULL | maxDD FULL | turnover/yr | exposure |",
+          "|---|---|---|---|---|---|---|---|---|"]
+    L.append(f"| **final strategy** | {m['sharpe_is']} | {m['sharpe_oos']} | {pv(pre_f)} | {m['sharpe_full']} | {m['cagr_full']} | {m['maxdd_full']} | {m['turnover_yr_full']} | {m['exposure_full']} |")
     if b:
-        L.append(f"| baseline (first run) | {b['sharpe_is']} | {b['sharpe_oos']} | {b['sharpe_full']} | {b['cagr_full']} | {b['maxdd_full']} | {b['turnover_yr_full']} | {b['exposure_full']} |")
-    L.append(f"| NIFTY 50 price index | {m['bench_sharpe_is']} | {m['bench_sharpe_oos']} | {m['bench_sharpe_full']} | {m['bench_cagr_full']} | - | - | 1.0 |")
+        L.append(f"| baseline (first run) | {b['sharpe_is']} | {b['sharpe_oos']} | {pv(pre_b)} | {b['sharpe_full']} | {b['cagr_full']} | {b['maxdd_full']} | {b['turnover_yr_full']} | {b['exposure_full']} |")
+    L.append(f"| NIFTY 50 price index | {m['bench_sharpe_is']} | {m['bench_sharpe_oos']} | {pv(pre_n)} | {m['bench_sharpe_full']} | {m['bench_cagr_full']} | - | - | 1.0 |")
+    if lin and pre_f is not None:
+        neg_oos = sum(o["sharpe_oos"] < 0 for o in lin); neg_pre = sum(o.get("sharpe_pre", 0) < 0 for o in lin)
+        best = max(lin, key=lambda o: o.get("sharpe_pre", -9))
+        L += ["", f"**Verdict.** The loop raised the in-sample Sharpe from {pv(b and b['sharpe_is'])} to {m['sharpe_is']}; the gain did not carry over. "
+              f"On 2024-26 the final strategy scores {m['sharpe_oos']} (baseline {pv(b and b['sharpe_oos'])}, Nifty {m['bench_sharpe_oos']}); "
+              f"{neg_oos} of {len(lin)} kept strategies are negative there and {neg_pre} of {len(lin)} on the sealed 2017-19 hold-out "
+              f"(final {pre_f}, baseline {pv(pre_b)}, best {best['stage']} `{best['commit']}` at {best['sharpe_pre']}; buy-and-hold Nifty {pv(pre_n)}). "
+              "The in-sample figure measures fit to 2020-2023, not expected return; see the lineage and diagnostics sections below."]
     yt = pd.DataFrame(final["yearly"])
     L += ["", f"Cash (RBI repo) returned {', '.join(f'{r.year}: {r.rf:.1%}' for r in yt.itertuples())}.", ""]
     L += ["![equity](equity.png)", "", "![rolling](rolling_sharpe.png)", "", "![yearly](yearly.png)", ""]
     L += ["## The strategy", "", "```", doc, "```", "", f"Parameters: `{json.dumps(final['params'])}`", ""]
-    lin = load(os.path.join(R, "lineage.json"))
     if lin:
         has_pre = "sharpe_pre" in lin[0]
         L += ["## Incumbent lineage on every window", "",
@@ -51,6 +65,14 @@ def main():
             L.append(f"| {o['stage']} | {o['commit']} | {o['sharpe_is']} | {o['sharpe_is_h1']} | {o['sharpe_is_h2']} | {o['sharpe_oos']} | {o['sharpe_full']} |"
                      + (f" {o['sharpe_pre']} | {o['bench_sharpe_pre']} |" if has_pre else ""))
         L += ["", "![lineage](lineage.png)", ""]
+    dpath = os.path.join(R, "diagnostics.md")
+    if os.path.exists(dpath):
+        dmd = open(dpath).read().split("## Every spell", 1)[0]
+        dmd = dmd.split("\n", 1)[1].replace("\n## ", "\n### ")   # drop the file title, demote headings
+        L += ["## Diagnostics: why it fails after 2023", "",
+              "An invested spell runs from a regime switch-on to the switch-off; excess is its return over cash. "
+              "The selection edge compares the next-20-session return of the names a cohort bought with the average member "
+              "on the same days (`python diagnose.py`; every spell is listed in `reports/diagnostics.md`).", "", dmd.strip(), ""]
     L += ["## Research log (kept experiments)", "", "| # | commit | Sharpe IS | Sharpe OOS | Sharpe FULL | maxDD IS | turnover/yr | description |", "|---|---|---|---|---|---|---|---|"]
     for i, r in keeps.iterrows():
         L.append(f"| {i} | {r.commit} | {r.sharpe_is} | {r.sharpe_oos} | {r.sharpe_full} | {r.maxdd_is} | {r.turnover_yr} | {r.description} |")

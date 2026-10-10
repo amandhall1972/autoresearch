@@ -94,6 +94,22 @@ pre-registered report-only columns): every candidate lost money there even befor
 * The keep rule gained the in-sample robustness gates above, to stop the loop from buying fragile
   timing rules with in-sample Sharpe.
 
+## Outcome (loop closed 2026-10-10)
+
+The loop ran its 8 permitted rounds (round 8 gained 0.23, so the dry-round rule never fired) and is
+closed. `sharpe_is` went 0.77 (baseline `3659aab`) → 5.09 (final `c44574d`) through 15 merged
+incumbents, each passing the gates above. The pre-registered lineage was then scored on the sealed
+2017-04..2019-12 hold-out exactly once per strategy (`reports/holdout_log.tsv`, 16 rows): all 16 are
+negative (baseline −1.08, best −0.27 at keep 8 `34b6420`, final −0.72; buy-and-hold Nifty +0.42).
+On 2024-2026 every incumbent is negative as well (final −1.06). In-sample robustness gates
+(halves, drop-5, plateaus, leave-one-spell-out) did not prevent the overfit: they test stability
+inside 2020-2023, and the strategy's edge in those years (timed, concentrated cohorts riding the
+post-Covid up-legs) did not exist before or after them. Full analysis: `reports/REPORT.md`,
+`reports/lineage.md`, `reports/diagnostics.md`.
+
+Any further research must not reuse the 2017-2019 or 2024-2026 windows as tests. Both have now been
+seen. The only clean test left is forward data (paper-trading with `signals.py` from 2026-10-10 on).
+
 ## Output format
 
 ```

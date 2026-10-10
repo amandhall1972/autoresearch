@@ -169,10 +169,14 @@ def main():
     eq_chart = line_chart([("Strategy (net of costs)", eq["strategy"], "--accent", 2.2),
                            ("NIFTYBEES buy & hold", eq["niftybees"], "--bench", 1.4)],
                           shade=("2024-01-01", str(eq.index[-1].date()), "validation window (not used by the loop)"))
-    hold_chart = ""
+    hold_chart = ""; hold_note = ""
     if hold is not None:
         hs = (1 + hold["strategy"]).cumprod(); hb = (1 + hold["niftybees"].fillna(0)).cumprod()
         hold_chart = line_chart([("Strategy (net of costs)", hs, "--accent", 2.2), ("NIFTYBEES buy & hold", hb, "--bench", 1.4)], height=260)
+        yrs = len(hold) / 252.0
+        hold_cash = (1 + hold["cash"]).prod() ** (1 / yrs) - 1
+        hold_note = (f" The strategy grew {fmt(hs.iloc[-1] ** (1 / yrs) - 1, 1, pct=True)} a year and the Nifty {fmt(hb.iloc[-1] ** (1 / yrs) - 1, 1, pct=True)},"
+                     f" while cash earned {fmt(hold_cash, 1, pct=True)}; Sharpe is measured over cash, so the strategy's is negative.")
     lin_groups = [(o["stage"].replace("keep ", "#"), {"is": o["sharpe_is"], "oos": o["sharpe_oos"], "pre": o.get("sharpe_pre")}) for o in lin]
     lin_keys = [("is", "2020–23 (selected on)", "--accent"), ("oos", "2024–26 (validation)", "--neg")]
     if lin and "sharpe_pre" in lin[0]:
@@ -198,11 +202,13 @@ def main():
         srow = [[per, s.get("spells"), fmt(s.get("hit_rate"), 0, pct=True), (fmt(s.get("mean_spell_excess"), 2, pct=True), cls(s.get("mean_spell_excess"))),
                  fmt(s.get("mean_excess_when_nifty_up"), 2, pct=True), fmt(s.get("mean_excess_when_nifty_down"), 2, pct=True), fmt(s.get("cost_drag_per_yr"), 2, pct=True)]
                 for per, s in dg["summary"].items()]
-        diag_html = table(["Window", "Invested spells", "Spells won", "Mean spell excess", "…when the Nifty rose", "…when the Nifty fell", "Cost drag / yr"], srow)
-        edge = table(["Year", "Formation days", "Names bought: next 20 sessions", "All members", "Selection edge"],
+        diag_html = ("<p>An invested spell runs from a regime switch-on to the switch-off. Excess is the spell's return over cash; "
+                     "the two middle columns split the spells by whether the Nifty rose or fell over the same days.</p>"
+                     + table(["Window", "Spells", "Won", "Mean excess", "Nifty up", "Nifty down", "Cost drag / yr"], srow))
+        edge = table(["Year", "Formation days", "Bought: next 20 sessions", "All members", "Selection edge"],
                      [[r["year"], r["formation_days"], fmt(r["fwd20_bought"], 2, pct=True), fmt(r["fwd20_all_members"], 2, pct=True),
                        (fmt(r["edge"], 2, pct=True, sign=True), cls(r["edge"]))] for r in dg["selection_edge_by_year"]])
-        diag_html += "<p>Does the stock selection itself still work? The table compares the next-20-session return of the names a cohort bought with the average member on the same days.</p>" + edge
+        diag_html += "<p style='margin-top:20px'>Does the stock selection itself still work? The table compares the next-20-session return of the names a cohort bought with the average member on the same days.</p>" + edge
     rounds_line = ", ".join(f"round {k}: {n}" for k, n in sorted(rounds.items()))
     p = S.PARAMS
     rules = [
@@ -210,9 +216,11 @@ def main():
         ("Entry (EMA)", f"EMA{p['ema_fast']} above EMA{p['ema_slow']}, but not more than {p['ema_spread'] * 100:g}% above it."),
         ("Entry (VWAP)", f"Close above the {p['vwap_n']}-day VWAP."),
         ("Entry (RSI)", f"EMA{p['rsi_smooth']}-smoothed RSI({p['rsi_n']}) below {p['rsi_hi']:g}, with no reading above {p['rsi_peak']:g} in the last {p['rsi_peak_n']} days; the name's volatility expansion (vol20/vol120) is not in the members' top third."),
-        ("Cohort", "One basket is bought on the day the regime switches on and then left to ride: no rebalancing, no replacement buys. Weights favour low stock-specific risk, the strongest short-term VWAP position and names without recent news shocks; no name above 40%."),
-        ("Sizing", f"A fresh basket is scaled down when the Bank Nifty has just become more volatile than usual, and halved after a whipsaw; the riding book is trimmed to a {p['vol_cap'] * 100:g}% volatility budget from its third day."),
-        ("Exits", "A name is sold on a close below 0.985 × its 20-day VWAP, when its 3-day VWAP drops under its 50-day VWAP, on a stock-specific shock or a 4× volume spike; the rest of the basket goes once most of it has been stopped out, and everything is sold when the regime switches off."),
+        ("Cohort", f"One basket is bought on the day the regime switches on and then left to ride: no rebalancing, no replacement buys. Weights are single-index mean-variance (shrunk beta over stock-specific variance), tilted to the strongest {p['vwap_short_n']}-day VWAP position and away from names with a recent shock or volume spike; no name above {p['w_cap'] * 100:g}%, the excess parked in NIFTYBEES."),
+        ("Re-entry", f"After a stand-aside at RSI {p['regime_rsi_max']:g}, the book re-enters with the {p['re_k']} names that score highest on VWAP{p['vwap_n']}/VWAP{p['vwap_long_n']} momentum times RSI strength relative to the index."),
+        ("Sizing", f"A fresh basket is scaled down when the Bank Nifty has just become more volatile than usual ({p['vol_n']}- vs {p['vol_long_n']}-day vol), and bought at {p['whipsaw_size'] * 100:g}% after a whipsaw of {p['whipsaw_days']} days or fewer."),
+        ("While held", f"From day {p['vol_cap_delay'] + 1} the bottom {p['rerank_drop'] * 100:.0f}% of the book by its own score is sold once, and the book is trimmed to a {p['vol_cap'] * 100:g}% volatility budget, least-liked names first. When market breadth (share of members above VWAP{p['vwap_n']}) dips more than {p['dip_k'] * 100:g} points below its average and turns up, the surviving names are topped up with idle cash within that budget."),
+        ("Exits", f"A name is sold on a close below {p['vwap_exit']:g} × its {p['vwap_n']}-day VWAP, when its {p['vwap_short_n']}-day VWAP drops under its {p['vwap_long_n']}-day VWAP, on a stock-specific shock ({p['shock_k']:g} residual sigmas) or a {p['vspike_k']:g}× volume spike. Once {(1 - p['exhaust']) * 100:g}% of the basket has been sold the rest goes too, and everything is sold when the regime switches off."),
         ("Execution", "Signals on the close, orders at the next open, 15 bps one-way cost (STT, fees, slippage), idle cash earns the RBI repo rate."),
     ]
     rules_html = "".join(f"<div class='rule'><dt>{esc(a)}</dt><dd>{esc(b_)}</dd></div>" for a, b_ in rules)
@@ -289,7 +297,7 @@ footer {{ color:var(--muted); font-size:13px }}
 <p>Every strategy the loop kept, re-scored on the final harness. In-sample Sharpe rises at each stage; the 2024–2026 column shows how much of that carried over{', and the sealed 2017–2019 column is the first and only look at those years' if lin and 'sharpe_pre' in lin[0] else ''}.</p>
 {lin_chart}
 {lin_tab}</section>
-{"<section><h2>Sealed hold-out, April 2017 – December 2019</h2><p>Point-in-time Nifty 50 of those years, including 11 names that left the index before 2020. Scored once, after the research ended.</p>" + hold_chart + "</section>" if hold_chart else ""}
+{"<section><h2>Sealed hold-out, April 2017 – December 2019</h2><p>Point-in-time Nifty 50 of those years, including 11 names that left the index before 2020. Scored once, after the research ended." + hold_note + "</p>" + hold_chart + "</section>" if hold_chart else ""}
 <section><h2>The strategy</h2><dl class="rules">{rules_html}</dl></section>
 <section><h2>Year by year</h2>{yearly}</section>
 <section><h2>Robustness checks</h2>
