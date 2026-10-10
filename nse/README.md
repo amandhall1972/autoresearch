@@ -102,7 +102,7 @@ python deep4.py --rebuild-report               # deep report + sampling error fr
 python make_report.py && python make_page.py   # reports/REPORT.md and reports/index.html
 python make_pdf_v4.py                          # reports/RCG-RN-REV-002_RSI-EMA-VWAP_Nifty50_v2.pdf (needs brand/)
 python signals.py --capital 1000000 --holdings my_holdings.csv   # next-open orders for paper trading
-python -m pytest -q tests                      # 87 tests (brand, deep-data and report tests skip when absent)
+python -m pytest -q tests                      # 88 tests (brand, deep-data and report tests skip when absent)
 
 # the v1 record (protocol v1-v3)
 python run.py --strategy v4/v1_final.py        # in-sample metrics + lookahead check (~10 s)
@@ -149,7 +149,7 @@ python make_pdf.py                 # reports/RCG-RN-REV-001_RSI-EMA-VWAP_Nifty50
 | `fetch_fmp.py` | reproduction fetcher (needs an FMP API key) |
 | `ingest_tool_results.py` | dev helper that converted the MCP tool dumps into `data/raw` (`--out data/raw_presample` for the hold-out names) |
 
-Run: `python run4.py --strategy strategy.py` (≈15 s, most of it the dense lookahead check). Tests: `python -m pytest -q tests` (87 tests).
+Run: `python run4.py --strategy strategy.py` (≈15 s, most of it the dense lookahead check). Tests: `python -m pytest -q tests` (88 tests).
 
 ## Data
 

@@ -461,7 +461,26 @@ PARAMS_FOR_CHART = {}
 # ---------------------------------------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------------------------------------
+SHARED = ("DOC_ID", "DOC_VERSION", "DOC_TITLE", "DOC_SUBTITLE", "ST", "Pp", "P_ETF")
+
+
 def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
+    """Build the note. It borrows make_pdf's page furniture by setting that module's document globals; they are
+    restored afterwards so a later make_pdf.build in the same process still produces RCG-RN-REV-001."""
+    saved = {k: getattr(M, k) for k in SHARED if hasattr(M, k)}
+    fig_n = M.FIG["n"]
+    try:
+        return _build(out, date, strategy_path, reports)
+    finally:
+        for k in SHARED:
+            if k in saved:
+                setattr(M, k, saved[k])
+            elif hasattr(M, k):
+                delattr(M, k)
+        M.FIG["n"] = fig_n
+
+
+def _build(out, date, strategy_path, reports):
     global PARAMS_FOR_CHART
     B.check_assets()
     B.register_reportlab_fonts()

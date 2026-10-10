@@ -189,3 +189,11 @@ def test_review_corrections_hold(built):
     assert "beat the EMA timer in every window" not in prose and "beats the EMA timer in every window" not in prose
     assert "not out of sample either" in prose                             # walk-forward reuses the chosen-on years
     assert "interval" in prose and "t-statistic" in prose                  # the deep result carries its sampling error
+
+
+@needs_build
+def test_build_restores_the_v1_note_settings(built):
+    """make_pdf_v4 borrows make_pdf's page furniture; after it builds, make_pdf must still describe RCG-RN-REV-001."""
+    import make_pdf
+    assert make_pdf.DOC_ID == "RCG-RN-REV-001"
+    assert "v2" not in make_pdf.DOC_TITLE
