@@ -2560,3 +2560,471 @@ v4-3	core	0.6788	1.1193	1.0723	0.6788	0.9657	0.9317	6.82	perturb	joint +-20 pct 
 v4-3	core	0.6677	0.9418	1.0358	0.6677	0.8997	0.9031	12.69	perturb	joint +-20 pct draw 9: core_fast=16, core_slow=58, core_share=0.1974, trend_n=102, breadth_cut=0.5573, rsi_n=3, rsi_max=16.2016, vwap_n=9, max_hold=16, slots=10
 v4-3	core	0.7005	0.9517	1.0487	0.7005	0.9233	0.9223	6.75	perturb	joint +-20 pct draw 10: core_fast=24, core_slow=53, core_share=0.1943, trend_n=101, breadth_cut=0.6895, rsi_n=3, rsi_max=20.7223, vwap_n=11, max_hold=19, slots=12
 v4-3	core	0.5148	0.5148	0.8354	0.8249	0.7463	0.8237	18.43	perturb	joint +-20 pct draw 11: core_fast=22, core_slow=58, core_share=0.1721, trend_n=117, breadth_cut=0.4812, rsi_n=3, rsi_max=22.4842, vwap_n=9, max_hold=19, slots=14
+v4-4	event	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	reference	incumbent 1 reference (no change)
+v4-4	event	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	core explore: none (sanity = inc1)
+v4-4	event	0.6396	0.7126	1.1241	0.6396	0.8892	0.9515	13.33	discard	core explore: trend_split share 0.2
+v4-4	event	0.3983	0.5778	1.0554	0.3983	0.7634	0.8266	13.51	discard	core explore: trend_split share 0.4
+v4-4	event	0.7452	0.8938	1.2326	0.7452	1.0107	1.0581	11.27	discard	core explore: r0_split share 0.2
+v4-4	event	0.6027	0.9009	1.2701	0.6027	0.9975	1.0364	9.4	discard	core explore: r0_split share 0.4
+v4-4	event	0.5725	0.659	1.2119	0.5725	0.9047	0.9865	16.97	discard	core explore: trend_idle share 0.2
+v4-4	event	0.3006	0.5041	1.2513	0.3006	0.8195	0.9204	20.83	discard	core explore: trend_idle share 0.4
+v4-4	event	0.691	0.8231	1.2695	0.691	0.9996	1.0638	15.51	discard	core explore: r0_idle share 0.2
+v4-4	event	0.5239	0.7995	1.3664	0.5239	1.0007	1.0712	17.91	discard	core explore: r0_idle share 0.4
+v4-4	event	0.5991	0.652	1.1347	0.5991	0.8705	0.9443	17.62	discard	core explore: trend_free share 0.2
+v4-4	event	0.366	0.501	1.1005	0.366	0.7588	0.8427	22.13	discard	core explore: trend_free share 0.4
+v4-4	event	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	standalone stream broad
+v4-4	event	-1.0261	-1.0261	-0.2722	0.3737	-0.3049	-0.0391	23.31	discard	standalone stream idio
+v4-4	event	-0.6186	-0.6186	0.0862	0.6228	0.0414	0.2705	27.18	discard	standalone stream any
+v4-4	event	-0.1502	0.2505	0.7181	-0.1502	0.3773	0.4216	13.64	discard	standalone stream bees_trend
+v4-4	event	-0.6717	0.1488	0.8534	-0.6717	0.2245	0.2508	17.28	discard	standalone stream lowvol
+v4-4	event	-0.4255	-0.4255	0.6088	-0.3875	0.1173	0.273	11.03	discard	standalone stream ew_up
+v4-4	event	-0.3077	-0.3077	0.6276	0.0255	0.2221	0.3951	11.19	discard	standalone stream mom
+v4-4	event	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	stagger none (sanity)
+v4-4	event	0.5094	1.1476	0.8442	0.5094	0.8209	0.7263	6.92	discard	stagger cap 2 new names per day
+v4-4	event	0.825	1.08	0.825	0.9392	0.8904	0.8451	10.35	discard	stagger cap 4 new names per day
+v4-4	event	0.7671	1.0819	1.1102	0.7671	0.9978	0.9843	11.9	discard	stagger cap 6 new names per day
+v4-4	event	0.616	1.1969	0.774	0.616	0.8151	0.7102	9.18	discard	stagger streak cap 3 per trigger day in streak
+v4-4	event	0.7671	1.0699	1.0913	0.7671	0.986	0.9719	11.94	discard	stagger streak cap 6 per trigger day in streak
+v4-4	event	0.684	1.0274	1.0732	0.684	0.9498	0.9334	9.09	discard	stagger half slot day1, top up on next trigger day if still eligible
+v4-4	event	0.6394	0.745	1.1101	0.6394	0.8912	0.9439	11.01	discard	stagger half slot day1, top up on next trigger day (any)
+v4-4	event	0.6259	1.1539	0.7772	0.6259	0.8104	0.7155	9.09	discard	stagger cap 3 new names per day
+v4-4	event	0.9101	1.1628	1.0392	0.9101	1.0179	0.9835	11.28	discard	stagger cap 5 new names per day
+v4-4	event	0.787	0.9869	1.1083	0.787	0.9803	0.9897	12.31	discard	stagger cap 7 new names per day
+v4-4	event	0.8261	0.9709	1.1271	0.8261	0.9945	1.015	12.58	discard	stagger cap 8 new names per day
+v4-4	event	0.9431	0.9431	0.953	1.0007	0.9292	0.9409	6.87	discard	stagger budget: all eligible bought, day budget 3 slots split equally
+v4-4	event	0.9063	0.9063	0.9616	0.9899	0.9243	0.9437	8.24	discard	stagger budget: all eligible bought, day budget 4 slots split equally
+v4-4	event	0.8558	0.8558	1.0047	1.0064	0.9443	0.9814	9.36	discard	stagger budget: all eligible bought, day budget 5 slots split equally
+v4-4	event	0.8087	0.8087	1.0288	1.0055	0.9472	0.9989	10.3	discard	stagger budget: all eligible bought, day budget 6 slots split equally
+v4-4	event	0.768	0.768	1.0583	0.9746	0.9504	1.0151	11.75	discard	stagger budget: all eligible bought, day budget 8 slots split equally
+v4-4	event	0.5512	0.5512	0.7937	0.9396	0.7515	0.8192	10.69	discard	stagger cap 4 new names per day, rank shallow
+v4-4	event	0.6642	0.6642	0.7739	0.8896	0.7626	0.799	11.49	discard	stagger cap 5 new names per day, rank shallow
+v4-4	event	0.786	0.786	0.8596	0.8684	0.828	0.8483	12.07	discard	stagger cap 6 new names per day, rank shallow
+v4-4	event	0.7841	0.7841	0.8801	1.1594	0.8925	0.9354	10.37	discard	stagger cap 4 new names per day, rank trend
+v4-4	event	0.669	0.669	0.955	0.8415	0.8419	0.9022	11.16	discard	stagger cap 5 new names per day, rank trend
+v4-4	event	0.7066	0.8188	0.9254	0.7066	0.829	0.8418	11.76	discard	stagger cap 6 new names per day, rank trend
+v4-4	event	0.6847	0.6847	0.7279	0.75	0.7139	0.7269	10.51	discard	stagger cap 4 new names per day, rank lowvol
+v4-4	event	0.5864	0.5864	0.9042	0.7395	0.7749	0.8398	11.35	discard	stagger cap 5 new names per day, rank lowvol
+v4-4	event	0.7292	0.7292	0.9473	0.9248	0.8765	0.9291	11.91	discard	stagger cap 6 new names per day, rank lowvol
+v4-4	event	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	budget file: day_budget 1.0 (sanity = inc1)
+v4-4	event	0.8558	0.8558	1.0047	1.0064	0.9443	0.9814	9.36	discard	budget 5/12 (=stagger budget 5 check)
+v4-4	event	0.7936	0.999	1.0314	0.7936	0.9456	0.9394	10.02	discard	budget 0.35 + topup of still-eligible held names on later trigger days
+v4-4	event	0.7961	0.9906	1.0416	0.7961	0.9491	0.9476	10.55	discard	budget 0.4 + topup of still-eligible held names on later trigger days
+v4-4	event	0.817	0.9569	1.0569	0.817	0.9541	0.9648	11.01	discard	budget 0.45 + topup of still-eligible held names on later trigger days
+v4-4	event	0.824	0.9167	0.824	1.0926	0.8804	0.8772	9.55	discard	budget by weight 0.33: all new eligible names split the day budget (no ranking), capacity = cash left
+v4-4	event	0.8488	0.9372	0.8488	1.0183	0.8861	0.8779	10.62	discard	budget by weight 0.42: all new eligible names split the day budget (no ranking), capacity = cash left
+v4-4	event	0.8929	0.8987	0.893	0.8929	0.873	0.8737	11.37	discard	budget by weight 0.5: all new eligible names split the day budget (no ranking), capacity = cash left
+v4-4	event	0.9594	1.0308	0.9863	0.9594	0.9598	0.9556	9.31	discard	budget 0.42 equal split, slots 10
+v4-4	event	0.8452	0.8452	0.9994	1.024	0.9452	0.9849	9.34	discard	budget 0.42 equal split, slots 14
+v4-4	event	0.8194	0.8194	1.0234	1.0422	0.9547	1.0056	9.39	discard	budget 0.42 equal split, max_hold 16
+v4-4	event	0.814	0.814	0.9968	0.9292	0.9136	0.9533	9.38	discard	budget 0.42 equal split, max_hold 24
+v4-4	event	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	exit file sanity (= inc1)
+v4-4	event	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	exit: also sell when RSI(3) > 100 - rsi_max (80)
+v4-4	event	0.3552	0.3552	0.6475	0.6096	0.5595	0.6241	16.82	discard	exit: also sell on first up close
+v4-4	event	0.0989	0.0989	0.7512	0.7425	0.5867	0.744	11.1	discard	exit: RSI(3) > 80 replaces VWAP reclaim
+v4-4	event	0.9101	1.1628	1.0392	0.9101	1.0179	0.9835	11.28	discard	CANDIDATE candidate.py: inc1 + at most max_new=5 new names per day (staggered entry)
+v4-4	event	0.9062	1.068	1.1161	0.9062	1.0346	1.0303	9.76	discard	plateau neighbour of candidate: trend_n=80
+v4-4	event	0.9008	0.9008	1.0416	0.9727	0.9752	1.0058	12.29	discard	plateau neighbour of candidate: trend_n=120
+v4-4	event	0.8275	0.8543	0.8275	1.0615	0.8821	0.8997	16.98	discard	plateau neighbour of candidate: breadth_cut=0.48
+v4-4	event	0.5152	1.4641	0.5152	0.5409	0.7502	0.5103	4.89	discard	plateau neighbour of candidate: breadth_cut=0.72
+v4-4	event	0.966	1.2411	0.966	0.9797	1.0185	0.9555	12.68	discard	plateau neighbour of candidate: rsi_n=2
+v4-4	event	0.6591	1.4024	1.1845	0.6591	1.0747	0.9995	8.16	discard	plateau neighbour of candidate: rsi_n=4
+v4-4	event	0.8508	1.3277	1.0886	0.8508	1.0579	0.9969	9.73	discard	plateau neighbour of candidate: rsi_max=16.0
+v4-4	event	0.8845	1.2907	1.0401	0.8845	1.0424	0.9742	12.26	discard	plateau neighbour of candidate: rsi_max=24.0
+v4-4	event	0.7315	1.2217	0.8756	0.7315	0.8931	0.813	13.21	discard	plateau neighbour of candidate: vwap_n=8
+v4-4	event	0.6225	0.927	0.7436	0.6225	0.7446	0.6915	9.25	discard	plateau neighbour of candidate: vwap_n=12
+v4-4	event	0.9678	1.1571	1.0365	0.9678	1.0292	1.0007	11.28	discard	plateau neighbour of candidate: max_hold=16
+v4-4	event	0.8243	1.2142	1.0364	0.8243	1.0069	0.9539	11.29	discard	plateau neighbour of candidate: max_hold=24
+v4-4	event	0.9061	1.0796	1.0228	0.9061	0.9902	0.9721	12.36	discard	plateau neighbour of candidate: slots=10
+v4-4	event	0.826	1.0915	0.9778	0.826	0.9491	0.9147	10.25	discard	plateau neighbour of candidate: slots=14
+v4-4	event	0.825	1.08	0.825	0.9392	0.8904	0.8451	10.35	discard	plateau neighbour of candidate: max_new=4
+v4-4	event	0.7671	1.0819	1.1102	0.7671	0.9978	0.9843	11.9	discard	plateau neighbour of candidate: max_new=6
+v4-4	event	0.5942	0.6259	0.5942	0.8586	0.6704	0.6874	20.27	discard	joint +-20% draw 0 of candidate (seed 20261010)
+v4-4	event	0.5181	0.6801	0.979	0.5181	0.7821	0.8204	12.51	discard	joint +-20% draw 1 of candidate (seed 20261010)
+v4-4	event	0.3378	1.1256	0.7472	0.3378	0.7125	0.6092	5.4	discard	joint +-20% draw 2 of candidate (seed 20261010)
+v4-4	event	0.2389	1.3131	0.7298	0.2389	0.7521	0.5642	4.88	discard	joint +-20% draw 3 of candidate (seed 20261010)
+v4-4	event	0.6286	1.5202	0.6658	0.6286	0.859	0.6413	5.93	discard	joint +-20% draw 4 of candidate (seed 20261010)
+v4-4	event	0.7781	0.7857	0.7781	0.8956	0.7984	0.809	16.45	discard	joint +-20% draw 5 of candidate (seed 20261010)
+v4-4	event	0.3686	0.3686	0.5946	0.9789	0.6236	0.7113	19.87	discard	joint +-20% draw 6 of candidate (seed 20261010)
+v4-4	event	1.0448	1.1109	1.0448	1.262	1.0927	1.0948	15.05	discard	joint +-20% draw 7 of candidate (seed 20261010)
+v4-4	event	0.73	1.0268	0.7384	0.73	0.7919	0.7283	13.81	discard	joint +-20% draw 8 of candidate (seed 20261010)
+v4-4	event	0.7759	1.025	0.7848	0.7759	0.8305	0.7656	8.09	discard	joint +-20% draw 9 of candidate (seed 20261010)
+v4-4	event	1.0162	1.0401	1.0162	1.1429	1.0228	1.0241	10.22	discard	joint +-20% draw 10 of candidate (seed 20261010)
+v4-4	event	0.7639	0.7844	0.7639	0.8715	0.7859	0.7921	14.15	discard	joint +-20% draw 11 of candidate (seed 20261010)
+v4-4	event	0.6169	0.902	0.8593	0.6169	0.7962	0.7696	13.6	discard	joint +-20% draw 12 of candidate (seed 20261010)
+v4-4	event	0.717	1.1425	0.813	0.717	0.8499	0.7662	6.6	discard	joint +-20% draw 13 of candidate (seed 20261010)
+v4-4	event	0.7354	1.0563	1.0576	0.7354	0.9603	0.9394	12.33	discard	joint +-20% draw 14 of candidate (seed 20261010)
+v4-4	event	0.7891	1.1456	0.7891	0.8112	0.8626	0.787	10.34	discard	joint +-20% draw 15 of candidate (seed 20261010)
+v4-4	event	0.6557	0.6749	0.6557	0.9127	0.7248	0.7457	16.93	discard	joint +-20% draw 16 of candidate (seed 20261010)
+v4-4	event	0.861	0.861	0.8886	0.9108	0.8756	0.8884	13.16	discard	joint +-20% draw 17 of candidate (seed 20261010)
+v4-4	event	0.883	0.883	0.9121	0.9002	0.8857	0.8979	12.41	discard	joint +-20% draw 18 of candidate (seed 20261010)
+v4-4	event	0.8197	0.8197	0.9171	1.0372	0.9079	0.9431	13.78	discard	joint +-20% draw 19 of candidate (seed 20261010)
+v4-4	event	0.3575	0.3575	0.8565	0.6838	0.6785	0.7903	17.68	discard	joint +-20% draw 20 of candidate (seed 20261010)
+v4-4	event	0.3354	0.3354	0.9077	0.8299	0.7291	0.8672	13.56	discard	joint +-20% draw 21 of candidate (seed 20261010)
+v4-4	event	0.7499	1.0999	0.9526	0.7499	0.9213	0.87	9.01	discard	joint +-20% draw 22 of candidate (seed 20261010)
+v4-4	event	0.7781	1.1799	0.7781	0.8104	0.8584	0.768	6.89	discard	joint +-20% draw 23 of candidate (seed 20261010)
+v4-4	event	0.644	1.0464	0.9474	0.644	0.8856	0.8369	6.85	discard	joint +-20% draw 24 of candidate (seed 20261010)
+v4-4	event	1.0075	1.0075	1.0301	1.15	1.0355	1.0551	16.47	discard	joint +-20% draw 25 of candidate (seed 20261010)
+v4-4	event	0.6143	1.0934	0.6143	0.7923	0.7621	0.6574	6.59	discard	joint +-20% draw 26 of candidate (seed 20261010)
+v4-4	event	0.6916	0.8904	0.943	0.6916	0.8587	0.848	7.42	discard	joint +-20% draw 27 of candidate (seed 20261010)
+v4-4	event	0.8092	0.8588	0.9345	0.8092	0.873	0.8839	15.3	discard	joint +-20% draw 28 of candidate (seed 20261010)
+v4-4	event	0.7738	0.8848	0.7738	0.8491	0.8043	0.7918	16.96	discard	joint +-20% draw 29 of candidate (seed 20261010)
+v4-4	event	0.2211	1.1185	0.4772	0.2211	0.5675	0.3899	5.23	discard	joint +-20% draw 30 of candidate (seed 20261010)
+v4-4	event	0.8655	1.0131	0.9846	0.8655	0.9417	0.9343	11.42	discard	joint +-20% draw 31 of candidate (seed 20261010)
+v4-4	event	0.2126	0.2126	0.7052	1.0101	0.6505	0.7998	15.77	discard	joint +-20% draw 32 of candidate (seed 20261010)
+v4-4	event	0.8832	0.9979	0.9762	0.8832	0.9398	0.9366	18.1	discard	joint +-20% draw 33 of candidate (seed 20261010)
+v4-4	event	0.9738	1.1526	1.0761	0.9738	1.0423	1.0284	13.17	discard	joint +-20% draw 34 of candidate (seed 20261010)
+v4-4	event	0.8413	1.0081	0.8413	0.9086	0.8757	0.8458	13.98	discard	joint +-20% draw 35 of candidate (seed 20261010)
+v4-4	event	0.6881	1.1052	0.9611	0.6881	0.9124	0.8574	8.64	discard	joint +-20% draw 36 of candidate (seed 20261010)
+v4-4	event	0.4956	1.2345	0.8547	0.4956	0.8522	0.7294	6.31	discard	joint +-20% draw 37 of candidate (seed 20261010)
+v4-4	event	0.3745	0.3745	0.6784	0.8281	0.6324	0.7194	17.93	discard	joint +-20% draw 38 of candidate (seed 20261010)
+v4-4	event	0.7054	1.2264	0.7054	0.7191	0.8208	0.693	9.99	discard	joint +-20% draw 39 of candidate (seed 20261010)
+v4-4	event	0.6417	1.0728	0.6417	0.845	0.7651	0.6859	8.39	discard	joint +-20% draw 40 of candidate (seed 20261010)
+v4-4	event	0.61	1.0369	1.023	0.61	0.9122	0.8779	8.99	discard	joint +-20% draw 41 of candidate (seed 20261010)
+v4-4	event	0.7467	0.9337	0.7467	0.9412	0.8286	0.8056	17.59	discard	joint +-20% draw 42 of candidate (seed 20261010)
+v4-4	event	0.7307	1.0354	0.7307	0.9547	0.8411	0.7976	11.19	discard	joint +-20% draw 43 of candidate (seed 20261010)
+v4-4	event	0.61	1.1614	0.9177	0.61	0.881	0.8062	7.56	discard	joint +-20% draw 44 of candidate (seed 20261010)
+v4-4	event	0.8318	0.9371	0.8749	0.8318	0.8643	0.847	15.71	discard	joint +-20% draw 45 of candidate (seed 20261010)
+v4-4	event	0.9018	1.1544	0.9018	0.9261	0.9392	0.8818	8.74	discard	joint +-20% draw 46 of candidate (seed 20261010)
+v4-4	event	0.3195	0.3195	0.798	1.0832	0.7451	0.8888	18.34	discard	joint +-20% draw 47 of candidate (seed 20261010)
+v4-4	event	0.7153	1.1432	1.0689	0.7153	0.9725	0.9407	12.07	discard	joint +-20% draw 48 of candidate (seed 20261010)
+v4-4	event	0.5418	1.3584	0.5418	0.7913	0.77	0.5998	6.66	discard	joint +-20% draw 49 of candidate (seed 20261010)
+v4-4	event	0.6732	0.6732	0.7374	0.8462	0.7407	0.7684	13.88	discard	joint +-20% draw 50 of candidate (seed 20261010)
+v4-4	event	0.6724	1.1571	0.8462	0.6724	0.8598	0.7777	9.89	discard	joint +-20% draw 51 of candidate (seed 20261010)
+v4-4	event	0.6019	0.6019	0.703	0.8737	0.7214	0.7641	16.9	discard	joint +-20% draw 52 of candidate (seed 20261010)
+v4-4	event	0.766	0.766	0.9045	0.9186	0.8574	0.8919	8.87	discard	joint +-20% draw 53 of candidate (seed 20261010)
+v4-4	event	0.3312	1.3755	0.5605	0.3312	0.698	0.4801	5.71	discard	joint +-20% draw 54 of candidate (seed 20261010)
+v4-4	event	0.8928	1.2697	0.9193	0.8928	0.9748	0.8921	10.35	discard	joint +-20% draw 55 of candidate (seed 20261010)
+v4-4	event	0.9081	1.3489	0.9081	0.9093	0.994	0.8915	13.59	discard	joint +-20% draw 56 of candidate (seed 20261010)
+v4-4	event	0.7204	1.2887	0.8849	0.7204	0.908	0.8096	4.25	discard	joint +-20% draw 57 of candidate (seed 20261010)
+v4-4	event	0.2868	1.405	0.6605	0.2868	0.754	0.5375	3.92	discard	joint +-20% draw 58 of candidate (seed 20261010)
+v4-4	event	0.6237	0.8359	0.6237	0.8624	0.736	0.7063	22.69	discard	joint +-20% draw 59 of candidate (seed 20261010)
+v4-4	sizing	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	check	sz.py mode=slots reproduces inc1 (check)
+v4-4	sizing	0.7691	0.7691	1.0553	0.9498	0.9494	1.013	15.16	discard	fewer larger slots: K=6 (1/K each, frozen)
+v4-4	sizing	0.8011	0.8011	1.1276	0.8192	0.9551	1.0117	14.47	discard	fewer larger slots: K=8 (1/K each, frozen)
+v4-4	sizing	0.8429	0.9341	1.1419	0.8429	0.9972	1.0302	13.82	discard	fewer larger slots: K=10 (1/K each, frozen)
+v4-4	sizing	0.3669	0.3669	0.8992	0.7659	0.7298	0.8472	22.77	discard	fill: all open positions rescaled daily to min(0.167,1/n_held), K=12
+v4-4	sizing	0.1326	0.1326	0.7685	0.7218	0.5918	0.7479	27.37	discard	fill: all open positions rescaled daily to min(0.250,1/n_held), K=12
+v4-4	sizing	0.6949	0.6949	1.0944	1.0203	0.9695	1.0605	14.53	discard	cap: frozen entry weight min(0.125, free capacity/n_new), K=12 deepest
+v4-4	sizing	0.689	0.689	1.0288	1.071	0.9489	1.0363	15.06	discard	cap: frozen entry weight min(0.167, free capacity/n_new), K=12 deepest
+v4-4	sizing	0.6374	0.6374	0.9844	1.0076	0.8982	0.986	15.38	discard	cap: frozen entry weight min(0.250, free capacity/n_new), K=12 deepest
+v4-4	sizing	0.5951	0.5951	1.0393	1.0021	0.9149	1.0188	14.57	discard	cap: frozen entry weight min(0.125, free capacity/n_new), no ranking, all eligible
+v4-4	sizing	0.5898	0.5898	0.9902	1.0503	0.9007	1.0041	15.13	discard	cap: frozen entry weight min(0.167, free capacity/n_new), no ranking, all eligible
+v4-4	sizing	0.5357	0.5357	0.9472	0.9839	0.8489	0.9537	15.48	discard	cap: frozen entry weight min(0.250, free capacity/n_new), no ranking, all eligible
+v4-4	sizing	0.3806	0.3806	0.8964	0.6749	0.7091	0.8134	18.09	discard	etf: on a trigger day the free capacity x1.0 goes to NIFTYBEES (frozen, trimmed when names enter), exit NIFTYBEES close>VWAP10 or max_hold
+v4-4	sizing	0.5175	0.5175	1.0194	0.779	0.8288	0.9288	15.59	discard	etf: on a trigger day the free capacity x0.5 goes to NIFTYBEES (frozen, trimmed when names enter), exit NIFTYBEES close>VWAP10 or max_hold
+v4-4	sizing	0.7502	0.7502	1.1081	0.7857	0.9269	0.9892	13.04	discard	invvol: frozen entry weight (1/K) x clip(median rv20/rv20, 1/2, 2), gross renormalised to <=1
+v4-4	sizing	0.6606	0.6606	1.0412	0.8645	0.8929	0.9709	13.0	discard	invvol: frozen entry weight (1/K) x clip(median rv60/rv60, 1/2, 2), gross renormalised to <=1
+v4-4	sizing	0.7797	0.953	1.1781	0.7797	1.0065	1.034	12.15	plateau	plateau neighbour of candidate (slots=10): trend_n=80
+v4-4	sizing	0.8342	0.8457	1.1302	0.8342	0.9697	1.0185	14.92	plateau	plateau neighbour of candidate (slots=10): trend_n=120
+v4-4	sizing	0.5234	0.5234	0.9151	1.1759	0.8864	1.0024	19.47	plateau	plateau neighbour of candidate (slots=10): breadth_cut=0.48
+v4-4	sizing	0.6808	1.3271	0.6808	0.8349	0.8375	0.7157	6.59	plateau	plateau neighbour of candidate (slots=10): breadth_cut=0.72
+v4-4	sizing	0.6458	0.6458	0.7079	1.0247	0.7725	0.8183	15.58	plateau	plateau neighbour of candidate (slots=10): rsi_n=2
+v4-4	sizing	0.8121	1.4675	1.2143	0.8121	1.1396	1.0676	9.73	plateau	plateau neighbour of candidate (slots=10): rsi_n=4
+v4-4	sizing	0.7521	0.9634	1.1365	0.7521	0.9763	0.9968	11.74	plateau	plateau neighbour of candidate (slots=10): rsi_max=16.0
+v4-4	sizing	0.8477	0.8477	0.9669	0.9081	0.9117	0.9417	15.0	plateau	plateau neighbour of candidate (slots=10): rsi_max=24.0
+v4-4	sizing	0.7417	0.7417	0.971	0.9716	0.8999	0.9603	16.07	plateau	plateau neighbour of candidate (slots=10): vwap_n=8
+v4-4	sizing	0.6124	0.755	0.8158	0.6124	0.7354	0.7366	11.22	plateau	plateau neighbour of candidate (slots=10): vwap_n=12
+v4-4	sizing	0.854	0.8925	1.149	0.854	0.9946	1.0387	13.87	plateau	plateau neighbour of candidate (slots=10): max_hold=16
+v4-4	sizing	0.7295	0.912	1.1294	0.7295	0.9565	0.9834	13.82	plateau	plateau neighbour of candidate (slots=10): max_hold=24
+v4-4	sizing	0.8011	0.8011	1.1276	0.8192	0.9551	1.0117	14.47	plateau	plateau neighbour of candidate (slots=10): slots=8
+v4-4	sizing	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	plateau	plateau neighbour of candidate (slots=10): slots=12
+v4-4	sizing	0.3295	0.3295	0.5741	0.8767	0.5965	0.6893	23.09	joint	candidate (slots=10) joint draw 0: trend_n=115,breadth_cut=0.487384,rsi_n=2,rsi_max=18.330692,vwap_n=11,max_hold=17,slots=9
+v4-4	sizing	0.69	0.69	0.9375	0.8684	0.8481	0.9046	15.02	joint	candidate (slots=10) joint draw 1: trend_n=90,breadth_cut=0.561368,rsi_n=3,rsi_max=18.865466,vwap_n=10,max_hold=16,slots=10
+v4-4	sizing	0.6927	0.9796	0.6927	0.7931	0.7607	0.7093	9.51	joint	candidate (slots=10) joint draw 2: trend_n=107,breadth_cut=0.633598,rsi_n=3,rsi_max=18.888815,vwap_n=12,max_hold=17,slots=12
+v4-4	sizing	0.5119	1.2793	0.9722	0.5119	0.8981	0.8094	10.3	joint	candidate (slots=10) joint draw 3: trend_n=91,breadth_cut=0.57853,rsi_n=4,rsi_max=21.128649,vwap_n=12,max_hold=21,slots=8
+v4-4	sizing	0.5749	1.1387	0.8901	0.5749	0.8468	0.7765	9.05	joint	candidate (slots=10) joint draw 4: trend_n=96,breadth_cut=0.67386,rsi_n=3,rsi_max=19.14261,vwap_n=10,max_hold=24,slots=10
+v4-4	sizing	0.8526	0.9124	0.8526	0.9857	0.886	0.8854	10.1	joint	candidate (slots=10) joint draw 5: trend_n=119,breadth_cut=0.647615,rsi_n=3,rsi_max=18.096554,vwap_n=12,max_hold=23,slots=9
+v4-4	sizing	0.7159	1.0226	0.7159	0.7486	0.7837	0.713	9.66	joint	candidate (slots=10) joint draw 6: trend_n=105,breadth_cut=0.641276,rsi_n=3,rsi_max=20.158381,vwap_n=12,max_hold=23,slots=11
+v4-4	sizing	0.9538	1.1354	1.1427	0.9538	1.0646	1.0667	10.66	joint	candidate (slots=10) joint draw 7: trend_n=84,breadth_cut=0.590578,rsi_n=3,rsi_max=16.014468,vwap_n=10,max_hold=18,slots=11
+v4-4	sizing	0.6085	0.6085	0.9412	1.4418	0.9829	1.1038	17.73	joint	candidate (slots=10) joint draw 8: trend_n=81,breadth_cut=0.54731,rsi_n=3,rsi_max=20.682146,vwap_n=9,max_hold=18,slots=8
+v4-4	sizing	0.4538	1.1694	0.4538	0.6502	0.6392	0.5049	6.57	joint	candidate (slots=10) joint draw 9: trend_n=85,breadth_cut=0.707816,rsi_n=3,rsi_max=22.596306,vwap_n=10,max_hold=20,slots=11
+v4-4	sizing	0.7994	0.7994	0.8155	0.8847	0.8102	0.8197	11.11	joint	candidate (slots=10) joint draw 10: trend_n=117,breadth_cut=0.648845,rsi_n=3,rsi_max=22.002661,vwap_n=11,max_hold=23,slots=11
+v4-4	sizing	0.6104	0.6104	0.859	0.9453	0.8141	0.8829	16.44	joint	candidate (slots=10) joint draw 11: trend_n=111,breadth_cut=0.536302,rsi_n=3,rsi_max=19.651245,vwap_n=11,max_hold=23,slots=11
+v4-4	sizing	0.6204	0.6204	0.9107	1.09	0.8814	0.9672	18.34	joint	candidate (slots=10) joint draw 12: trend_n=104,breadth_cut=0.56212,rsi_n=3,rsi_max=21.534188,vwap_n=9,max_hold=18,slots=10
+v4-4	sizing	0.5363	1.1123	0.5363	0.6889	0.6994	0.5726	10.2	joint	candidate (slots=10) joint draw 13: trend_n=106,breadth_cut=0.639812,rsi_n=3,rsi_max=20.829825,vwap_n=12,max_hold=22,slots=10
+v4-4	sizing	0.7065	1.1852	0.7942	0.7065	0.8224	0.7473	11.15	joint	candidate (slots=10) joint draw 14: trend_n=89,breadth_cut=0.641793,rsi_n=3,rsi_max=16.704177,vwap_n=8,max_hold=20,slots=11
+v4-4	sizing	0.5567	0.5567	0.6353	0.797	0.6556	0.6918	19.04	joint	candidate (slots=10) joint draw 15: trend_n=110,breadth_cut=0.539255,rsi_n=3,rsi_max=21.414669,vwap_n=10,max_hold=19,slots=9
+v4-4	sizing	0.63	0.7262	0.7443	0.63	0.6974	0.6995	15.64	joint	candidate (slots=10) joint draw 16: trend_n=111,breadth_cut=0.573764,rsi_n=3,rsi_max=21.485418,vwap_n=11,max_hold=21,slots=10
+v4-4	sizing	0.7666	1.1138	1.0362	0.7666	0.9539	0.9333	12.2	joint	candidate (slots=10) joint draw 17: trend_n=82,breadth_cut=0.563515,rsi_n=3,rsi_max=16.93435,vwap_n=9,max_hold=23,slots=12
+v4-4	sizing	0.5938	0.9462	0.9892	0.5938	0.8655	0.8481	6.89	joint	candidate (slots=10) joint draw 18: trend_n=112,breadth_cut=0.703053,rsi_n=3,rsi_max=16.026492,vwap_n=10,max_hold=24,slots=11
+v4-4	sizing	0.7761	0.7761	0.996	0.9698	0.92	0.9748	13.7	joint	candidate (slots=10) joint draw 19: trend_n=103,breadth_cut=0.620244,rsi_n=3,rsi_max=19.009685,vwap_n=9,max_hold=22,slots=11
+v4-4	sizing	0.5266	0.9666	0.9228	0.5266	0.8055	0.7814	13.63	joint	candidate (slots=10) joint draw 20: trend_n=114,breadth_cut=0.594443,rsi_n=3,rsi_max=17.477947,vwap_n=10,max_hold=18,slots=11
+v4-4	sizing	0.934	1.2955	1.0684	0.934	1.0437	1.0027	9.35	joint	candidate (slots=10) joint draw 21: trend_n=97,breadth_cut=0.688179,rsi_n=3,rsi_max=18.424751,vwap_n=9,max_hold=18,slots=9
+v4-4	sizing	0.5733	0.5733	0.8359	0.9086	0.7835	0.8538	16.91	joint	candidate (slots=10) joint draw 22: trend_n=92,breadth_cut=0.535497,rsi_n=3,rsi_max=21.688983,vwap_n=10,max_hold=16,slots=12
+v4-4	sizing	0.6704	0.6704	0.9444	1.0521	0.8946	0.9703	15.45	joint	candidate (slots=10) joint draw 23: trend_n=81,breadth_cut=0.596903,rsi_n=3,rsi_max=23.209863,vwap_n=9,max_hold=17,slots=10
+v4-4	sizing	0.2396	0.2396	1.0336	0.7068	0.7438	0.9143	16.24	joint	candidate (slots=10) joint draw 24: trend_n=95,breadth_cut=0.502629,rsi_n=4,rsi_max=22.719452,vwap_n=8,max_hold=22,slots=10
+v4-4	sizing	0.7662	0.791	0.7668	0.7662	0.7503	0.7551	12.07	joint	candidate (slots=10) joint draw 25: trend_n=85,breadth_cut=0.661392,rsi_n=3,rsi_max=22.367818,vwap_n=8,max_hold=22,slots=10
+v4-4	sizing	0.3341	0.3341	0.7796	0.9601	0.7113	0.831	20.3	joint	candidate (slots=10) joint draw 26: trend_n=106,breadth_cut=0.556516,rsi_n=3,rsi_max=21.729168,vwap_n=8,max_hold=18,slots=11
+v4-4	sizing	0.3289	1.1037	0.3289	0.6075	0.5917	0.4165	8.29	joint	candidate (slots=10) joint draw 27: trend_n=85,breadth_cut=0.656838,rsi_n=3,rsi_max=23.304805,vwap_n=12,max_hold=22,slots=8
+v4-4	sizing	0.7308	1.3187	0.9079	0.7308	0.9115	0.8321	7.68	joint	candidate (slots=10) joint draw 28: trend_n=101,breadth_cut=0.705591,rsi_n=3,rsi_max=18.519025,vwap_n=9,max_hold=18,slots=11
+v4-4	sizing	0.3882	0.3882	0.823	0.7986	0.7058	0.8089	15.88	joint	candidate (slots=10) joint draw 29: trend_n=109,breadth_cut=0.512963,rsi_n=3,rsi_max=18.127093,vwap_n=11,max_hold=19,slots=11
+v4-4	sizing	0.4013	1.1301	1.0865	0.4013	0.9061	0.856	7.07	joint	candidate (slots=10) joint draw 30: trend_n=84,breadth_cut=0.50895,rsi_n=4,rsi_max=16.310862,vwap_n=9,max_hold=22,slots=11
+v4-4	sizing	0.4049	0.4049	0.7703	0.9758	0.7322	0.8472	19.46	joint	candidate (slots=10) joint draw 31: trend_n=113,breadth_cut=0.522578,rsi_n=3,rsi_max=22.871733,vwap_n=11,max_hold=16,slots=9
+v4-4	sizing	0.6068	0.6068	0.7406	0.9372	0.7556	0.8078	17.55	joint	candidate (slots=10) joint draw 32: trend_n=111,breadth_cut=0.555461,rsi_n=3,rsi_max=23.608239,vwap_n=11,max_hold=21,slots=9
+v4-4	sizing	0.6405	1.0338	0.9113	0.6405	0.8511	0.8112	9.32	joint	candidate (slots=10) joint draw 33: trend_n=105,breadth_cut=0.645343,rsi_n=3,rsi_max=18.907645,vwap_n=11,max_hold=18,slots=12
+v4-4	sizing	0.7047	0.7047	0.9115	0.829	0.8305	0.8776	17.65	joint	candidate (slots=10) joint draw 34: trend_n=111,breadth_cut=0.563659,rsi_n=3,rsi_max=22.553849,vwap_n=10,max_hold=20,slots=12
+v4-4	sizing	0.9128	0.9128	1.2331	0.9368	1.0623	1.1213	11.65	joint	candidate (slots=10) joint draw 35: trend_n=105,breadth_cut=0.676093,rsi_n=3,rsi_max=18.835775,vwap_n=9,max_hold=17,slots=8
+v4-4	sizing	0.3813	0.3813	0.8445	1.1655	0.8204	0.9567	19.89	joint	candidate (slots=10) joint draw 36: trend_n=100,breadth_cut=0.507386,rsi_n=3,rsi_max=19.624418,vwap_n=9,max_hold=17,slots=9
+v4-4	sizing	0.1128	0.1128	0.7436	1.1712	0.7089	0.9006	18.93	joint	candidate (slots=10) joint draw 37: trend_n=83,breadth_cut=0.507623,rsi_n=2,rsi_max=19.144664,vwap_n=11,max_hold=22,slots=9
+v4-4	sizing	0.9372	1.3398	1.1979	0.9372	1.1276	1.0979	11.66	joint	candidate (slots=10) joint draw 38: trend_n=90,breadth_cut=0.648122,rsi_n=3,rsi_max=18.092057,vwap_n=9,max_hold=23,slots=9
+v4-4	sizing	0.781	1.0885	0.8301	0.781	0.8448	0.7988	9.83	joint	candidate (slots=10) joint draw 39: trend_n=98,breadth_cut=0.684662,rsi_n=3,rsi_max=17.649575,vwap_n=8,max_hold=17,slots=10
+v4-4	sizing	0.6588	0.6588	0.9228	0.8187	0.8209	0.8786	16.87	joint	candidate (slots=10) joint draw 40: trend_n=110,breadth_cut=0.576391,rsi_n=3,rsi_max=20.220756,vwap_n=9,max_hold=18,slots=11
+v4-4	sizing	0.8063	0.8063	0.9253	0.9891	0.8946	0.9335	12.16	joint	candidate (slots=10) joint draw 41: trend_n=95,breadth_cut=0.562421,rsi_n=3,rsi_max=17.207921,vwap_n=12,max_hold=20,slots=9
+v4-4	sizing	0.5811	0.873	0.8444	0.5811	0.7702	0.7472	11.18	joint	candidate (slots=10) joint draw 42: trend_n=107,breadth_cut=0.665266,rsi_n=3,rsi_max=22.681334,vwap_n=10,max_hold=22,slots=11
+v4-4	sizing	0.2401	0.2401	0.8388	0.9908	0.726	0.8912	22.4	joint	candidate (slots=10) joint draw 43: trend_n=112,breadth_cut=0.499464,rsi_n=3,rsi_max=21.360535,vwap_n=9,max_hold=21,slots=10
+v4-4	sizing	0.4303	1.2785	0.5241	0.4303	0.6579	0.4827	5.31	joint	candidate (slots=10) joint draw 44: trend_n=82,breadth_cut=0.717281,rsi_n=3,rsi_max=19.278757,vwap_n=10,max_hold=20,slots=11
+v4-4	sizing	0.8486	0.9416	0.9361	0.8486	0.8896	0.8863	11.5	joint	candidate (slots=10) joint draw 45: trend_n=108,breadth_cut=0.651169,rsi_n=3,rsi_max=21.628969,vwap_n=10,max_hold=23,slots=12
+v4-4	sizing	0.5615	0.5615	0.6471	0.5818	0.5979	0.6126	10.96	joint	candidate (slots=10) joint draw 46: trend_n=83,breadth_cut=0.632346,rsi_n=2,rsi_max=23.890579,vwap_n=11,max_hold=18,slots=9
+v4-4	sizing	0.6812	1.2545	1.01	0.6812	0.9513	0.8905	5.27	joint	candidate (slots=10) joint draw 47: trend_n=107,breadth_cut=0.706128,rsi_n=4,rsi_max=19.667132,vwap_n=10,max_hold=18,slots=12
+v4-4	sizing	0.5442	0.5442	0.7204	1.0906	0.7729	0.8495	19.73	joint	candidate (slots=10) joint draw 48: trend_n=116,breadth_cut=0.510763,rsi_n=3,rsi_max=19.270139,vwap_n=10,max_hold=23,slots=9
+v4-4	sizing	0.8057	1.3291	0.9911	0.8057	0.9804	0.9158	12.28	joint	candidate (slots=10) joint draw 49: trend_n=91,breadth_cut=0.598533,rsi_n=3,rsi_max=17.144286,vwap_n=9,max_hold=23,slots=11
+v4-4	sizing	0.6034	0.8678	0.7716	0.6034	0.7378	0.7036	8.44	joint	candidate (slots=10) joint draw 50: trend_n=93,breadth_cut=0.68575,rsi_n=3,rsi_max=22.404133,vwap_n=10,max_hold=16,slots=10
+v4-4	sizing	0.6571	0.6571	1.1373	1.1344	1.0101	1.1237	16.35	joint	candidate (slots=10) joint draw 51: trend_n=84,breadth_cut=0.550918,rsi_n=3,rsi_max=21.102944,vwap_n=9,max_hold=21,slots=11
+v4-4	sizing	0.6434	1.1605	0.7443	0.6434	0.8063	0.7018	7.78	joint	candidate (slots=10) joint draw 52: trend_n=90,breadth_cut=0.661827,rsi_n=3,rsi_max=16.58883,vwap_n=11,max_hold=21,slots=9
+v4-4	sizing	0.7129	0.7129	0.7935	0.9101	0.7972	0.8323	17.3	joint	candidate (slots=10) joint draw 53: trend_n=101,breadth_cut=0.590629,rsi_n=3,rsi_max=21.548827,vwap_n=9,max_hold=19,slots=8
+v4-4	sizing	0.1067	0.1067	0.937	1.0022	0.7476	0.9426	15.55	joint	candidate (slots=10) joint draw 54: trend_n=97,breadth_cut=0.547229,rsi_n=3,rsi_max=16.622269,vwap_n=8,max_hold=18,slots=11
+v4-4	sizing	0.4169	1.2028	0.4169	0.8675	0.7077	0.5499	6.05	joint	candidate (slots=10) joint draw 55: trend_n=93,breadth_cut=0.701443,rsi_n=3,rsi_max=18.966695,vwap_n=12,max_hold=17,slots=11
+v4-4	sizing	0.459	1.4499	0.459	0.936	0.7839	0.5921	8.23	joint	candidate (slots=10) joint draw 56: trend_n=84,breadth_cut=0.639514,rsi_n=3,rsi_max=18.271544,vwap_n=12,max_hold=19,slots=9
+v4-4	sizing	0.7079	1.2125	1.1987	0.7079	1.0478	1.0264	9.44	joint	candidate (slots=10) joint draw 57: trend_n=92,breadth_cut=0.671613,rsi_n=3,rsi_max=18.875718,vwap_n=9,max_hold=23,slots=12
+v4-4	sizing	0.668	0.668	0.9075	0.717	0.7887	0.8342	13.93	joint	candidate (slots=10) joint draw 58: trend_n=92,breadth_cut=0.568168,rsi_n=3,rsi_max=19.250255,vwap_n=10,max_hold=18,slots=12
+v4-4	sizing	0.9249	1.4458	1.2404	0.9249	1.1724	1.1189	8.81	joint	candidate (slots=10) joint draw 59: trend_n=103,breadth_cut=0.605527,rsi_n=4,rsi_max=18.770788,vwap_n=8,max_hold=23,slots=12
+v4-4	exits	0.6076	0.6076	0.9692	0.7056	0.8044	0.8712	11.72	discard	exit target max(rolling VWAP, entry-day VWAP) (0 new params)
+v4-4	exits	0.4599	0.4723	1.0243	0.4599	0.721	0.8004	12.06	discard	exit after 2 consecutive closes above VWAP10
+v4-4	exits	0.6036	0.6036	1.0797	0.6455	0.8421	0.921	12.33	discard	exit when RSI3 > 70 (instead of VWAP reclaim)
+v4-4	exits	0.5299	0.5299	0.8658	0.5632	0.6979	0.7553	12.86	discard	exit on close above VWAP20 (exit VWAP longer than entry VWAP10)
+v4-4	exits	0.701	0.837	1.1009	0.701	0.9172	0.9566	13.15	discard	protective stop: close < entry close * 0.92
+v4-4	exits	0.6592	1.2182	1.1271	0.6592	1.0036	0.9622	11.2	discard	min depth: eligible only if close < VWAP10 * 0.98
+v4-4	exits	0.7949	0.8581	1.1258	0.7949	0.9602	1.0039	13.13	discard	exit on VWAP reclaim OR RSI3 > 70 (earlier exit)
+v4-4	exits	0.7887	0.7887	1.1212	0.8467	0.9564	1.0179	13.07	discard	exit on VWAP reclaim OR RSI3 > 80 (earlier exit)
+v4-4	exits	0.8229	0.8229	1.146	0.8703	0.9824	1.0421	13.09	discard	max_hold 15 (shorter time stop)
+v4-4	exits	0.7842	0.7842	1.1182	0.8467	0.954	1.016	13.02	discard	min depth 1 pct below VWAP10
+v4-4	exits	0.7644	0.8869	1.1182	0.7644	0.9551	0.989	12.42	discard	min depth 1.5 pct below VWAP10
+v4-4	exits	0.5459	1.1913	1.0415	0.5459	0.9297	0.8711	9.73	discard	min depth 2.5 pct below VWAP10
+v4-4	exits	0.669	0.669	0.6844	0.8537	0.7114	0.7374	13.06	discard	trend exit: sell all when NIFTY closes below its EMA100 (0 new params)
+v4-4	exits	0.4757	0.4757	0.8933	0.9542	0.803	0.9033	14.42	discard	trend exit: sell a name when it closes below its own EMA100 (0 new params)
+v4-4	exits	0.7247	0.7247	1.0858	0.8824	0.9325	1.0056	14.38	discard	exit on close above VWAP5 (shorter exit VWAP, entry/trigger keep VWAP10)
+v4-4	exits	0.9872	1.1902	1.0664	0.9872	1.0399	1.0234	13.71	discard	exit on close above VWAP7 (shorter exit VWAP)
+v4-4	exits	0.7887	0.7887	1.1471	0.8348	0.9668	1.0311	13.11	discard	profit cap: also sell when close > entry close * 1.04
+v4-4	exits	1.0397	1.0446	1.0397	1.1181	1.026	1.0449	13.98	discard	exit on close above VWAP6 (shape scan of exit VWAP length)
+v4-4	exits	0.8851	1.0587	1.1392	0.8851	1.0276	1.0416	13.45	discard	exit on close above VWAP8 (shape scan of exit VWAP length)
+v4-4	exits	0.8893	0.8893	1.1319	0.9461	1.0067	1.0567	13.25	discard	exit on close above VWAP9 (shape scan of exit VWAP length)
+v4-4	exits	0.4895	0.9707	0.8817	0.4895	0.784	0.7439	13.71	discard	exit when close regains 0.5 of the gap from entry close to current VWAP10
+v4-4	exits	0.3697	1.0075	1.0677	0.3697	0.8541	0.8247	13.4	discard	exit when close regains 0.7 of the gap from entry close to current VWAP10
+v4-4	exits	0.6484	0.6484	0.8727	0.9534	0.8205	0.8813	16.3	discard	tied vwap_n=7 for trigger, ranking and exit (moved param, no new one)
+v4-4	exits	1.0044	1.2107	1.0714	1.0044	1.0509	1.0322	13.72	discard	exit VWAP7, no time stop (max_hold=10000): is the time stop still needed?
+v4-4	exits	1.0446	1.0446	1.0448	1.1359	1.0331	1.0539	13.98	discard	exit VWAP6, no time stop (max_hold=10000)
+v4-4	exits	0.7288	1.0981	1.1441	0.7288	0.999	0.9948	13.45	discard	exit VWAP8, no time stop (plateau neighbour)
+v4-4	exits	0.7247	0.7247	1.0858	0.8824	0.9325	1.0056	14.38	discard	exit VWAP5, no time stop (plateau neighbour)
+v4-4	exits	0.4899	0.874	1.0105	0.4899	0.8325	0.8316	15.82	discard	exit when close > VWAP anchored at the entry day (since-entry AVWAP), time stop 20
+v4-4	exits	0.3592	0.3592	0.6957	1.0609	0.7186	0.8332	27.67	perturb	c_exit7_ts.py joint +-20 pct draw 0: trend_n=115, breadth_cut=0.4874, rsi_n=2, rsi_max=18.3307, vwap_n=11, exit_n=6, max_hold=19, slots=11
+v4-4	exits	0.6199	0.8871	0.9321	0.6199	0.8196	0.8189	14.26	perturb	c_exit7_ts.py joint +-20 pct draw 1: trend_n=94, breadth_cut=0.5893, rsi_n=3, rsi_max=19.2532, vwap_n=8, exit_n=7, max_hold=21, slots=13
+v4-4	exits	1.0439	1.5871	1.0439	1.1925	1.0959	1.0295	4.74	perturb	c_exit7_ts.py joint +-20 pct draw 2: trend_n=86, breadth_cut=0.5667, rsi_n=4, rsi_max=16.9953, vwap_n=12, exit_n=6, max_hold=19, slots=14
+v4-4	exits	0.416	1.0986	0.6477	0.416	0.6813	0.5647	6.22	perturb	c_exit7_ts.py joint +-20 pct draw 3: trend_n=106, breadth_cut=0.7155, rsi_n=3, rsi_max=16.78, vwap_n=10, exit_n=8, max_hold=22, slots=11
+v4-4	exits	0.5677	1.0712	0.5677	0.7134	0.6729	0.5864	7.24	perturb	c_exit7_ts.py joint +-20 pct draw 4: trend_n=98, breadth_cut=0.707, rsi_n=3, rsi_max=23.8126, vwap_n=11, exit_n=6, max_hold=18, slots=14
+v4-4	exits	0.8256	0.9764	0.8723	0.8256	0.863	0.847	18.77	perturb	c_exit7_ts.py joint +-20 pct draw 5: trend_n=116, breadth_cut=0.5331, rsi_n=3, rsi_max=21.3759, vwap_n=10, exit_n=7, max_hold=23, slots=14
+v4-4	exits	0.347	0.347	0.8509	0.8505	0.718	0.8398	20.13	perturb	c_exit7_ts.py joint +-20 pct draw 6: trend_n=109, breadth_cut=0.5033, rsi_n=3, rsi_max=20.0001, vwap_n=8, exit_n=7, max_hold=18, slots=13
+v4-4	exits	0.5281	0.5281	1.0076	1.3155	0.9609	1.0928	18.11	perturb	c_exit7_ts.py joint +-20 pct draw 7: trend_n=81, breadth_cut=0.5473, rsi_n=3, rsi_max=20.6821, vwap_n=9, exit_n=6, max_hold=17, slots=10
+v4-4	exits	0.6022	1.0191	0.7728	0.6022	0.7632	0.7076	16.26	perturb	c_exit7_ts.py joint +-20 pct draw 8: trend_n=118, breadth_cut=0.5471, rsi_n=3, rsi_max=19.164, vwap_n=10, exit_n=8, max_hold=23, slots=13
+v4-4	exits	0.5053	1.2666	0.7788	0.5053	0.8007	0.6793	10.5	perturb	c_exit7_ts.py joint +-20 pct draw 9: trend_n=102, breadth_cut=0.6601, rsi_n=3, rsi_max=23.3308, vwap_n=11, exit_n=8, max_hold=18, slots=12
+v4-4	exits	0.9636	1.1045	0.9712	0.9636	0.9633	0.9438	12.58	perturb	c_exit7_ts.py joint +-20 pct draw 10: trend_n=98, breadth_cut=0.6381, rsi_n=3, rsi_max=22.0159, vwap_n=10, exit_n=7, max_hold=20, slots=13
+v4-4	exits	0.7237	0.9972	0.9578	0.7237	0.8839	0.8696	15.07	perturb	c_exit7_ts.py joint +-20 pct draw 11: trend_n=88, breadth_cut=0.5263, rsi_n=3, rsi_max=21.2112, vwap_n=11, exit_n=8, max_hold=21, slots=14
+v4-4	exits	0.7932	0.8832	0.9286	0.7932	0.8568	0.8681	16.57	perturb	c_exit7_ts.py joint +-20 pct draw 12: trend_n=109, breadth_cut=0.5802, rsi_n=3, rsi_max=21.3931, vwap_n=11, exit_n=6, max_hold=16, slots=12
+v4-4	exits	0.4622	1.3549	0.8737	0.4622	0.868	0.7328	9.56	perturb	c_exit7_ts.py joint +-20 pct draw 13: trend_n=109, breadth_cut=0.6577, rsi_n=3, rsi_max=16.9778, vwap_n=11, exit_n=7, max_hold=19, slots=10
+v4-4	exits	0.7876	1.2607	0.7876	0.7883	0.8634	0.7815	17.89	perturb	c_exit7_ts.py joint +-20 pct draw 14: trend_n=111, breadth_cut=0.5738, rsi_n=3, rsi_max=21.4854, vwap_n=11, exit_n=7, max_hold=19, slots=10
+v4-4	exits	0.7503	1.3141	1.1422	0.7503	1.052	1.0008	11.28	perturb	c_exit7_ts.py joint +-20 pct draw 15: trend_n=94, breadth_cut=0.5529, rsi_n=3, rsi_max=17.8354, vwap_n=12, exit_n=8, max_hold=22, slots=14
+v4-4	exits	0.7148	0.7148	0.996	0.7337	0.8478	0.8973	20.79	perturb	c_exit7_ts.py joint +-20 pct draw 16: trend_n=91, breadth_cut=0.4808, rsi_n=3, rsi_max=23.7287, vwap_n=11, exit_n=7, max_hold=21, slots=12
+v4-4	exits	0.8316	0.8316	0.9476	1.1874	0.9712	1.0252	19.52	perturb	c_exit7_ts.py joint +-20 pct draw 17: trend_n=95, breadth_cut=0.5102, rsi_n=3, rsi_max=21.0688, vwap_n=11, exit_n=7, max_hold=23, slots=10
+v4-4	exits	0.7792	0.7792	1.0209	1.096	0.9662	1.0366	17.03	perturb	c_exit7_ts.py joint +-20 pct draw 18: trend_n=99, breadth_cut=0.5502, rsi_n=3, rsi_max=19.4986, vwap_n=11, exit_n=6, max_hold=18, slots=10
+v4-4	exits	0.7723	0.7723	0.8804	0.9391	0.8514	0.8882	16.84	perturb	c_exit7_ts.py joint +-20 pct draw 19: trend_n=89, breadth_cut=0.5216, rsi_n=3, rsi_max=17.8499, vwap_n=9, exit_n=8, max_hold=19, slots=10
+v4-4	exits	0.8059	0.938	0.8843	0.8059	0.8611	0.8518	21.2	perturb	c_exit7_ts.py joint +-20 pct draw 20: trend_n=116, breadth_cut=0.4863, rsi_n=3, rsi_max=22.1913, vwap_n=12, exit_n=7, max_hold=17, slots=12
+v4-4	exits	0.2672	0.2672	1.0283	0.7066	0.748	0.9107	16.23	perturb	c_exit7_ts.py joint +-20 pct draw 21: trend_n=95, breadth_cut=0.5026, rsi_n=4, rsi_max=22.7195, vwap_n=8, exit_n=8, max_hold=20, slots=10
+v4-4	exits	0.6172	1.1598	0.9186	0.6172	0.871	0.8088	11.54	perturb	c_exit7_ts.py joint +-20 pct draw 22: trend_n=110, breadth_cut=0.6078, rsi_n=3, rsi_max=16.2962, vwap_n=11, exit_n=7, max_hold=21, slots=11
+v4-4	exits	0.7685	1.1308	0.8292	0.7685	0.8539	0.7898	9.51	perturb	c_exit7_ts.py joint +-20 pct draw 23: trend_n=101, breadth_cut=0.6519, rsi_n=3, rsi_max=18.3535, vwap_n=11, exit_n=6, max_hold=22, slots=11
+v4-4	exits	0.8994	1.0742	0.8994	0.9074	0.9179	0.8821	8.38	perturb	c_exit7_ts.py joint +-20 pct draw 24: trend_n=117, breadth_cut=0.6923, rsi_n=3, rsi_max=16.6529, vwap_n=10, exit_n=8, max_hold=19, slots=11
+v4-4	exits	0.6661	0.6661	0.9941	0.7952	0.8509	0.9167	17.0	perturb	c_exit7_ts.py joint +-20 pct draw 25: trend_n=90, breadth_cut=0.5483, rsi_n=3, rsi_max=21.824, vwap_n=9, exit_n=8, max_hold=18, slots=13
+v4-4	exits	0.579	0.9259	0.7611	0.579	0.7239	0.6875	7.03	perturb	c_exit7_ts.py joint +-20 pct draw 26: trend_n=94, breadth_cut=0.6596, rsi_n=3, rsi_max=16.965, vwap_n=12, exit_n=6, max_hold=18, slots=13
+v4-4	exits	0.6032	1.1171	0.8737	0.6032	0.8473	0.7729	8.91	perturb	c_exit7_ts.py joint +-20 pct draw 27: trend_n=114, breadth_cut=0.6802, rsi_n=3, rsi_max=20.0305, vwap_n=11, exit_n=8, max_hold=16, slots=11
+v4-4	exits	0.7992	1.1904	0.7992	0.8229	0.8626	0.7999	18.75	perturb	c_exit7_ts.py joint +-20 pct draw 28: trend_n=111, breadth_cut=0.5555, rsi_n=3, rsi_max=23.6082, vwap_n=11, exit_n=7, max_hold=18, slots=13
+v4-4	exits	0.6345	0.6345	0.7695	0.7935	0.7335	0.7724	20.2	perturb	c_exit7_ts.py joint +-20 pct draw 29: trend_n=108, breadth_cut=0.537, rsi_n=3, rsi_max=21.4669, vwap_n=9, exit_n=8, max_hold=22, slots=11
+v4-4	exits	0.7243	1.358	0.7243	0.7458	0.8363	0.7057	7.92	perturb	c_exit7_ts.py joint +-20 pct draw 30: trend_n=91, breadth_cut=0.6766, rsi_n=3, rsi_max=20.2312, vwap_n=12, exit_n=7, max_hold=23, slots=11
+v4-4	exits	0.7811	0.7811	0.9312	0.9451	0.8766	0.9215	13.85	perturb	c_exit7_ts.py joint +-20 pct draw 31: trend_n=94, breadth_cut=0.5515, rsi_n=3, rsi_max=16.5095, vwap_n=10, exit_n=6, max_hold=22, slots=12
+v4-4	exits	0.402	0.402	0.7829	0.9594	0.7243	0.8273	15.44	perturb	c_exit7_ts.py joint +-20 pct draw 32: trend_n=91, breadth_cut=0.4961, rsi_n=3, rsi_max=16.5856, vwap_n=8, exit_n=6, max_hold=19, slots=13
+v4-4	exits	0.7142	0.7142	0.9438	0.9596	0.8741	0.9341	18.64	perturb	c_exit7_ts.py joint +-20 pct draw 33: trend_n=110, breadth_cut=0.5582, rsi_n=3, rsi_max=21.6041, vwap_n=9, exit_n=6, max_hold=18, slots=14
+v4-4	exits	1.0447	1.1016	1.1259	1.0447	1.0664	1.079	13.94	perturb	c_exit7_ts.py joint +-20 pct draw 34: trend_n=94, breadth_cut=0.59, rsi_n=3, rsi_max=18.0838, vwap_n=9, exit_n=6, max_hold=17, slots=12
+v4-4	exits	0.7414	0.7414	0.8895	0.9965	0.8627	0.9127	18.38	perturb	c_exit7_ts.py joint +-20 pct draw 35: trend_n=110, breadth_cut=0.5764, rsi_n=3, rsi_max=20.2208, vwap_n=9, exit_n=6, max_hold=22, slots=11
+v4-4	exits	0.7905	1.0641	0.7905	0.8991	0.8315	0.7833	11.15	perturb	c_exit7_ts.py joint +-20 pct draw 36: trend_n=94, breadth_cut=0.6608, rsi_n=3, rsi_max=23.3279, vwap_n=10, exit_n=6, max_hold=21, slots=13
+v4-4	exits	0.787	1.5033	0.787	0.8171	0.9104	0.7742	8.74	perturb	c_exit7_ts.py joint +-20 pct draw 37: trend_n=96, breadth_cut=0.6804, rsi_n=3, rsi_max=22.4707, vwap_n=11, exit_n=8, max_hold=17, slots=10
+v4-4	exits	0.2533	0.2533	0.8378	0.9329	0.7118	0.8589	20.08	perturb	c_exit7_ts.py joint +-20 pct draw 38: trend_n=107, breadth_cut=0.5131, rsi_n=3, rsi_max=19.8505, vwap_n=8, exit_n=8, max_hold=21, slots=12
+v4-4	exits	0.6551	1.174	0.873	0.6551	0.8622	0.7858	12.92	perturb	c_exit7_ts.py joint +-20 pct draw 39: trend_n=96, breadth_cut=0.6061, rsi_n=3, rsi_max=21.6425, vwap_n=11, exit_n=7, max_hold=22, slots=12
+v4-4	exits	0.7067	0.9427	0.7067	0.8369	0.7659	0.7381	11.57	perturb	c_exit7_ts.py joint +-20 pct draw 40: trend_n=114, breadth_cut=0.6915, rsi_n=3, rsi_max=21.0782, vwap_n=8, exit_n=8, max_hold=22, slots=11
+v4-4	exits	0.5329	1.3727	1.0698	0.5329	0.9795	0.8902	8.63	perturb	c_exit7_ts.py joint +-20 pct draw 41: trend_n=91, breadth_cut=0.6405, rsi_n=4, rsi_max=23.7089, vwap_n=10, exit_n=7, max_hold=18, slots=14
+v4-4	exits	0.8627	0.9134	0.8627	0.8638	0.8549	0.8544	19.53	perturb	c_exit7_ts.py joint +-20 pct draw 42: trend_n=116, breadth_cut=0.5108, rsi_n=3, rsi_max=19.2701, vwap_n=10, exit_n=8, max_hold=18, slots=11
+v4-4	exits	0.8245	1.1116	1.0261	0.8245	0.9678	0.9456	11.09	perturb	c_exit7_ts.py joint +-20 pct draw 43: trend_n=100, breadth_cut=0.5549, rsi_n=3, rsi_max=17.4048, vwap_n=12, exit_n=8, max_hold=19, slots=14
+v4-4	exits	0.5872	1.0742	0.7984	0.5872	0.7725	0.7132	7.68	perturb	c_exit7_ts.py joint +-20 pct draw 44: trend_n=105, breadth_cut=0.6721, rsi_n=3, rsi_max=16.1496, vwap_n=10, exit_n=6, max_hold=18, slots=14
+v4-4	exits	0.5804	0.5804	0.923	0.8073	0.8026	0.8767	20.1	perturb	c_exit7_ts.py joint +-20 pct draw 45: trend_n=106, breadth_cut=0.5532, rsi_n=3, rsi_max=22.2279, vwap_n=9, exit_n=8, max_hold=19, slots=10
+v4-4	exits	1.0262	1.2261	1.029	1.0262	1.0331	1.0059	12.78	perturb	c_exit7_ts.py joint +-20 pct draw 46: trend_n=111, breadth_cut=0.6438, rsi_n=3, rsi_max=20.2814, vwap_n=10, exit_n=8, max_hold=22, slots=11
+v4-4	exits	0.3196	0.3196	0.8799	1.0399	0.7762	0.9221	19.72	perturb	c_exit7_ts.py joint +-20 pct draw 47: trend_n=97, breadth_cut=0.4919, rsi_n=3, rsi_max=18.241, vwap_n=9, exit_n=6, max_hold=17, slots=11
+v4-4	exits	0.8696	1.123	1.1478	0.8696	1.0435	1.0408	10.61	perturb	c_exit7_ts.py joint +-20 pct draw 48: trend_n=106, breadth_cut=0.558, rsi_n=4, rsi_max=19.9478, vwap_n=9, exit_n=8, max_hold=17, slots=13
+v4-4	exits	0.5621	1.6387	0.5951	0.5621	0.7885	0.5689	8.06	perturb	c_exit7_ts.py joint +-20 pct draw 49: trend_n=84, breadth_cut=0.6395, rsi_n=3, rsi_max=18.2715, vwap_n=12, exit_n=7, max_hold=18, slots=11
+v4-4	exits	0.8159	1.0941	0.9129	0.8159	0.9011	0.871	16.24	perturb	c_exit7_ts.py joint +-20 pct draw 50: trend_n=112, breadth_cut=0.5432, rsi_n=3, rsi_max=18.2002, vwap_n=11, exit_n=8, max_hold=18, slots=11
+v4-4	exits	0.5037	1.5929	1.0318	0.5037	0.9929	0.8539	10.36	perturb	c_exit7_ts.py joint +-20 pct draw 51: trend_n=92, breadth_cut=0.5775, rsi_n=3, rsi_max=18.2316, vwap_n=12, exit_n=7, max_hold=20, slots=14
+v4-4	exits	0.753	0.7804	0.9476	0.753	0.8435	0.8734	20.39	perturb	c_exit7_ts.py joint +-20 pct draw 52: trend_n=94, breadth_cut=0.4921, rsi_n=3, rsi_max=23.3505, vwap_n=11, exit_n=7, max_hold=18, slots=12
+v4-4	exits	0.6493	1.0748	0.8397	0.6493	0.819	0.7619	10.01	perturb	c_exit7_ts.py joint +-20 pct draw 53: trend_n=119, breadth_cut=0.6744, rsi_n=3, rsi_max=19.4611, vwap_n=10, exit_n=7, max_hold=20, slots=14
+v4-4	exits	0.5181	0.9709	0.5181	0.7057	0.6512	0.5678	8.5	perturb	c_exit7_ts.py joint +-20 pct draw 54: trend_n=106, breadth_cut=0.6993, rsi_n=2, rsi_max=20.5066, vwap_n=10, exit_n=8, max_hold=24, slots=12
+v4-4	exits	0.8676	1.3296	0.9781	0.8676	0.994	0.9262	13.45	perturb	c_exit7_ts.py joint +-20 pct draw 55: trend_n=88, breadth_cut=0.6141, rsi_n=3, rsi_max=18.773, vwap_n=9, exit_n=7, max_hold=19, slots=10
+v4-4	exits	0.7888	1.2361	0.7888	0.8755	0.8893	0.8122	18.55	perturb	c_exit7_ts.py joint +-20 pct draw 56: trend_n=115, breadth_cut=0.5966, rsi_n=3, rsi_max=21.0846, vwap_n=9, exit_n=7, max_hold=19, slots=10
+v4-4	exits	0.6026	1.4133	0.779	0.6026	0.8215	0.7053	5.3	perturb	c_exit7_ts.py joint +-20 pct draw 57: trend_n=99, breadth_cut=0.7168, rsi_n=4, rsi_max=21.3344, vwap_n=9, exit_n=7, max_hold=23, slots=13
+v4-4	exits	0.4824	0.9963	0.4824	0.9195	0.6529	0.5672	5.54	perturb	c_exit7_ts.py joint +-20 pct draw 58: trend_n=80, breadth_cut=0.7165, rsi_n=3, rsi_max=19.1491, vwap_n=10, exit_n=6, max_hold=17, slots=10
+v4-4	exits	0.446	0.446	0.6515	0.8906	0.6669	0.74	26.89	perturb	c_exit7_ts.py joint +-20 pct draw 59: trend_n=116, breadth_cut=0.5217, rsi_n=2, rsi_max=22.3844, vwap_n=9, exit_n=7, max_hold=17, slots=13
+v4-4	exits	0.3671	0.3671	0.6777	1.0841	0.7187	0.8309	27.65	perturb	c_exit7.py joint +-20 pct draw 0: trend_n=115, breadth_cut=0.4874, rsi_n=2, rsi_max=18.3307, vwap_n=11, exit_n=6, slots=11
+v4-4	exits	0.7421	0.7421	1.0445	0.9878	0.9361	1.0065	15.01	perturb	c_exit7.py joint +-20 pct draw 1: trend_n=90, breadth_cut=0.5614, rsi_n=3, rsi_max=18.8655, vwap_n=10, exit_n=6, slots=12
+v4-4	exits	0.7611	0.9491	0.8603	0.7611	0.8208	0.8051	9.59	perturb	c_exit7.py joint +-20 pct draw 2: trend_n=107, breadth_cut=0.6336, rsi_n=3, rsi_max=18.8888, vwap_n=12, exit_n=6, slots=14
+v4-4	exits	0.4709	1.8853	1.2476	0.4709	1.1412	0.9824	9.99	perturb	c_exit7.py joint +-20 pct draw 3: trend_n=91, breadth_cut=0.5785, rsi_n=4, rsi_max=21.1286, vwap_n=12, exit_n=7, slots=10
+v4-4	exits	0.4595	0.9962	0.7729	0.4595	0.7229	0.6627	8.63	perturb	c_exit7.py joint +-20 pct draw 4: trend_n=96, breadth_cut=0.6739, rsi_n=3, rsi_max=19.1426, vwap_n=10, exit_n=8, slots=12
+v4-4	exits	0.5417	1.0318	0.8238	0.5417	0.7825	0.722	10.27	perturb	c_exit7.py joint +-20 pct draw 5: trend_n=119, breadth_cut=0.6476, rsi_n=3, rsi_max=18.0966, vwap_n=12, exit_n=8, slots=11
+v4-4	exits	0.3651	1.2841	0.7329	0.3651	0.7455	0.6086	9.62	perturb	c_exit7.py joint +-20 pct draw 6: trend_n=105, breadth_cut=0.6413, rsi_n=3, rsi_max=20.1584, vwap_n=12, exit_n=8, slots=13
+v4-4	exits	1.0054	1.1115	1.0808	1.0054	1.0247	1.0315	9.91	perturb	c_exit7.py joint +-20 pct draw 7: trend_n=84, breadth_cut=0.5906, rsi_n=3, rsi_max=16.0145, vwap_n=10, exit_n=6, slots=13
+v4-4	exits	0.5652	0.5652	1.0155	1.3262	0.9754	1.1018	18.12	perturb	c_exit7.py joint +-20 pct draw 8: trend_n=81, breadth_cut=0.5473, rsi_n=3, rsi_max=20.6821, vwap_n=9, exit_n=6, slots=10
+v4-4	exits	0.4411	1.1845	0.4411	0.5868	0.592	0.4612	6.5	perturb	c_exit7.py joint +-20 pct draw 9: trend_n=85, breadth_cut=0.7078, rsi_n=3, rsi_max=22.5963, vwap_n=10, exit_n=7, slots=13
+v4-4	exits	0.7226	1.2079	0.8988	0.7226	0.9019	0.8238	11.49	perturb	c_exit7.py joint +-20 pct draw 10: trend_n=117, breadth_cut=0.6488, rsi_n=3, rsi_max=22.0027, vwap_n=11, exit_n=8, slots=13
+v4-4	exits	0.6664	1.0999	0.8924	0.6664	0.8542	0.8078	16.43	perturb	c_exit7.py joint +-20 pct draw 11: trend_n=111, breadth_cut=0.5363, rsi_n=3, rsi_max=19.6512, vwap_n=11, exit_n=8, slots=13
+v4-4	exits	0.6281	0.6281	0.9678	0.9527	0.8677	0.9474	19.06	perturb	c_exit7.py joint +-20 pct draw 12: trend_n=104, breadth_cut=0.5621, rsi_n=3, rsi_max=21.5342, vwap_n=9, exit_n=6, slots=12
+v4-4	exits	0.477	1.2068	0.7496	0.477	0.7645	0.652	10.42	perturb	c_exit7.py joint +-20 pct draw 13: trend_n=106, breadth_cut=0.6398, rsi_n=3, rsi_max=20.8298, vwap_n=12, exit_n=8, slots=12
+v4-4	exits	0.588	1.3161	0.7702	0.588	0.8087	0.6972	10.33	perturb	c_exit7.py joint +-20 pct draw 14: trend_n=89, breadth_cut=0.6418, rsi_n=3, rsi_max=16.7042, vwap_n=8, exit_n=7, slots=13
+v4-4	exits	0.8004	1.0096	0.8004	0.8293	0.8389	0.8063	20.91	perturb	c_exit7.py joint +-20 pct draw 15: trend_n=110, breadth_cut=0.5393, rsi_n=3, rsi_max=21.4147, vwap_n=10, exit_n=7, slots=10
+v4-4	exits	0.8691	1.1877	0.8943	0.8691	0.9212	0.8753	16.88	perturb	c_exit7.py joint +-20 pct draw 16: trend_n=111, breadth_cut=0.5738, rsi_n=3, rsi_max=21.4854, vwap_n=11, exit_n=7, slots=12
+v4-4	exits	0.5149	1.0619	1.0212	0.5149	0.8766	0.8497	11.17	perturb	c_exit7.py joint +-20 pct draw 17: trend_n=82, breadth_cut=0.5635, rsi_n=3, rsi_max=16.9344, vwap_n=9, exit_n=8, slots=14
+v4-4	exits	0.3516	1.1094	0.8204	0.3516	0.7524	0.6644	6.36	perturb	c_exit7.py joint +-20 pct draw 18: trend_n=112, breadth_cut=0.7031, rsi_n=3, rsi_max=16.0265, vwap_n=10, exit_n=8, slots=14
+v4-4	exits	0.5478	0.9643	0.9974	0.5478	0.8523	0.8406	12.89	perturb	c_exit7.py joint +-20 pct draw 19: trend_n=103, breadth_cut=0.6202, rsi_n=3, rsi_max=19.0097, vwap_n=9, exit_n=8, slots=13
+v4-4	exits	0.9345	1.0559	0.9502	0.9345	0.9382	0.9288	13.6	perturb	c_exit7.py joint +-20 pct draw 20: trend_n=114, breadth_cut=0.5944, rsi_n=3, rsi_max=17.4779, vwap_n=10, exit_n=6, slots=13
+v4-4	exits	0.9054	1.1246	0.9054	0.9594	0.92	0.8918	9.51	perturb	c_exit7.py joint +-20 pct draw 21: trend_n=97, breadth_cut=0.6882, rsi_n=3, rsi_max=18.4248, vwap_n=9, exit_n=6, slots=10
+v4-4	exits	0.5716	0.5716	0.959	0.7117	0.7927	0.8661	17.25	perturb	c_exit7.py joint +-20 pct draw 22: trend_n=92, breadth_cut=0.5355, rsi_n=3, rsi_max=21.689, vwap_n=10, exit_n=6, slots=14
+v4-4	exits	0.5162	0.5162	0.9366	1.0701	0.8538	0.9587	15.75	perturb	c_exit7.py joint +-20 pct draw 23: trend_n=81, breadth_cut=0.5969, rsi_n=3, rsi_max=23.2099, vwap_n=9, exit_n=6, slots=12
+v4-4	exits	0.3841	0.3841	1.0326	0.6327	0.7615	0.8907	14.54	perturb	c_exit7.py joint +-20 pct draw 24: trend_n=95, breadth_cut=0.5026, rsi_n=4, rsi_max=22.7195, vwap_n=8, exit_n=8, slots=12
+v4-4	exits	0.6198	0.7408	0.6977	0.6198	0.6649	0.6598	11.49	perturb	c_exit7.py joint +-20 pct draw 25: trend_n=85, breadth_cut=0.6614, rsi_n=3, rsi_max=22.3678, vwap_n=8, exit_n=8, slots=12
+v4-4	exits	0.7052	0.7052	0.853	0.9748	0.8297	0.8795	20.11	perturb	c_exit7.py joint +-20 pct draw 26: trend_n=106, breadth_cut=0.5565, rsi_n=3, rsi_max=21.7292, vwap_n=8, exit_n=6, slots=13
+v4-4	exits	0.6412	1.2755	0.6412	0.7012	0.7796	0.6422	8.63	perturb	c_exit7.py joint +-20 pct draw 27: trend_n=85, breadth_cut=0.6568, rsi_n=3, rsi_max=23.3048, vwap_n=12, exit_n=8, slots=10
+v4-4	exits	0.6999	1.1505	0.8072	0.6999	0.8137	0.749	7.26	perturb	c_exit7.py joint +-20 pct draw 28: trend_n=101, breadth_cut=0.7056, rsi_n=3, rsi_max=18.519, vwap_n=9, exit_n=6, slots=14
+v4-4	exits	0.7336	1.1123	0.972	0.7336	0.9226	0.8825	16.03	perturb	c_exit7.py joint +-20 pct draw 29: trend_n=109, breadth_cut=0.513, rsi_n=3, rsi_max=18.1271, vwap_n=11, exit_n=7, slots=13
+v4-4	exits	0.2518	1.063	1.0739	0.2518	0.8472	0.8099	5.66	perturb	c_exit7.py joint +-20 pct draw 30: trend_n=84, breadth_cut=0.509, rsi_n=4, rsi_max=16.3109, vwap_n=9, exit_n=8, slots=14
+v4-4	exits	0.7762	0.8293	0.7762	0.7849	0.7795	0.7766	22.26	perturb	c_exit7.py joint +-20 pct draw 31: trend_n=113, breadth_cut=0.5226, rsi_n=3, rsi_max=22.8717, vwap_n=11, exit_n=6, slots=11
+v4-4	exits	0.7959	1.2674	0.8075	0.7959	0.8798	0.7982	19.62	perturb	c_exit7.py joint +-20 pct draw 32: trend_n=111, breadth_cut=0.5555, rsi_n=3, rsi_max=23.6082, vwap_n=11, exit_n=7, slots=11
+v4-4	exits	0.7019	0.9239	0.9226	0.7019	0.8391	0.8333	9.31	perturb	c_exit7.py joint +-20 pct draw 33: trend_n=105, breadth_cut=0.6453, rsi_n=3, rsi_max=18.9076, vwap_n=11, exit_n=6, slots=14
+v4-4	exits	0.6887	0.9259	0.9453	0.6887	0.8526	0.85	18.08	perturb	c_exit7.py joint +-20 pct draw 34: trend_n=111, breadth_cut=0.5637, rsi_n=3, rsi_max=22.5538, vwap_n=10, exit_n=7, slots=14
+v4-4	exits	0.9949	1.1438	0.9949	1.1593	1.0369	1.0324	11.7	perturb	c_exit7.py joint +-20 pct draw 35: trend_n=105, breadth_cut=0.6761, rsi_n=3, rsi_max=18.8358, vwap_n=9, exit_n=6, slots=10
+v4-4	exits	0.5153	0.5153	0.985	1.0363	0.8804	0.9927	20.23	perturb	c_exit7.py joint +-20 pct draw 36: trend_n=100, breadth_cut=0.5074, rsi_n=3, rsi_max=19.6244, vwap_n=9, exit_n=6, slots=11
+v4-4	exits	0.5523	0.5523	0.9061	1.1069	0.8726	0.9752	20.83	perturb	c_exit7.py joint +-20 pct draw 37: trend_n=83, breadth_cut=0.5076, rsi_n=2, rsi_max=19.1447, vwap_n=11, exit_n=8, slots=11
+v4-4	exits	0.6402	1.261	1.0903	0.6402	0.9838	0.9313	11.01	perturb	c_exit7.py joint +-20 pct draw 38: trend_n=90, breadth_cut=0.6481, rsi_n=3, rsi_max=18.0921, vwap_n=9, exit_n=8, slots=11
+v4-4	exits	0.8698	1.1508	0.8762	0.8698	0.8999	0.8555	9.48	perturb	c_exit7.py joint +-20 pct draw 39: trend_n=98, breadth_cut=0.6847, rsi_n=3, rsi_max=17.6496, vwap_n=8, exit_n=6, slots=12
+v4-4	exits	0.6977	0.6977	0.9203	0.9784	0.8634	0.9242	16.97	perturb	c_exit7.py joint +-20 pct draw 40: trend_n=110, breadth_cut=0.5764, rsi_n=3, rsi_max=20.2208, vwap_n=9, exit_n=6, slots=13
+v4-4	exits	0.7788	1.2897	1.0031	0.7788	0.9784	0.9154	12.33	perturb	c_exit7.py joint +-20 pct draw 41: trend_n=95, breadth_cut=0.5624, rsi_n=3, rsi_max=17.2079, vwap_n=12, exit_n=7, slots=11
+v4-4	exits	0.4821	1.0841	0.8907	0.4821	0.8129	0.7511	11.29	perturb	c_exit7.py joint +-20 pct draw 42: trend_n=107, breadth_cut=0.6653, rsi_n=3, rsi_max=22.6813, vwap_n=10, exit_n=8, slots=13
+v4-4	exits	0.3034	0.3034	0.7683	0.8246	0.6643	0.7816	22.46	perturb	c_exit7.py joint +-20 pct draw 43: trend_n=112, breadth_cut=0.4995, rsi_n=3, rsi_max=21.3605, vwap_n=9, exit_n=7, slots=12
+v4-4	exits	0.4357	1.2472	0.6142	0.4357	0.6854	0.5423	5.21	perturb	c_exit7.py joint +-20 pct draw 44: trend_n=82, breadth_cut=0.7173, rsi_n=3, rsi_max=19.2788, vwap_n=10, exit_n=7, slots=13
+v4-4	exits	0.695	0.9913	0.9483	0.695	0.8664	0.8478	11.27	perturb	c_exit7.py joint +-20 pct draw 45: trend_n=108, breadth_cut=0.6512, rsi_n=3, rsi_max=21.629, vwap_n=10, exit_n=8, slots=14
+v4-4	exits	0.6812	0.7566	0.8233	0.6812	0.7483	0.7556	12.5	perturb	c_exit7.py joint +-20 pct draw 46: trend_n=83, breadth_cut=0.6323, rsi_n=2, rsi_max=23.8906, vwap_n=11, exit_n=6, slots=11
+v4-4	exits	0.9591	1.0996	0.9591	1.1195	0.9675	0.9632	4.91	perturb	c_exit7.py joint +-20 pct draw 47: trend_n=107, breadth_cut=0.7061, rsi_n=4, rsi_max=19.6671, vwap_n=10, exit_n=6, slots=14
+v4-4	exits	0.7513	0.9714	0.8748	0.7513	0.8439	0.8249	19.53	perturb	c_exit7.py joint +-20 pct draw 48: trend_n=116, breadth_cut=0.5108, rsi_n=3, rsi_max=19.2701, vwap_n=10, exit_n=8, slots=11
+v4-4	exits	0.5322	1.2607	1.0102	0.5322	0.9136	0.8458	10.77	perturb	c_exit7.py joint +-20 pct draw 49: trend_n=91, breadth_cut=0.5985, rsi_n=3, rsi_max=17.1443, vwap_n=9, exit_n=8, slots=14
+v4-4	exits	0.6443	1.2507	0.6443	0.8184	0.778	0.6648	8.93	perturb	c_exit7.py joint +-20 pct draw 50: trend_n=93, breadth_cut=0.6857, rsi_n=3, rsi_max=22.4041, vwap_n=10, exit_n=6, slots=11
+v4-4	exits	0.6984	0.6984	1.0374	0.9144	0.9085	0.9812	15.93	perturb	c_exit7.py joint +-20 pct draw 51: trend_n=84, breadth_cut=0.5509, rsi_n=3, rsi_max=21.1029, vwap_n=9, exit_n=7, slots=13
+v4-4	exits	0.6956	1.3034	0.7784	0.6956	0.841	0.7325	7.78	perturb	c_exit7.py joint +-20 pct draw 52: trend_n=90, breadth_cut=0.6618, rsi_n=3, rsi_max=16.5888, vwap_n=11, exit_n=8, slots=10
+v4-4	exits	0.8812	1.0931	0.8812	0.9844	0.9336	0.9115	17.52	perturb	c_exit7.py joint +-20 pct draw 53: trend_n=101, breadth_cut=0.5906, rsi_n=3, rsi_max=21.5488, vwap_n=9, exit_n=7, slots=10
+v4-4	exits	0.4679	0.4679	0.8631	1.0025	0.7885	0.8899	14.62	perturb	c_exit7.py joint +-20 pct draw 54: trend_n=97, breadth_cut=0.5472, rsi_n=3, rsi_max=16.6223, vwap_n=8, exit_n=6, slots=13
+v4-4	exits	0.4987	1.0013	0.4987	0.8421	0.6596	0.5717	6.07	perturb	c_exit7.py joint +-20 pct draw 55: trend_n=93, breadth_cut=0.7014, rsi_n=3, rsi_max=18.9667, vwap_n=12, exit_n=6, slots=13
+v4-4	exits	0.5774	1.6387	0.6021	0.5774	0.7954	0.5779	8.06	perturb	c_exit7.py joint +-20 pct draw 56: trend_n=84, breadth_cut=0.6395, rsi_n=3, rsi_max=18.2715, vwap_n=12, exit_n=7, slots=11
+v4-4	exits	0.4376	1.1407	1.0999	0.4376	0.9243	0.8847	8.86	perturb	c_exit7.py joint +-20 pct draw 57: trend_n=92, breadth_cut=0.6716, rsi_n=3, rsi_max=18.8757, vwap_n=9, exit_n=8, slots=14
+v4-4	exits	0.8945	0.8945	1.0679	0.9156	0.9636	1.0003	13.62	perturb	c_exit7.py joint +-20 pct draw 58: trend_n=92, breadth_cut=0.5682, rsi_n=3, rsi_max=19.2503, vwap_n=10, exit_n=6, slots=14
+v4-4	exits	0.8711	1.4218	1.2083	0.8711	1.1345	1.0799	7.72	perturb	c_exit7.py joint +-20 pct draw 59: trend_n=103, breadth_cut=0.6055, rsi_n=4, rsi_max=18.7708, vwap_n=8, exit_n=8, slots=14
+v4-4	exits	0.636	0.7894	1.0463	0.636	0.8689	0.9008	13.79	discard	exit when close > VWAP anchored at the start of the pullback (first close below VWAP10), time stop 20 (0 new params)
+v4-4	exits	0.2937	0.2937	1.0259	0.6041	0.7361	0.8729	12.47	discard	exit when close > VWAP anchored at the highest close of the last vwap_n days (swing-high AVWAP), time stop 20 (0 new params)
+v4-4	exits	0.7419	1.0043	1.1048	0.7419	0.9648	0.9726	13.48	discard	exit when close > exponentially weighted VWAP (span 7.0), time stop 20
+v4-4	exits	0.9504	1.1293	1.0275	0.9504	0.9981	0.9852	13.72	discard	exit VWAP7 + time stop 12 (max_hold moved)
+v4-4	exits	0.9416	0.9987	1.093	0.9416	1.005	1.028	13.44	discard	exit VWAP8 + time stop 12
+v4-4	exits	0.9714	0.9714	1.0129	1.0954	0.9924	1.0203	13.97	discard	exit VWAP6 + time stop 12 (plateau neighbour)
+v4-4	exits	0.9564	1.1228	1.0776	0.9564	1.0248	1.0211	13.76	discard	exit VWAP7 + time stop 10 (plateau neighbour)
+v4-4	exits	0.9942	1.187	1.0283	0.9942	1.0208	0.9993	13.72	discard	exit VWAP7 + time stop 14 (plateau neighbour)
+v4-4	exits	0.2513	0.2513	0.6112	0.9891	0.6318	0.7522	27.84	perturb	c_exit7_ts12 joint +-20 pct draw 0: trend_n=115, breadth_cut=0.4874, rsi_n=2, rsi_max=18.3307, vwap_n=11, exit_n=6, max_hold=11, slots=11
+v4-4	exits	0.5858	0.8334	0.9144	0.5858	0.7916	0.7967	14.28	perturb	c_exit7_ts12 joint +-20 pct draw 1: trend_n=94, breadth_cut=0.5893, rsi_n=3, rsi_max=19.2532, vwap_n=8, exit_n=7, max_hold=13, slots=13
+v4-4	exits	1.0545	1.5871	1.0545	1.1847	1.1003	1.0348	4.74	perturb	c_exit7_ts12 joint +-20 pct draw 2: trend_n=86, breadth_cut=0.5667, rsi_n=4, rsi_max=16.9953, vwap_n=12, exit_n=6, max_hold=12, slots=14
+v4-4	exits	0.5021	1.053	0.6315	0.5021	0.6804	0.5797	6.25	perturb	c_exit7_ts12 joint +-20 pct draw 3: trend_n=106, breadth_cut=0.7155, rsi_n=3, rsi_max=16.78, vwap_n=10, exit_n=8, max_hold=13, slots=11
+v4-4	exits	0.5557	1.0758	0.5557	0.6822	0.6602	0.5693	7.23	perturb	c_exit7_ts12 joint +-20 pct draw 4: trend_n=98, breadth_cut=0.707, rsi_n=3, rsi_max=23.8126, vwap_n=11, exit_n=6, max_hold=11, slots=14
+v4-4	exits	0.7754	0.9392	0.8249	0.7754	0.8189	0.799	18.85	perturb	c_exit7_ts12 joint +-20 pct draw 5: trend_n=116, breadth_cut=0.5331, rsi_n=3, rsi_max=21.3759, vwap_n=10, exit_n=7, max_hold=14, slots=14
+v4-4	exits	0.3671	0.3671	0.8398	0.7474	0.6928	0.7986	20.43	perturb	c_exit7_ts12 joint +-20 pct draw 6: trend_n=109, breadth_cut=0.5033, rsi_n=3, rsi_max=20.0001, vwap_n=8, exit_n=7, max_hold=11, slots=13
+v4-4	exits	0.3822	0.3822	0.9777	1.3678	0.9289	1.0909	18.23	perturb	c_exit7_ts12 joint +-20 pct draw 7: trend_n=81, breadth_cut=0.5473, rsi_n=3, rsi_max=20.6821, vwap_n=9, exit_n=6, max_hold=10, slots=10
+v4-4	exits	0.6985	0.9785	0.6985	0.7066	0.7429	0.6922	16.32	perturb	c_exit7_ts12 joint +-20 pct draw 8: trend_n=118, breadth_cut=0.5471, rsi_n=3, rsi_max=19.164, vwap_n=10, exit_n=8, max_hold=14, slots=13
+v4-4	exits	0.6695	1.1737	0.7643	0.6695	0.8061	0.7117	10.54	perturb	c_exit7_ts12 joint +-20 pct draw 9: trend_n=102, breadth_cut=0.6601, rsi_n=3, rsi_max=23.3308, vwap_n=11, exit_n=8, max_hold=11, slots=12
+v4-4	exits	0.9578	1.0487	0.9578	0.9959	0.9516	0.9435	12.6	perturb	c_exit7_ts12 joint +-20 pct draw 10: trend_n=98, breadth_cut=0.6381, rsi_n=3, rsi_max=22.0159, vwap_n=10, exit_n=7, max_hold=12, slots=13
+v4-4	exits	0.8633	0.8809	0.9219	0.8633	0.8778	0.8905	15.13	perturb	c_exit7_ts12 joint +-20 pct draw 11: trend_n=88, breadth_cut=0.5263, rsi_n=3, rsi_max=21.2112, vwap_n=11, exit_n=8, max_hold=12, slots=14
+v4-4	exits	0.7327	0.7918	0.9125	0.7327	0.8163	0.8394	16.6	perturb	c_exit7_ts12 joint +-20 pct draw 12: trend_n=109, breadth_cut=0.5802, rsi_n=3, rsi_max=21.3931, vwap_n=11, exit_n=6, max_hold=10, slots=12
+v4-4	exits	0.474	1.2884	0.8594	0.474	0.8479	0.7265	9.61	perturb	c_exit7_ts12 joint +-20 pct draw 13: trend_n=109, breadth_cut=0.6577, rsi_n=3, rsi_max=16.9778, vwap_n=11, exit_n=7, max_hold=12, slots=10
+v4-4	exits	0.7216	1.2357	0.7562	0.7216	0.8249	0.7378	18.03	perturb	c_exit7_ts12 joint +-20 pct draw 14: trend_n=111, breadth_cut=0.5738, rsi_n=3, rsi_max=21.4854, vwap_n=11, exit_n=7, max_hold=12, slots=10
+v4-4	exits	0.7962	1.2742	1.1077	0.7962	1.0363	0.9912	11.28	perturb	c_exit7_ts12 joint +-20 pct draw 15: trend_n=94, breadth_cut=0.5529, rsi_n=3, rsi_max=17.8354, vwap_n=12, exit_n=8, max_hold=13, slots=14
+v4-4	exits	0.5808	0.5808	0.9959	0.7117	0.8127	0.8895	20.88	perturb	c_exit7_ts12 joint +-20 pct draw 16: trend_n=91, breadth_cut=0.4808, rsi_n=3, rsi_max=23.7287, vwap_n=11, exit_n=7, max_hold=12, slots=12
+v4-4	exits	0.7785	0.7785	0.9009	1.1593	0.9286	0.9841	19.6	perturb	c_exit7_ts12 joint +-20 pct draw 17: trend_n=95, breadth_cut=0.5102, rsi_n=3, rsi_max=21.0688, vwap_n=11, exit_n=7, max_hold=14, slots=10
+v4-4	exits	0.6412	0.6412	1.024	1.0756	0.9365	1.0319	17.09	perturb	c_exit7_ts12 joint +-20 pct draw 18: trend_n=99, breadth_cut=0.5502, rsi_n=3, rsi_max=19.4986, vwap_n=11, exit_n=6, max_hold=11, slots=10
+v4-4	exits	0.776	0.776	0.8586	1.0434	0.8672	0.9066	17.06	perturb	c_exit7_ts12 joint +-20 pct draw 19: trend_n=89, breadth_cut=0.5216, rsi_n=3, rsi_max=17.8499, vwap_n=9, exit_n=8, max_hold=12, slots=10
+v4-4	exits	0.6498	0.8384	0.8927	0.6498	0.8003	0.8018	21.48	perturb	c_exit7_ts12 joint +-20 pct draw 20: trend_n=116, breadth_cut=0.4863, rsi_n=3, rsi_max=22.1913, vwap_n=12, exit_n=7, max_hold=10, slots=12
+v4-4	exits	0.2843	0.2843	0.981	0.8629	0.7674	0.9266	16.32	perturb	c_exit7_ts12 joint +-20 pct draw 21: trend_n=95, breadth_cut=0.5026, rsi_n=4, rsi_max=22.7195, vwap_n=8, exit_n=8, max_hold=12, slots=10
+v4-4	exits	0.5543	1.042	0.862	0.5543	0.8026	0.7514	11.59	perturb	c_exit7_ts12 joint +-20 pct draw 22: trend_n=110, breadth_cut=0.6078, rsi_n=3, rsi_max=16.2962, vwap_n=11, exit_n=7, max_hold=13, slots=11
+v4-4	exits	0.7242	1.0615	0.8094	0.7242	0.8183	0.7633	9.5	perturb	c_exit7_ts12 joint +-20 pct draw 23: trend_n=101, breadth_cut=0.6519, rsi_n=3, rsi_max=18.3535, vwap_n=11, exit_n=6, max_hold=13, slots=11
+v4-4	exits	0.8889	1.0786	0.8889	0.9414	0.9192	0.8832	8.41	perturb	c_exit7_ts12 joint +-20 pct draw 24: trend_n=117, breadth_cut=0.6923, rsi_n=3, rsi_max=16.6529, vwap_n=10, exit_n=8, max_hold=11, slots=11
+v4-4	exits	0.596	0.596	1.0059	0.8786	0.8643	0.9512	17.21	perturb	c_exit7_ts12 joint +-20 pct draw 25: trend_n=90, breadth_cut=0.5483, rsi_n=3, rsi_max=21.824, vwap_n=9, exit_n=8, max_hold=11, slots=13
+v4-4	exits	0.5702	0.8929	0.7473	0.5702	0.7073	0.6753	7.03	perturb	c_exit7_ts12 joint +-20 pct draw 26: trend_n=94, breadth_cut=0.6596, rsi_n=3, rsi_max=16.965, vwap_n=12, exit_n=6, max_hold=11, slots=13
+v4-4	exits	0.8129	1.0872	0.8294	0.8129	0.8597	0.8007	8.99	perturb	c_exit7_ts12 joint +-20 pct draw 27: trend_n=114, breadth_cut=0.6802, rsi_n=3, rsi_max=20.0305, vwap_n=11, exit_n=8, max_hold=10, slots=11
+v4-4	exits	0.7593	1.0865	0.798	0.7593	0.8267	0.7772	18.98	perturb	c_exit7_ts12 joint +-20 pct draw 28: trend_n=111, breadth_cut=0.5555, rsi_n=3, rsi_max=23.6082, vwap_n=11, exit_n=7, max_hold=11, slots=13
+v4-4	exits	0.5783	0.5783	0.7171	0.8343	0.7056	0.7519	20.37	perturb	c_exit7_ts12 joint +-20 pct draw 29: trend_n=108, breadth_cut=0.537, rsi_n=3, rsi_max=21.4669, vwap_n=9, exit_n=8, max_hold=13, slots=11
+v4-4	exits	0.7097	1.3417	0.7097	0.7309	0.8216	0.691	7.94	perturb	c_exit7_ts12 joint +-20 pct draw 30: trend_n=91, breadth_cut=0.6766, rsi_n=3, rsi_max=20.2312, vwap_n=12, exit_n=7, max_hold=14, slots=11
+v4-4	exits	0.6973	0.6973	0.9171	0.9416	0.8525	0.9108	13.88	perturb	c_exit7_ts12 joint +-20 pct draw 31: trend_n=94, breadth_cut=0.5515, rsi_n=3, rsi_max=16.5095, vwap_n=10, exit_n=6, max_hold=13, slots=12
+v4-4	exits	0.3671	0.3671	0.7489	0.9232	0.689	0.7929	15.46	perturb	c_exit7_ts12 joint +-20 pct draw 32: trend_n=91, breadth_cut=0.4961, rsi_n=3, rsi_max=16.5856, vwap_n=8, exit_n=6, max_hold=11, slots=13
+v4-4	exits	0.6435	0.6435	0.9077	0.9743	0.8448	0.9143	18.71	perturb	c_exit7_ts12 joint +-20 pct draw 33: trend_n=110, breadth_cut=0.5582, rsi_n=3, rsi_max=21.6041, vwap_n=9, exit_n=6, max_hold=11, slots=14
+v4-4	exits	0.9856	1.0384	1.1082	0.9856	1.0304	1.0488	13.93	perturb	c_exit7_ts12 joint +-20 pct draw 34: trend_n=94, breadth_cut=0.59, rsi_n=3, rsi_max=18.0838, vwap_n=9, exit_n=6, max_hold=10, slots=12
+v4-4	exits	0.6815	0.6815	0.8692	0.9059	0.8181	0.8704	18.41	perturb	c_exit7_ts12 joint +-20 pct draw 35: trend_n=110, breadth_cut=0.5764, rsi_n=3, rsi_max=20.2208, vwap_n=9, exit_n=6, max_hold=13, slots=11
+v4-4	exits	0.8112	1.0153	0.8112	0.8939	0.8316	0.7965	11.18	perturb	c_exit7_ts12 joint +-20 pct draw 36: trend_n=94, breadth_cut=0.6608, rsi_n=3, rsi_max=23.3279, vwap_n=10, exit_n=6, max_hold=13, slots=13
+v4-4	exits	0.7405	1.4541	0.7405	0.9658	0.9059	0.7803	8.77	perturb	c_exit7_ts12 joint +-20 pct draw 37: trend_n=96, breadth_cut=0.6804, rsi_n=3, rsi_max=22.4707, vwap_n=11, exit_n=8, max_hold=10, slots=10
+v4-4	exits	0.1958	0.1958	0.7904	0.9318	0.6759	0.8268	20.23	perturb	c_exit7_ts12 joint +-20 pct draw 38: trend_n=107, breadth_cut=0.5131, rsi_n=3, rsi_max=19.8505, vwap_n=8, exit_n=8, max_hold=13, slots=12
+v4-4	exits	0.5862	1.1211	0.8335	0.5862	0.815	0.7391	12.91	perturb	c_exit7_ts12 joint +-20 pct draw 39: trend_n=96, breadth_cut=0.6061, rsi_n=3, rsi_max=21.6425, vwap_n=11, exit_n=7, max_hold=13, slots=12
+v4-4	exits	0.6723	0.9002	0.6723	0.8565	0.743	0.7203	11.66	perturb	c_exit7_ts12 joint +-20 pct draw 40: trend_n=114, breadth_cut=0.6915, rsi_n=3, rsi_max=21.0782, vwap_n=8, exit_n=8, max_hold=13, slots=11
+v4-4	exits	0.6225	1.3728	1.0714	0.6225	0.999	0.9135	8.62	perturb	c_exit7_ts12 joint +-20 pct draw 41: trend_n=91, breadth_cut=0.6405, rsi_n=4, rsi_max=23.7089, vwap_n=10, exit_n=7, max_hold=11, slots=14
+v4-4	exits	0.7924	0.7924	0.8353	0.8329	0.8069	0.8259	19.94	perturb	c_exit7_ts12 joint +-20 pct draw 42: trend_n=116, breadth_cut=0.5108, rsi_n=3, rsi_max=19.2701, vwap_n=10, exit_n=8, max_hold=11, slots=11
+v4-4	exits	0.9032	1.0809	0.9883	0.9032	0.9594	0.9425	11.07	perturb	c_exit7_ts12 joint +-20 pct draw 43: trend_n=100, breadth_cut=0.5549, rsi_n=3, rsi_max=17.4048, vwap_n=12, exit_n=8, max_hold=11, slots=14
+v4-4	exits	0.6351	1.0151	0.7954	0.6351	0.7678	0.7226	7.67	perturb	c_exit7_ts12 joint +-20 pct draw 44: trend_n=105, breadth_cut=0.6721, rsi_n=3, rsi_max=16.1496, vwap_n=10, exit_n=6, max_hold=11, slots=14
+v4-4	exits	0.5614	0.5614	0.9256	0.7478	0.7836	0.8574	20.42	perturb	c_exit7_ts12 joint +-20 pct draw 45: trend_n=106, breadth_cut=0.5532, rsi_n=3, rsi_max=22.2279, vwap_n=9, exit_n=8, max_hold=12, slots=10
+v4-4	exits	0.9835	1.0362	0.9835	1.1378	0.9978	1.0086	12.89	perturb	c_exit7_ts12 joint +-20 pct draw 46: trend_n=111, breadth_cut=0.6438, rsi_n=3, rsi_max=20.2814, vwap_n=10, exit_n=8, max_hold=13, slots=11
+v4-4	exits	0.2421	0.2421	0.8329	0.875	0.6942	0.8374	19.88	perturb	c_exit7_ts12 joint +-20 pct draw 47: trend_n=97, breadth_cut=0.4919, rsi_n=3, rsi_max=18.241, vwap_n=9, exit_n=6, max_hold=10, slots=11
+v4-4	exits	0.9696	0.9924	1.0653	0.9696	0.9951	1.0139	10.64	perturb	c_exit7_ts12 joint +-20 pct draw 48: trend_n=106, breadth_cut=0.558, rsi_n=4, rsi_max=19.9478, vwap_n=9, exit_n=8, max_hold=10, slots=13
+v4-4	exits	0.5648	1.6387	0.5648	0.5998	0.7798	0.5572	8.09	perturb	c_exit7_ts12 joint +-20 pct draw 49: trend_n=84, breadth_cut=0.6395, rsi_n=3, rsi_max=18.2715, vwap_n=12, exit_n=7, max_hold=11, slots=11
+v4-4	exits	0.853	1.0615	0.8843	0.853	0.8893	0.8635	16.41	perturb	c_exit7_ts12 joint +-20 pct draw 50: trend_n=112, breadth_cut=0.5432, rsi_n=3, rsi_max=18.2002, vwap_n=11, exit_n=8, max_hold=11, slots=11
+v4-4	exits	0.569	1.5804	1.0024	0.569	0.9908	0.8523	10.35	perturb	c_exit7_ts12 joint +-20 pct draw 51: trend_n=92, breadth_cut=0.5775, rsi_n=3, rsi_max=18.2316, vwap_n=12, exit_n=7, max_hold=12, slots=14
+v4-4	exits	0.6606	0.7673	0.9234	0.6606	0.8032	0.825	20.56	perturb	c_exit7_ts12 joint +-20 pct draw 52: trend_n=94, breadth_cut=0.4921, rsi_n=3, rsi_max=23.3505, vwap_n=11, exit_n=7, max_hold=11, slots=12
+v4-4	exits	0.5992	1.0163	0.8248	0.5992	0.7876	0.7372	10.03	perturb	c_exit7_ts12 joint +-20 pct draw 53: trend_n=119, breadth_cut=0.6744, rsi_n=3, rsi_max=19.4611, vwap_n=10, exit_n=7, max_hold=12, slots=14
+v4-4	exits	0.5295	0.8886	0.5295	0.8041	0.6625	0.6045	8.56	perturb	c_exit7_ts12 joint +-20 pct draw 54: trend_n=106, breadth_cut=0.6993, rsi_n=2, rsi_max=20.5066, vwap_n=10, exit_n=8, max_hold=14, slots=12
+v4-4	exits	0.819	1.3256	0.9642	0.819	0.9739	0.9013	13.49	perturb	c_exit7_ts12 joint +-20 pct draw 55: trend_n=88, breadth_cut=0.6141, rsi_n=3, rsi_max=18.773, vwap_n=9, exit_n=7, max_hold=11, slots=10
+v4-4	exits	0.7566	1.1566	0.7566	0.7793	0.8309	0.7576	18.66	perturb	c_exit7_ts12 joint +-20 pct draw 56: trend_n=115, breadth_cut=0.5966, rsi_n=3, rsi_max=21.0846, vwap_n=9, exit_n=7, max_hold=12, slots=10
+v4-4	exits	0.5743	1.4278	0.7753	0.5743	0.8173	0.6951	5.29	perturb	c_exit7_ts12 joint +-20 pct draw 57: trend_n=99, breadth_cut=0.7168, rsi_n=4, rsi_max=21.3344, vwap_n=9, exit_n=7, max_hold=14, slots=13
+v4-4	exits	0.4637	1.0261	0.4637	0.8631	0.6374	0.5389	5.54	perturb	c_exit7_ts12 joint +-20 pct draw 58: trend_n=80, breadth_cut=0.7165, rsi_n=3, rsi_max=19.1491, vwap_n=10, exit_n=6, max_hold=10, slots=10
+v4-4	exits	0.3801	0.3801	0.6588	0.844	0.6418	0.7273	27.44	perturb	c_exit7_ts12 joint +-20 pct draw 59: trend_n=116, breadth_cut=0.5217, rsi_n=2, rsi_max=22.3844, vwap_n=9, exit_n=7, max_hold=10, slots=13
+v4-4	exits	0.7827	0.7827	1.1404	0.9957	1.0031	1.0801	13.24	discard	bounce exit for losers: sell on close > VWAP10, or (close < entry close and close > VWAP7); time stop 20
+v4-4	exits	0.5932	0.8089	1.0865	0.5932	0.8779	0.9111	13.03	discard	incumbent without the time stop (max_hold=10000): simplification check
+v4-4	exits	0.8108	0.8108	1.139	1.0603	1.0235	1.1	13.38	discard	bounce exit for losers: close > VWAP10, or (close < entry close and close > VWAP6); time stop 20
+v4-4	exits	0.7317	0.7317	1.1802	0.8747	0.9817	1.0661	13.2	discard	bounce exit for losers: close > VWAP10, or (close < entry close and close > VWAP8); time stop 20
+v4-4	exits	0.4111	0.4111	0.8084	0.8943	0.7327	0.8298	14.69	discard	losers exit on first up-close: close > VWAP10, or (close < entry close and close > previous close); time stop 20 (0 new params)
+v4-4	exits	0.7059	0.7059	0.9601	1.0709	0.9108	0.9826	18.24	discard	exit VWAP7 + time stop 20, looser trigger breadth_cut=0.5 (more episodes, more invested days)
+v4-4	exits	0.811	0.811	0.9258	0.9307	0.8773	0.9136	16.88	discard	exit VWAP7 + time stop 20, looser trigger breadth_cut=0.55 (more episodes, more invested days)
+v4-4	exits	0.9872	1.1902	1.0664	0.9872	1.0399	1.0234	13.71	candidate	candidate.py = incumbent 1 with exit at close > VWAP(exit_n=7), time stop 20 kept (best attempt; fails sanity, years, plateau)
+v4-4	exits	0.8516	1.0698	1.0502	0.8516	0.9763	0.9668	11.82	plateau	candidate.py plateau neighbour trend_n=80
+v4-4	exits	0.891	1.0757	1.0558	0.891	0.9943	0.9901	15.18	plateau	candidate.py plateau neighbour trend_n=120
+v4-4	exits	0.713	0.713	0.9953	0.8903	0.888	0.9504	19.52	plateau	candidate.py plateau neighbour breadth_cut=0.48
+v4-4	exits	0.6001	1.2718	0.6001	0.8069	0.7646	0.6419	6.45	plateau	candidate.py plateau neighbour breadth_cut=0.72
+v4-4	exits	0.7665	0.8788	0.7665	1.0109	0.846	0.8505	16.75	plateau	candidate.py plateau neighbour rsi_n=2
+v4-4	exits	1.071	1.6017	1.1889	1.071	1.2117	1.1304	8.93	plateau	candidate.py plateau neighbour rsi_n=4
+v4-4	exits	0.7704	1.3101	1.0292	0.7704	0.9918	0.9306	11.25	plateau	candidate.py plateau neighbour rsi_max=16.0
+v4-4	exits	0.7549	1.1907	0.954	0.7549	0.9282	0.8779	15.82	plateau	candidate.py plateau neighbour rsi_max=24.0
+v4-4	exits	0.8428	0.876	0.9177	0.8428	0.8618	0.8782	15.28	plateau	candidate.py plateau neighbour vwap_n=8
+v4-4	exits	0.5593	1.1831	0.931	0.5593	0.8695	0.8002	11.63	plateau	candidate.py plateau neighbour vwap_n=12
+v4-4	exits	1.0397	1.0446	1.0397	1.1181	1.026	1.0449	13.98	plateau	candidate.py plateau neighbour exit_n=6
+v4-4	exits	0.8851	1.0587	1.1392	0.8851	1.0276	1.0416	13.45	plateau	candidate.py plateau neighbour exit_n=8
+v4-4	exits	0.9916	1.1879	1.0618	0.9916	1.038	1.0216	13.73	plateau	candidate.py plateau neighbour max_hold=16
+v4-4	exits	1.0044	1.2107	1.0714	1.0044	1.0509	1.0322	13.72	plateau	candidate.py plateau neighbour max_hold=24
+v4-4	exits	1.0278	1.2643	1.0466	1.0278	1.0567	1.027	14.75	plateau	candidate.py plateau neighbour slots=10
+v4-4	exits	0.858	1.196	1.0448	0.858	0.9973	0.9684	12.7	plateau	candidate.py plateau neighbour slots=14

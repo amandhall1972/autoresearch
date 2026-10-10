@@ -300,3 +300,13 @@ rule, **`v4/r3_clean.py` is added to the deep hold-out set for information** (am
 
 Round 3 gained 0.589 over R0 (not dry). Under the stopping rule, rounds 4 and 5 remain; gates are now measured
 against incumbent 1.
+
+## v4 round 4 (dry)
+
+Three lenses against incumbent 1 (288 logged rows; candidates `v4/r4_*.py`), three audits, nothing merged. Each lens
+found one lever that raised the objective but failed gates: a cap of 5 new names per trigger day (0.910; fails
+sanity at 4.91 names, leave-one-year-out without 2020 and 2024, plateau4), 10 slots instead of 12 (0.843; fails
+leave-one-year-out in 4 years, consistency as 2018 turns negative, plateau4), and an exit at the 7-session VWAP
+instead of the 10-session one (0.987; fails sanity at 28 % of days invested, leave-one-year-out without 2020,
+plateau4). Second sources of return on ordinary days (NIFTYBEES cores, low-volatility, momentum or equal-weight
+sleeves) all cut 2024-26. Dry round 1 of 2 since the last merge; round 5 is the last the stopping rule allows.
