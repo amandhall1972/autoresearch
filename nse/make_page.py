@@ -1,0 +1,326 @@
+"""
+Build reports/index.html: a self-contained results page (inline SVG charts, no external data) from the
+outputs of validate.py, lineage.py --holdout, diagnose.py and results.tsv. Usage: python make_page.py [--dir reports]
+"""
+import csv, html, json, math, os, sys
+import numpy as np
+import pandas as pd
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+R = os.path.join(HERE, "reports")
+if "--dir" in sys.argv:
+    R = sys.argv[sys.argv.index("--dir") + 1]
+
+
+def load(p):
+    p = os.path.join(R, p)
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
+def esc(s):
+    return html.escape(str(s))
+
+
+def fmt(x, d=2, pct=False, sign=False):
+    if x is None or (isinstance(x, float) and not math.isfinite(x)):
+        return "–"
+    if pct:
+        return f"{x * 100:+.{d}f}%" if sign else f"{x * 100:.{d}f}%"
+    return f"{x:+.{d}f}" if sign else f"{x:.{d}f}"
+
+
+def cls(x):
+    return "pos" if (x is not None and x > 0) else ("neg" if (x is not None and x < 0) else "")
+
+
+# ----------------------------------------------------------------------------- SVG helpers
+def line_chart(series, width=860, height=300, log=True, shade=None, labels=None, ylabel="Growth of ₹1"):
+    """series: list of (name, pd.Series of levels, css var color, stroke width)."""
+    pad_l, pad_r, pad_t, pad_b = 56, 16, 14, 30
+    idx = series[0][1].index
+    allv = np.concatenate([s.values for _, s, _, _ in series])
+    allv = allv[np.isfinite(allv)]
+    lo, hi = float(allv.min()), float(allv.max())
+    f = (lambda v: math.log(v)) if log else (lambda v: v)
+    flo, fhi = f(lo * 0.97), f(hi * 1.03)
+    x0, x1 = idx[0].value, idx[-1].value
+    X = lambda t: pad_l + (t.value - x0) / (x1 - x0) * (width - pad_l - pad_r)
+    Y = lambda v: pad_t + (1 - (f(v) - flo) / (fhi - flo)) * (height - pad_t - pad_b)
+    out = [f'<svg viewBox="0 0 {width} {height}" role="img" class="chart" preserveAspectRatio="xMidYMid meet">']
+    if shade:
+        a, b, lab = shade
+        xa, xb = X(pd.Timestamp(a)), X(pd.Timestamp(b))
+        out.append(f'<rect x="{xa:.1f}" y="{pad_t}" width="{xb - xa:.1f}" height="{height - pad_t - pad_b}" fill="var(--shade)"/>')
+        out.append(f'<text x="{xa + 6:.1f}" y="{height - pad_b - 8}" class="ann">{esc(lab)}</text>')
+    # y ticks
+    ticks = []
+    if log:
+        for v in [0.8, 0.9, 1.0, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]:
+            if lo * 0.97 <= v <= hi * 1.03:
+                ticks.append(v)
+    else:
+        step = (hi - lo) / 4
+        ticks = [lo + k * step for k in range(5)]
+    for v in ticks:
+        y = Y(v)
+        out.append(f'<line x1="{pad_l}" x2="{width - pad_r}" y1="{y:.1f}" y2="{y:.1f}" class="grid"/>')
+        out.append(f'<text x="{pad_l - 8}" y="{y + 4:.1f}" class="tick" text-anchor="end">{v:g}</text>')
+    # x ticks: years
+    for yr in range(idx[0].year, idx[-1].year + 1):
+        t = pd.Timestamp(f"{yr}-01-01")
+        if t < idx[0]:
+            continue
+        x = X(t)
+        out.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{pad_t}" y2="{height - pad_b}" class="grid"/>')
+        out.append(f'<text x="{x + 3:.1f}" y="{height - 10}" class="tick">{yr}</text>')
+    for name, s, col, sw in series:
+        s = s.dropna()
+        step = max(1, len(s) // 600)
+        pts = " ".join(f"{X(t):.1f},{Y(v):.1f}" for t, v in list(s.items())[::step] + [list(s.items())[-1]])
+        out.append(f'<polyline points="{pts}" fill="none" stroke="var({col})" stroke-width="{sw}" stroke-linejoin="round"/>')
+        out.append(f'<circle cx="{X(s.index[-1]):.1f}" cy="{Y(s.iloc[-1]):.1f}" r="3" fill="var({col})"/>')
+    out.append("</svg>")
+    leg = "".join(f'<span class="key"><i style="background:var({col})"></i>{esc(name)}</span>' for name, _, col, _ in series)
+    return f'<figure class="fig">{"".join(out)}<figcaption class="legend">{leg}</figcaption></figure>'
+
+
+def bar_groups(groups, keys, width=860, height=300, ylab="Sharpe"):
+    """groups: list of (label, {key: value}); keys: list of (key, name, css var)."""
+    pad_l, pad_r, pad_t, pad_b = 48, 12, 16, 46
+    vals = [g[1].get(k) for g in groups for k, _, _ in keys if g[1].get(k) is not None]
+    lo, hi = min(0.0, min(vals)), max(0.0, max(vals))
+    span = hi - lo or 1.0
+    lo -= 0.06 * span; hi += 0.08 * span
+    Y = lambda v: pad_t + (1 - (v - lo) / (hi - lo)) * (height - pad_t - pad_b)
+    gw = (width - pad_l - pad_r) / len(groups)
+    bw = gw * 0.8 / len(keys)
+    out = [f'<svg viewBox="0 0 {width} {height}" role="img" class="chart">']
+    step = 1.0 if (hi - lo) > 3 else 0.5
+    v = math.ceil(lo / step) * step
+    while v <= hi:
+        y = Y(v)
+        out.append(f'<line x1="{pad_l}" x2="{width - pad_r}" y1="{y:.1f}" y2="{y:.1f}" class="{"zero" if abs(v) < 1e-9 else "grid"}"/>')
+        out.append(f'<text x="{pad_l - 6}" y="{y + 4:.1f}" class="tick" text-anchor="end">{v:g}</text>')
+        v += step
+    for gi, (lab, d) in enumerate(groups):
+        gx = pad_l + gi * gw + gw * 0.1
+        for ki, (k, _, col) in enumerate(keys):
+            val = d.get(k)
+            if val is None:
+                continue
+            x = gx + ki * bw
+            y0, y1 = Y(0), Y(val)
+            out.append(f'<rect x="{x:.1f}" y="{min(y0, y1):.1f}" width="{bw * 0.92:.1f}" height="{abs(y1 - y0):.1f}" fill="var({col})"><title>{esc(lab)}: {val:.2f}</title></rect>')
+        out.append(f'<text x="{pad_l + gi * gw + gw / 2:.1f}" y="{height - 26}" class="tick" text-anchor="middle">{esc(lab)}</text>')
+    out.append(f'<text x="12" y="{pad_t + 8}" class="tick" transform="rotate(-90 12 {pad_t + 8})" text-anchor="end">{esc(ylab)}</text>')
+    out.append("</svg>")
+    leg = "".join(f'<span class="key"><i style="background:var({col})"></i>{esc(name)}</span>' for _, name, col in keys)
+    return f'<figure class="fig">{"".join(out)}<figcaption class="legend">{leg}</figcaption></figure>'
+
+
+def table(head, rows, num_from=1):
+    h = "".join(f"<th>{esc(x)}</th>" for x in head)
+    body = []
+    for r in rows:
+        tds = []
+        for j, x in enumerate(r):
+            c = "num" if j >= num_from else ""
+            if isinstance(x, tuple):
+                x, extra = x
+                c = (c + " " + extra).strip()
+            tds.append(f'<td class="{c}">{x}</td>')
+        body.append("<tr>" + "".join(tds) + "</tr>")
+    return f'<div class="tw"><table><thead><tr>{h}</tr></thead><tbody>{"".join(body)}</tbody></table></div>'
+
+
+# ----------------------------------------------------------------------------- page
+def main():
+    v = load("validation.json"); b = load("baseline/validation.json"); lin = load("lineage.json") or []
+    dg = load("diagnostics.json")
+    m = v["metrics"]
+    tsv = list(csv.DictReader(open(os.path.join(HERE, "results.tsv")), delimiter="\t"))
+    n_exp = len(tsv)
+    rounds = {}
+    for r in tsv:
+        d = r["description"]
+        if d.startswith("[r") and ":" in d[:6]:
+            k = d[2:d.index(":")]
+            if k.isdigit():
+                rounds[int(k)] = rounds.get(int(k), 0) + 1
+    final = lin[-1] if lin else {}
+    pre = final.get("sharpe_pre")
+    eq = pd.read_csv(os.path.join(R, "equity_curves.csv"), index_col=0, parse_dates=True)
+    cash = (1 + pd.Series(0.0, index=eq.index)).cumprod()
+    hf = os.path.join(R, "holdout_final_returns.csv")
+    hold = pd.read_csv(hf, index_col=0, parse_dates=True) if os.path.exists(hf) else None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("strategy_page", os.path.join(HERE, "strategy.py"))
+    S = importlib.util.module_from_spec(spec); spec.loader.exec_module(S)
+
+    hero_cards = [
+        ("Selection window", "2020–2023", m["sharpe_is"], "In-sample Sharpe the loop maximised"),
+        ("Validation window", "2024 – Oct 2026", m["sharpe_oos"], "Never used by the loop"),
+        ("Sealed hold-out", "Apr 2017–2019", pre, "Scored once, at the end"),
+        ("Whole period", "2020 – Oct 2026", m["sharpe_full"], "Selection + validation"),
+    ]
+    cards = "".join(f'<div class="card"><div class="eyebrow">{esc(a)}</div><div class="sub">{esc(c)}</div>'
+                    f'<div class="big {cls(x)}">{fmt(x)}</div><div class="note">{esc(n)}</div></div>' for a, c, x, n in hero_cards)
+
+    eq_chart = line_chart([("Strategy (net of costs)", eq["strategy"], "--accent", 2.2),
+                           ("NIFTYBEES buy & hold", eq["niftybees"], "--bench", 1.4)],
+                          shade=("2024-01-01", str(eq.index[-1].date()), "validation window (not used by the loop)"))
+    hold_chart = ""
+    if hold is not None:
+        hs = (1 + hold["strategy"]).cumprod(); hb = (1 + hold["niftybees"].fillna(0)).cumprod()
+        hold_chart = line_chart([("Strategy (net of costs)", hs, "--accent", 2.2), ("NIFTYBEES buy & hold", hb, "--bench", 1.4)], height=260)
+    lin_groups = [(o["stage"].replace("keep ", "#"), {"is": o["sharpe_is"], "oos": o["sharpe_oos"], "pre": o.get("sharpe_pre")}) for o in lin]
+    lin_keys = [("is", "2020–23 (selected on)", "--accent"), ("oos", "2024–26 (validation)", "--neg")]
+    if lin and "sharpe_pre" in lin[0]:
+        lin_keys.append(("pre", "2017–19 (sealed hold-out)", "--bench"))
+    lin_chart = bar_groups(lin_groups, lin_keys) if lin else ""
+
+    yearly = table(["Year", "Strategy return", "Strategy Sharpe", "Exposure", "Nifty 50 return", "Nifty Sharpe", "Cash"],
+                   [[r["year"], (fmt(r["strat_ret"], 1, pct=True), cls(r["strat_ret"])), (fmt(r["strat_sharpe"]), cls(r["strat_sharpe"])),
+                     fmt(r["exposure"], 0, pct=True), fmt(r["nifty_ret"], 1, pct=True), fmt(r["nifty_sharpe"]), fmt(r["rf"], 1, pct=True)] for r in v["yearly"]])
+    costs = table(["One-way cost (bps)", "Sharpe 2020–23", "Sharpe 2024–26", "Sharpe 2020–26", "CAGR 2020–26"],
+                  [[r["cost_bps"], fmt(r["sharpe_is"]), (fmt(r["sharpe_oos"]), cls(r["sharpe_oos"])), fmt(r["sharpe_full"]), fmt(r["cagr_full"], 1, pct=True)] for r in v["cost_sensitivity"]])
+    bs = v["bootstrap"]
+    boot = table(["Window", "Sharpe", "95% block-bootstrap CI", "P(Sharpe > 0)"],
+                 [[lab, fmt(bs[k]["sharpe"]), f'{fmt(bs[k]["ci95"][0])} to {fmt(bs[k]["ci95"][1])}', fmt(bs[k]["p_sharpe_gt_0"], 0, pct=True)]
+                  for k, lab in [("is", "2020–23"), ("oos", "2024–26"), ("full", "2020–26")]], num_from=1)
+    lin_tab = table(["Stage", "Commit", "2020–23", "2020–21", "2022–23", "2024–26", "2020–26"] + (["2017–19 hold-out", "Nifty 2017–19"] if lin and "sharpe_pre" in lin[0] else []),
+                    [[o["stage"], f'<code>{esc(o["commit"])}</code>', fmt(o["sharpe_is"]), fmt(o["sharpe_is_h1"]), fmt(o["sharpe_is_h2"]),
+                      (fmt(o["sharpe_oos"]), cls(o["sharpe_oos"])), fmt(o["sharpe_full"])]
+                     + ([(fmt(o.get("sharpe_pre")), cls(o.get("sharpe_pre"))), fmt(o.get("bench_sharpe_pre"))] if "sharpe_pre" in o else []) for o in lin], num_from=2)
+    ps = v["param_sensitivity_summary"]; wf = v["walk_forward"]; dsr = bs["is"].get("deflated", {})
+    diag_html = ""
+    if dg:
+        srow = [[per, s.get("spells"), fmt(s.get("hit_rate"), 0, pct=True), (fmt(s.get("mean_spell_excess"), 2, pct=True), cls(s.get("mean_spell_excess"))),
+                 fmt(s.get("mean_excess_when_nifty_up"), 2, pct=True), fmt(s.get("mean_excess_when_nifty_down"), 2, pct=True), fmt(s.get("cost_drag_per_yr"), 2, pct=True)]
+                for per, s in dg["summary"].items()]
+        diag_html = table(["Window", "Invested spells", "Spells won", "Mean spell excess", "…when the Nifty rose", "…when the Nifty fell", "Cost drag / yr"], srow)
+        edge = table(["Year", "Formation days", "Names bought: next 20 sessions", "All members", "Selection edge"],
+                     [[r["year"], r["formation_days"], fmt(r["fwd20_bought"], 2, pct=True), fmt(r["fwd20_all_members"], 2, pct=True),
+                       (fmt(r["edge"], 2, pct=True, sign=True), cls(r["edge"]))] for r in dg["selection_edge_by_year"]])
+        diag_html += "<p>Does the stock selection itself still work? The table compares the next-20-session return of the names a cohort bought with the average member on the same days.</p>" + edge
+    rounds_line = ", ".join(f"round {k}: {n}" for k, n in sorted(rounds.items()))
+    p = S.PARAMS
+    rules = [
+        ("Regime", f"Trade only while the NIFTY 50's RSI({p['regime_rsi_n']}) is bullish: switch on above {p['regime_rsi_mid'] + p['regime_rsi_band']:g}, go fully to cash below {p['regime_rsi_mid'] - p['regime_rsi_band']:g}, and stand aside while it is above {p['regime_rsi_max']:g}."),
+        ("Entry (EMA)", f"EMA{p['ema_fast']} above EMA{p['ema_slow']}, but not more than {p['ema_spread'] * 100:g}% above it."),
+        ("Entry (VWAP)", f"Close above the {p['vwap_n']}-day VWAP."),
+        ("Entry (RSI)", f"EMA{p['rsi_smooth']}-smoothed RSI({p['rsi_n']}) below {p['rsi_hi']:g}, with no reading above {p['rsi_peak']:g} in the last {p['rsi_peak_n']} days; the name's volatility expansion (vol20/vol120) is not in the members' top third."),
+        ("Cohort", "One basket is bought on the day the regime switches on and then left to ride: no rebalancing, no replacement buys. Weights favour low stock-specific risk, the strongest short-term VWAP position and names without recent news shocks; no name above 40%."),
+        ("Sizing", f"A fresh basket is scaled down when the Bank Nifty has just become more volatile than usual, and halved after a whipsaw; the riding book is trimmed to a {p['vol_cap'] * 100:g}% volatility budget from its third day."),
+        ("Exits", "A name is sold on a close below 0.985 × its 20-day VWAP, when its 3-day VWAP drops under its 50-day VWAP, on a stock-specific shock or a 4× volume spike; the rest of the basket goes once most of it has been stopped out, and everything is sold when the regime switches off."),
+        ("Execution", "Signals on the close, orders at the next open, 15 bps one-way cost (STT, fees, slippage), idle cash earns the RBI repo rate."),
+    ]
+    rules_html = "".join(f"<div class='rule'><dt>{esc(a)}</dt><dd>{esc(b_)}</dd></div>" for a, b_ in rules)
+    verdict_pre = ""
+    if pre is not None:
+        verdict_pre = (f" On the sealed 2017–2019 hold-out, which no research decision ever touched, it scores <b class='{cls(pre)}'>{fmt(pre)}</b>"
+                       f" against <b>{fmt(final.get('bench_sharpe_pre'))}</b> for the Nifty.")
+    page = f"""<title>Nifty RSI·EMA·VWAP Study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: a single reading column with full-width figures; numbers in mono, headings in a condensed grotesk. */
+:root {{
+  --bg:#f5f6f8; --surface:#ffffff; --fg:#141922; --muted:#5b6474; --line:#dde1e8; --shade:rgba(20,25,34,.05);
+  --accent:#c96a12; --bench:#2f6f8f; --pos:#1f7a4d; --neg:#b4402a; --chip:#eef0f4;
+  --f-display:"Archivo","Helvetica Neue",Arial,sans-serif; --f-body:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}}
+@media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{
+  --bg:#0f1218; --surface:#161b23; --fg:#e8ebf0; --muted:#9aa3b2; --line:#2a313d; --shade:rgba(232,235,240,.05);
+  --accent:#f0913a; --bench:#6fb3d6; --pos:#5cc58e; --neg:#f07a62; --chip:#1d232d; color-scheme:dark }} }}
+:root[data-theme="dark"] {{
+  --bg:#0f1218; --surface:#161b23; --fg:#e8ebf0; --muted:#9aa3b2; --line:#2a313d; --shade:rgba(232,235,240,.05);
+  --accent:#f0913a; --bench:#6fb3d6; --pos:#5cc58e; --neg:#f07a62; --chip:#1d232d; color-scheme:dark }}
+body {{ background:var(--bg); color:var(--fg); font:16px/1.6 var(--f-body); }}
+.wrap {{ max-width:920px; margin:0 auto; padding-inline:16px; padding-block:40px 64px; display:flex; flex-direction:column; gap:40px }}
+h1,h2,h3 {{ font-family:var(--f-display); letter-spacing:-.01em; text-wrap:balance; margin:0 }}
+h1 {{ font-size:clamp(30px,5vw,46px); font-weight:800; line-height:1.08 }}
+h2 {{ font-size:24px; font-weight:700; margin-bottom:12px }}
+p {{ margin:0 0 12px; max-width:68ch }}
+.eyebrow {{ font:600 12px/1.2 var(--f-body); letter-spacing:.08em; text-transform:uppercase; color:var(--muted) }}
+.lede {{ font-size:18px; color:var(--fg); max-width:70ch }}
+.cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px }}
+.card {{ background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:16px 16px 14px; display:flex; flex-direction:column; gap:4px; min-width:0 }}
+.card .sub {{ color:var(--muted); font-size:13px }}
+.big {{ font:500 38px/1.1 var(--f-mono); font-variant-numeric:tabular-nums }}
+.note {{ font-size:13px; color:var(--muted) }}
+.pos {{ color:var(--pos) }} .neg {{ color:var(--neg) }}
+.fig {{ margin:0; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:12px 12px 8px }}
+.chart {{ width:100%; height:auto; display:block }}
+.chart .grid {{ stroke:var(--line); stroke-width:1 }} .chart .zero {{ stroke:var(--muted); stroke-width:1 }}
+.chart .tick {{ fill:var(--muted); font:11px var(--f-mono) }} .chart .ann {{ fill:var(--muted); font:12px var(--f-body) }}
+.legend {{ display:flex; flex-wrap:wrap; gap:16px; font-size:13px; color:var(--muted); padding:6px 4px 2px }}
+.key {{ display:inline-flex; align-items:center; gap:6px }} .key i {{ width:14px; height:4px; border-radius:2px; display:inline-block }}
+.tw {{ overflow-x:auto; border:1px solid var(--line); border-radius:10px; background:var(--surface) }}
+table {{ border-collapse:collapse; width:100%; font-size:14px }}
+th {{ text-align:left; font:600 12px var(--f-body); letter-spacing:.04em; text-transform:uppercase; color:var(--muted); padding:10px 12px; border-bottom:1px solid var(--line); white-space:nowrap }}
+td {{ padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap }}
+tr:last-child td {{ border-bottom:0 }}
+td.num {{ font-family:var(--f-mono); font-variant-numeric:tabular-nums; text-align:right }}
+code {{ font-family:var(--f-mono); font-size:.92em; background:var(--chip); padding:1px 5px; border-radius:4px }}
+dl.rules {{ margin:0; display:grid; gap:0; border:1px solid var(--line); border-radius:10px; background:var(--surface) }}
+.rule {{ display:grid; grid-template-columns:140px 1fr; gap:12px; padding:12px 16px; border-bottom:1px solid var(--line) }}
+.rule:last-child {{ border-bottom:0 }}
+.rule dt {{ font-weight:600 }} .rule dd {{ margin:0; min-width:0 }}
+@media (max-width:560px) {{ .rule {{ grid-template-columns:1fr; gap:2px }} }}
+.callout {{ border-left:4px solid var(--neg); background:var(--surface); padding:14px 16px; border-radius:0 10px 10px 0 }}
+ul {{ margin:0; padding-left:20px; max-width:70ch }} li {{ margin-bottom:6px }}
+pre {{ background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:12px 14px; overflow-x:auto; font:13px/1.5 var(--f-mono) }}
+footer {{ color:var(--muted); font-size:13px }}
+</style>
+<div class="wrap">
+<header style="display:flex;flex-direction:column;gap:14px">
+  <div class="eyebrow">NSE · Nifty 50 universe · daily bars · Jan 2020 – Oct 2026</div>
+  <h1>RSI + EMA + VWAP on the Nifty 50, refined by an autonomous research loop</h1>
+  <p class="lede">The loop pushed the in-sample Sharpe ratio from <b>{fmt(b['metrics']['sharpe_is']) if b else '–'}</b> to <b>{fmt(m['sharpe_is'])}</b> over {len(rounds)} research rounds and {n_exp:,} logged experiments.
+  On the 2024–2026 data it never used, the same strategy has a Sharpe of <b class="{cls(m['sharpe_oos'])}">{fmt(m['sharpe_oos'])}</b>.{verdict_pre}</p>
+</header>
+<section class="cards">{cards}</section>
+<section><h2>Equity, net of costs</h2>
+<p>Growth of ₹1, log scale. The book holds stocks on {fmt(m['pct_days_invested_full'], 0, pct=True)} of trading days, and on average {fmt(m['exposure_full'], 0, pct=True)} of the capital is invested; the rest earns the RBI repo rate.</p>
+{eq_chart}</section>
+<section><h2>What the in-sample gains bought out of sample</h2>
+<p>Every strategy the loop kept, re-scored on the final harness. In-sample Sharpe rises at each stage; the 2024–2026 column shows how much of that carried over{', and the sealed 2017–2019 column is the first and only look at those years' if lin and 'sharpe_pre' in lin[0] else ''}.</p>
+{lin_chart}
+{lin_tab}</section>
+{"<section><h2>Sealed hold-out, April 2017 – December 2019</h2><p>Point-in-time Nifty 50 of those years, including 11 names that left the index before 2020. Scored once, after the research ended.</p>" + hold_chart + "</section>" if hold_chart else ""}
+<section><h2>The strategy</h2><dl class="rules">{rules_html}</dl></section>
+<section><h2>Year by year</h2>{yearly}</section>
+<section><h2>Robustness checks</h2>
+<p><b>Costs.</b> The edge in 2020–2023 survives far higher costs than assumed; 2024–2026 is negative at every cost level.</p>{costs}
+<p style="margin-top:16px"><b>Sampling error.</b> Stationary block bootstrap (20-day blocks).</p>{boot}
+<p style="margin-top:16px"><b>Multiple testing.</b> The deflated Sharpe ratio over {dsr.get('n_trials', '–'):,} logged trials is {fmt(dsr.get('dsr'), 3)} (hurdle {fmt(dsr.get('sr0_ann'))}). That figure assumes independent trials; these were sequential refinements of one design, so it overstates confidence, and the out-of-sample columns above are the better guide.</p>
+<p><b>Parameters.</b> {ps['n_perturbations']} one-at-a-time ±10/20% perturbations: median in-sample Sharpe {fmt(ps['median_sharpe_is'])} (base {fmt(m['sharpe_is'])}), {fmt(ps['frac_within_0.2_of_base_is'], 0, pct=True)} within 0.2 of the base; median 2024–26 Sharpe {fmt(ps['median_sharpe_oos'])}.
+Walk-forward re-selection of those parameters year by year gives a Sharpe of {fmt(wf['sharpe_concat'])} over 2021–2026.</p></section>
+{"<section><h2>Why it fails after 2023</h2>" + diag_html + "</section>" if diag_html else ""}
+<section><h2>How the research ran</h2>
+<ul>
+<li>One editable file (<code>strategy.py</code>), a fixed harness, one metric: the 2020–2023 Sharpe. Six parallel researchers per round, each in its own git worktree, each with one lens; the lead verified, merged and combined their winners.</li>
+<li>Experiments per round: {esc(rounds_line)}.</li>
+<li>A keep had to raise in-sample Sharpe and pass five gates: both halves of 2020–2023, the five best days removed, every new parameter on a plateau, simplifications allowed, and no single trading episode carrying the gain.</li>
+<li>After round 1 the lead looked at the 2024–2026 numbers, so that window became a validation window and a fresh, sealed 2017–2019 hold-out was built before round 2. Researchers never saw either.</li>
+<li>Every run passes a dense lookahead check: weights are recomputed on truncated and future-scrambled data and must not change.</li>
+</ul></section>
+<section class="callout"><h2>Bottom line</h2>
+<p>The loop did what it was asked: it found the rules that best explain 2020–2023. Those years held a crash and a strong recovery that a regime-timed, high-conviction book could exploit. After 2023 the same rules lose to cash: Sharpe {fmt(m['sharpe_oos'])} over 2024–2026, while the Nifty itself managed {fmt(m['bench_sharpe_oos'])}. Treat the in-sample figure as a measure of fit, not of expected return. Before trading any version, paper-trade it and judge it on data the loop has not seen.</p></section>
+<section><h2>Reproduce</h2>
+<pre>cd nse
+python run.py                    # in-sample metrics + lookahead check (~10 s)
+python run.py --report           # adds 2024–26 and full-period metrics
+python validate.py --boot 2000   # costs, bootstrap, deflated Sharpe, perturbations, walk-forward
+python lineage.py --holdout      # every kept strategy on all windows (logs each hold-out look)
+python signals.py --capital 1000000 --holdings my_holdings.csv   # tomorrow's orders</pre></section>
+<footer>Data: Financial Modeling Prep daily bars; Nifty 50 membership from NSE index data via the Historical Nifty 50 Constituent Weights dataset. Price returns (no dividends). Branch <code>autoresearch/oct9-nse</code>.</footer>
+</div>"""
+    open(os.path.join(R, "index.html"), "w").write(page)
+    print("wrote", os.path.join(R, "index.html"), len(page), "bytes")
+
+
+if __name__ == "__main__":
+    main()
