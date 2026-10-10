@@ -167,8 +167,10 @@ def test_full_strategy_source_and_parameter_register_are_included(built):
 def test_worked_example_explains_every_exit(built):
     tr = built["info"]["trace"]
     assert tr["unexplained"] == []
+    assert tr["replica_ok"]                                   # the three weight terms reproduce the strategy
     assert tr["events"][-1][2].startswith("Regime off")
-    assert abs(sum(w for _, w, *_ in tr["formation"]) - tr["gross0"]) < 1e-9
+    assert abs(sum(f["w"] for f in tr["formation"]) - tr["gross0"]) < 1e-9
+    assert any("re-rank" in e[2] for e in tr["events"])        # the day-3 re-rank is replicated, not assumed
 
 
 @needs_build

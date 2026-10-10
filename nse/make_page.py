@@ -159,7 +159,7 @@ def main():
 
     hero_cards = [
         ("Selection window", "2020–2023", m["sharpe_is"], "In-sample Sharpe the loop maximised"),
-        ("Validation window", "2024 – Oct 2026", m["sharpe_oos"], "Never used by the loop"),
+        ("Validation window", "2024 – Oct 2026", m["sharpe_oos"], "Not used by the keep rule"),
         ("Sealed hold-out", "Apr 2017–2019", pre, "Scored once, at the end"),
         ("Whole period", "2020 – Oct 2026", m["sharpe_full"], "Selection + validation"),
     ]
@@ -175,7 +175,7 @@ def main():
         hold_chart = line_chart([("Strategy (net of costs)", hs, "--accent", 2.2), ("NIFTYBEES buy & hold", hb, "--bench", 1.4)], height=260)
         yrs = len(hold) / 252.0
         hold_cash = (1 + hold["cash"]).prod() ** (1 / yrs) - 1
-        hold_note = (f" The strategy grew {fmt(hs.iloc[-1] ** (1 / yrs) - 1, 1, pct=True)} a year and the Nifty {fmt(hb.iloc[-1] ** (1 / yrs) - 1, 1, pct=True)},"
+        hold_note = (f" The strategy grew {fmt(hs.iloc[-1] ** (1 / yrs) - 1, 1, pct=True)} a year and NIFTYBEES {fmt(hb.iloc[-1] ** (1 / yrs) - 1, 1, pct=True)},"
                      f" while cash earned {fmt(hold_cash, 1, pct=True)}; Sharpe is measured over cash, so the strategy's is negative.")
     lin_groups = [(o["stage"].replace("keep ", "#"), {"is": o["sharpe_is"], "oos": o["sharpe_oos"], "pre": o.get("sharpe_pre")}) for o in lin]
     lin_keys = [("is", "2020–23 (selected on)", "--accent"), ("oos", "2024–26 (validation)", "--neg")]
@@ -202,7 +202,7 @@ def main():
         srow = [[per, s.get("spells"), fmt(s.get("hit_rate"), 0, pct=True), (fmt(s.get("mean_spell_excess"), 2, pct=True), cls(s.get("mean_spell_excess"))),
                  fmt(s.get("mean_excess_when_nifty_up"), 2, pct=True), fmt(s.get("mean_excess_when_nifty_down"), 2, pct=True), fmt(s.get("cost_drag_per_yr"), 2, pct=True)]
                 for per, s in dg["summary"].items()]
-        diag_html = ("<p>An invested spell runs from a regime switch-on to the switch-off. Excess is the spell's return over cash; "
+        diag_html = ("<p>An invested spell is a maximal run of invested sessions: it starts at a switch-on or re-entry and ends at the switch-off or when the exits empty the book. Excess is the spell's return over cash; "
                      "the two middle columns split the spells by whether the Nifty rose or fell over the same days.</p>"
                      + table(["Window", "Spells", "Won", "Mean excess", "Nifty up", "Nifty down", "Cost drag / yr"], srow))
         edge = table(["Year", "Formation days", "Bought: next 20 sessions", "All members", "Selection edge"],
@@ -287,7 +287,7 @@ footer {{ color:var(--muted); font-size:13px }}
   <div class="eyebrow">NSE · Nifty 50 universe · daily bars · Jan 2020 – Oct 2026</div>
   <h1>RSI + EMA + VWAP on the Nifty 50, refined by an autonomous research loop</h1>
   <p class="lede">The loop pushed the in-sample Sharpe ratio from <b>{fmt(b['metrics']['sharpe_is']) if b else '–'}</b> to <b>{fmt(m['sharpe_is'])}</b> over {len(rounds)} research rounds and {n_exp:,} logged experiments.
-  On the 2024–2026 data it never used, the same strategy has a Sharpe of <b class="{cls(m['sharpe_oos'])}">{fmt(m['sharpe_oos'])}</b>.{verdict_pre}</p>
+  On the 2024–2026 data the keep rule never used, the same strategy has a Sharpe of <b class="{cls(m['sharpe_oos'])}">{fmt(m['sharpe_oos'])}</b>.{verdict_pre}</p>
 </header>
 <section class="cards">{cards}</section>
 <section><h2>Equity, net of costs</h2>
@@ -302,17 +302,17 @@ footer {{ color:var(--muted); font-size:13px }}
 <section><h2>Year by year</h2>{yearly}</section>
 <section><h2>Robustness checks</h2>
 <p><b>Costs.</b> The edge in 2020–2023 survives far higher costs than assumed; 2024–2026 is negative at every cost level.</p>{costs}
-<p style="margin-top:16px"><b>Sampling error.</b> Stationary block bootstrap (20-day blocks).</p>{boot}
-<p style="margin-top:16px"><b>Multiple testing.</b> The deflated Sharpe ratio over {dsr.get('n_trials', '–'):,} logged trials is {fmt(dsr.get('dsr'), 3)} (hurdle {fmt(dsr.get('sr0_ann'))}). That figure assumes independent trials; these were sequential refinements of one design, so it overstates confidence, and the out-of-sample columns above are the better guide.</p>
+<p style="margin-top:16px"><b>Sampling error.</b> Stationary block bootstrap (mean block 20 sessions).</p>{boot}
+<p style="margin-top:16px"><b>Multiple testing.</b> The deflated Sharpe ratio over {dsr.get('n_trials', '–'):,} logged trials is {fmt(dsr.get('dsr'), 3)} (hurdle {fmt(dsr.get('sr0_ann'))}). That calculation treats the trials as independent draws; a search that keeps building on its own best result on the same four years is not that, so read it as a check on the arithmetic of selection, not as evidence of an edge. The out-of-sample columns above are the better guide.</p>
 <p><b>Parameters.</b> {ps['n_perturbations']} one-at-a-time ±10/20% perturbations: median in-sample Sharpe {fmt(ps['median_sharpe_is'])} (base {fmt(m['sharpe_is'])}), {fmt(ps['frac_within_0.2_of_base_is'], 0, pct=True)} within 0.2 of the base; median 2024–26 Sharpe {fmt(ps['median_sharpe_oos'])}.
-Walk-forward re-selection of those parameters year by year gives a Sharpe of {fmt(wf['sharpe_concat'])} over 2021–2026.</p></section>
+Walk-forward re-selection of those parameters year by year gives a Sharpe of {fmt(wf['sharpe_concat'])} over 2021–2026, mostly from 2021–2023, which the grid's centre was tuned on; the 2024–2026 test years are negative.</p></section>
 {"<section><h2>Why it fails after 2023</h2>" + diag_html + "</section>" if diag_html else ""}
 <section><h2>How the research ran</h2>
 <ul>
-<li>One editable file (<code>strategy.py</code>), a fixed harness, one metric: the 2020–2023 Sharpe. Six parallel researchers per round, each in its own git worktree, each with one lens; the lead verified, merged and combined their winners.</li>
+<li>One editable file (<code>strategy.py</code>), a fixed harness, one metric: the 2020–2023 Sharpe. Up to six parallel researchers per round (four in round 8, when two failed to start), each in its own git worktree, each with one lens; the lead verified, merged and combined their winners.</li>
 <li>Experiments per round: {esc(rounds_line)}.</li>
 <li>A keep had to raise in-sample Sharpe and pass five gates: both halves of 2020–2023, the five best days removed, every new parameter on a plateau, simplifications allowed, and no single trading episode carrying the gain.</li>
-<li>After round 1 the lead looked at the 2024–2026 numbers, so that window became a validation window and a fresh, sealed 2017–2019 hold-out was built before round 2. Researchers never saw either.</li>
+<li>After round 1 the lead looked at the 2024–2026 numbers, so that window became a validation window and a fresh, sealed 2017–2019 hold-out was built before round 2. From round 2 researchers saw neither.</li>
 <li>Every run passes a dense lookahead check: weights are recomputed on truncated and future-scrambled data and must not change.</li>
 </ul></section>
 <section class="callout"><h2>Bottom line</h2>

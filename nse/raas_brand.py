@@ -113,7 +113,7 @@ def mpl_rc():
         "axes.spines.top": False, "axes.spines.right": False,
         "xtick.color": SYAHI[60], "ytick.color": SYAHI[60], "xtick.labelsize": 7, "ytick.labelsize": 7,
         "xtick.major.size": 2.5, "ytick.major.size": 0, "xtick.major.width": 0.6,
-        "legend.frameon": False, "legend.fontsize": 7.5, "axes.titlesize": 8.5, "axes.titleweight": "medium",
+        "legend.frameon": False, "legend.fontsize": 7.5, "legend.labelcolor": SYAHI[100], "axes.axisbelow": True, "axes.titlesize": 8.5, "axes.titleweight": "medium",
         "axes.unicode_minus": True, "svg.fonttype": "path", "pdf.fonttype": 42,
         "axes.prop_cycle": __import__("cycler").cycler(color=CHART),
     }
@@ -123,14 +123,17 @@ def mpl_rc():
 # Numbers: true minus, tabular mono, Indian grouping
 # --------------------------------------------------------------------------------------------------
 def num(x, dp=2, pct=False, sign=False):
-    """Format a number with a true minus (U+2212); pct multiplies by 100 and appends %."""
+    """Format a number with a true minus (U+2212); pct multiplies by 100 and appends %.
+    Rounds half up on the decimal value as written (0.4415 as a percentage is 44.2, not 44.1)."""
+    from decimal import Decimal, ROUND_HALF_UP
     if x is None or (isinstance(x, float) and x != x):
         return "–"
-    v = x * 100 if pct else x
-    s = f"{abs(v):,.{dp}f}"
-    if v < 0 and float(s.replace(",", "")) != 0:
+    d = Decimal(repr(float(x))) * (100 if pct else 1)
+    q = d.quantize(Decimal(1).scaleb(-dp), rounding=ROUND_HALF_UP)
+    s = f"{abs(q):,.{dp}f}"
+    if q < 0:
         s = MINUS + s
-    elif sign and v > 0:
+    elif sign and q > 0:
         s = "+" + s
     return s + ("%" if pct else "")
 

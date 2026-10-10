@@ -64,7 +64,7 @@ PW, PH = A4
 ML = MR = 20 * mm
 MT, MB = 27 * mm, 22 * mm
 FW = PW - ML - MR                      # frame width (170 mm): tables and figures
-MEASURE_INDENT = 30 * mm               # body text measure 140 mm (about 70 characters a line)
+MEASURE_INDENT = 54 * mm               # body text measure 116 mm: 65-72 characters a line at 10.5 pt
 C = lambda h: HexColor(h)              # noqa: E731
 NAVY, PAPER, INK, SAFED = C(B.NEELA[900]), C(B.KAGAZ[100]), C(B.SYAHI[100]), C(B.SAFED)
 MUTED, SUBTLE, RULE = C(B.SYAHI[60]), C(B.SYAHI[40]), C(B.KAGAZ[300])
@@ -84,11 +84,21 @@ def signed_colour(x, on_navy=False):
 
 
 def snum(x, dp=2, pct=False, sign=False, colour=True, on_navy=False):
-    """Signed number as Paragraph markup: mono, true minus, green/red only for gains/losses."""
+    """Signed number for tables: true minus, green/red by sign (gains and losses only)."""
     s = esc(B.num(x, dp, pct, sign))
     if colour:
         return f'<font color="{signed_colour(x, on_navy)}">{s}</font>'
     return s
+
+
+def pnum(x, dp=2, pct=False, sign=False):
+    """Number in running text: true minus, ink. Colour is kept for tables, tiles and charts."""
+    return esc(B.num(x, dp, pct, sign))
+
+
+def code(name):
+    """Inline code (file, function, command) in IBM Plex Mono."""
+    return f"<font name='PlexMono'>{esc(name)}</font>"
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -108,6 +118,7 @@ def styles():
     S["h1"] = ParagraphStyle("h1", fontName="Outfit-Medium", fontSize=27, leading=32, textColor=NAVY, spaceAfter=10)
     S["h2"] = ParagraphStyle("h2", fontName="Outfit-Medium", fontSize=15, leading=20, textColor=NAVY,
                              spaceBefore=14, spaceAfter=5, keepWithNext=1)
+    S["h2_split"] = ParagraphStyle("h2_split", parent=S["h2"], keepWithNext=0)
     S["h3"] = ParagraphStyle("h3", fontName="Plex-SemiBold", fontSize=10.5, leading=15, textColor=INK,
                              spaceBefore=8, spaceAfter=2, keepWithNext=1, rightIndent=MEASURE_INDENT)
     S["caption"] = ParagraphStyle("caption", fontName="PlexMono", fontSize=7.4, leading=10, textColor=MUTED)
@@ -124,7 +135,7 @@ def styles():
     S["navy_title"] = ParagraphStyle("navy_title", fontName="Outfit-Medium", fontSize=14, leading=19,
                                      textColor=SAFED, spaceAfter=4)
     S["navy_body"] = ParagraphStyle("navy_body", fontName="Plex", fontSize=10, leading=15, textColor=PAPER,
-                                    spaceAfter=5)
+                                    spaceAfter=5, rightIndent=FW - 24 - 330)
     S["navy_label"] = ParagraphStyle("navy_label", fontName="PlexMono", fontSize=7.4, leading=10,
                                      textColor=C(B.NEELA[100]))
     S["tile_label"] = ParagraphStyle("tile_label", fontName="Plex-SemiBold", fontSize=7.8, leading=10, textColor=MUTED)
@@ -157,10 +168,17 @@ def _mono_safe(text):
 
 
 def para(text, style="body"):
-    """Paragraph that falls back from Plex Mono to Plex Sans when the text needs glyphs Mono lacks."""
+    """Paragraph that falls back from Plex Mono to Plex Sans when the text needs glyphs Mono lacks, and
+    opens the leading of small text that carries sub- or superscripts so the scripts never touch the next line."""
     if style in MONO_FALLBACK and not _mono_safe(text):
         style = MONO_FALLBACK[style]
-    return Paragraph(text, ST[style])
+    st = ST[style]
+    if ("<sub" in text or "<sup" in text) and st.fontSize < 10:
+        tall = style + "_tall"
+        if tall not in ST:
+            ST[tall] = ParagraphStyle(tall, parent=st, leading=st.fontSize * 1.75)
+        st = ST[tall]
+    return Paragraph(text, st)
 
 
 def P(text, style="body"):
@@ -206,7 +224,7 @@ class CodeBlock(Flowable):
     """Line-numbered, syntax-coloured Python listing in IBM Plex Mono that wraps long lines and splits
     across pages. Colours stay inside the Neela/Syahi range (green and red are reserved for gains/losses)."""
 
-    SIZE, LEAD, PAD, GUTTER = 6.7, 8.7, 6.0, 26.0
+    SIZE, LEAD, PAD, GUTTER = 6.2, 8.0, 6.0, 24.0
 
     def __init__(self, vlines, width):
         super().__init__()
@@ -308,8 +326,8 @@ class CodeBlock(Flowable):
             y -= self.LEAD
 
 
-def card(flowables, width=FW, pad=8, bg=SAFED, border=RULE):
-    t = Table([[f] for f in flowables], colWidths=[width])
+def card(flowables, width=FW, pad=8, bg=SAFED, border=RULE, space_after=0):
+    t = Table([[f] for f in flowables], colWidths=[width], spaceAfter=space_after)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), bg), ("BOX", (0, 0), (-1, -1), 0.5, border),
         ("LEFTPADDING", (0, 0), (-1, -1), pad), ("RIGHTPADDING", (0, 0), (-1, -1), pad),
@@ -332,8 +350,7 @@ def formula_card(lines, note=None):
     items = [P(l, "formula") for l in lines]
     if note:
         items.append(P(note, "note"))
-    t = card(items, width=FW - MEASURE_INDENT + 20 * mm, pad=10)
-    return t
+    return card(items, width=FW, pad=10, space_after=10)
 
 
 def data_table(header, rows, widths, num_cols=(), mono_cols=(), zebra=True, head_rows=1, compact=False,
@@ -353,7 +370,7 @@ def data_table(header, rows, widths, num_cols=(), mono_cols=(), zebra=True, head
             return para(v, "cell_mono" + sfx)
         return para(v, "cell" + sfx)
     data = [[cell(v, j, True) for j, v in enumerate(header)]] + [[cell(v, j, False) for j, v in enumerate(r)] for r in rows]
-    t = Table(data, colWidths=widths, repeatRows=head_rows, hAlign="LEFT")
+    t = Table(data, colWidths=widths, repeatRows=head_rows, hAlign="LEFT", spaceAfter=10)
     pad = 2.0 if compact else 3.2
     cmds = [
         ("BACKGROUND", (0, 0), (-1, -1), SAFED), ("BOX", (0, 0), (-1, -1), 0.5, RULE),
@@ -371,7 +388,10 @@ def data_table(header, rows, widths, num_cols=(), mono_cols=(), zebra=True, head
     return t
 
 
-def figure(drawing, caption, source=None):
+SOURCE = "Source: RAAS Capital Quant Desk backtest on Financial Modeling Prep daily bars."
+
+
+def figure(drawing, caption, source=SOURCE):
     items = [drawing, Spacer(1, 4), P(caption, "caption")]
     if source:
         items.append(P(source, "caption"))
@@ -388,8 +408,9 @@ def stat_tiles(tiles, width=FW):
         big = f'<font color="{signed_colour(value) if isinstance(value, float) else B.NEELA[900]}">' \
               f'{esc(B.num(value, 2) if isinstance(value, float) else value)}</font>'
         inner = Table([[P(esc(label), "tile_label")], [P(esc(period), "tile_sub")], [P(big, "tile_big")],
-                       [P(esc(note), "tile_sub")]], colWidths=[w - 2])
+                       [P(esc(note), "tile_sub")]], colWidths=[w - 2], rowHeights=[19, 21, 31, 25])
         inner.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), SAFED), ("BOX", (0, 0), (-1, -1), 0.5, RULE),
+                                   ("VALIGN", (0, 0), (-1, -1), "TOP"),
                                    ("LEFTPADDING", (0, 0), (-1, -1), 9), ("TOPPADDING", (0, 0), (-1, 0), 9),
                                    ("BOTTOMPADDING", (0, -1), (-1, -1), 9), ("TOPPADDING", (0, 1), (-1, -1), 1),
                                    ("BOTTOMPADDING", (0, 0), (-1, -2), 1)]))
@@ -460,6 +481,12 @@ def date_axis(ax, fmt="%Y", major=None):
         lab.set_fontfamily("IBM Plex Mono")
 
 
+def indian_ticks(axis):
+    """Tick labels with Indian digit grouping (17,000 / 1,750) and no decimals."""
+    from matplotlib.ticker import FuncFormatter
+    axis.set_major_formatter(FuncFormatter(lambda v, _: (B.MINUS if v < 0 else "") + B.inr(abs(v))[1:]))
+
+
 def mono_ticks(ax):
     for lab in ax.get_xticklabels() + ax.get_yticklabels():
         lab.set_fontfamily("IBM Plex Mono")
@@ -514,7 +541,7 @@ def chart_regime(md, S_mod, p, year="2023"):
         a.fill_between(o.index, 0, 1, where=o.values, transform=a.get_xaxis_transform(), color=B.NEELA[100],
                        alpha=0.55, lw=0, step="post")
     ax.plot(x.index, x.values, color=B.NEELA[900], lw=1.3)
-    ax.set_ylabel("NIFTY 50")
+    ax.set_ylabel("Nifty 50")
     rr = r.loc[sl]
     ax2.plot(rr.index, rr.values, color=B.NEELA[900], lw=1.1)
     on_l, off_l, max_l = (p["regime_rsi_mid"] + p["regime_rsi_band"], p["regime_rsi_mid"] - p["regime_rsi_band"],
@@ -522,10 +549,12 @@ def chart_regime(md, S_mod, p, year="2023"):
     for lvl, ls, lab in [(on_l, "-", f"switch on above {on_l:g}"), (off_l, "--", f"switch off below {off_l:g}"),
                          (max_l, ":", f"stand aside above {max_l:g}")]:
         ax2.axhline(lvl, color=B.SYAHI[60], lw=0.8, ls=ls, label=lab)
-    ax2.set_ylabel("RSI(14)"); ax2.set_ylim(20, 92)
-    ax2.legend(loc="lower right", ncol=3, fontsize=6.6, framealpha=0.9, frameon=True, edgecolor="none")
+    ax2.set_ylabel("RSI(14)"); ax2.set_ylim(15, 92)
     from matplotlib.patches import Patch
-    ax.legend(handles=[Patch(color=B.NEELA[100], alpha=0.55, label="In market")], loc="upper left")
+    h2_, l2_ = ax2.get_legend_handles_labels()
+    ax.legend(handles=[Patch(color=B.NEELA[100], alpha=0.55, label="In market")] + h2_,
+              labels=["In market"] + l2_, loc="lower left", bbox_to_anchor=(0, 1.0), ncol=4, fontsize=6.8)
+    indian_ticks(ax.yaxis)
     ax.set_xlim(x.index[0], x.index[-1])
     date_axis(ax2, "%b", mdates.MonthLocator()); mono_ticks(ax)
     fig.tight_layout(pad=0.4, h_pad=0.3)
@@ -556,6 +585,7 @@ def chart_indicators(md, p, ticker, start, end, t_form, t_exit):
                 va="bottom", ha=ha)
     ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncol=6, fontsize=6.8)
     ax.set_ylabel(f"{ticker}, rupees")
+    indian_ticks(ax.yaxis)
     ax2.plot(sr.loc[sl].index, sr.loc[sl], color=B.NEELA[900], lw=1.1)
     ax2.axhline(p["rsi_hi"], color=B.SYAHI[60], lw=0.8, ls="--")
     ax2.axhline(p["rsi_peak"], color=B.SYAHI[60], lw=0.8, ls=":")
@@ -579,14 +609,13 @@ def chart_lineage(lin):
     for k, (key, lab, col) in enumerate(series):
         ax.bar(x + (k - 1) * wbar, [o.get(key, np.nan) for o in lin], wbar, color=col, label=lab, lw=0)
     ax.axhline(0, color=B.SYAHI[100], lw=0.7)
-    ax.axhline(lin[-1].get("bench_sharpe_pre", np.nan), color=B.SYAHI[60], lw=0.8, ls="--")
-    ax.text(n - 0.5, lin[-1].get("bench_sharpe_pre", 0) + 0.12, "Nifty 2017–19", fontsize=6.6, color=B.SYAHI[60],
-            ha="right")
+    ax.axhline(lin[-1].get("bench_sharpe_pre", np.nan), color=B.SYAHI[60], lw=0.8, ls="--",
+               label="Nifty 50 buy and hold, 2017–19")
     ax.set_xticks(x)
     ax.set_xticklabels(["base"] + [str(i) for i in range(1, n - 1)] + ["final"])
     ax.set_ylabel("Sharpe ratio (excess of repo)")
     ax.set_xlabel("Kept strategy, in the order the loop kept them")
-    ax.legend(loc="upper left", ncol=3)
+    ax.legend(loc="upper left", ncol=2)
     ax.grid(axis="x", visible=False)
     mono_ticks(ax)
     fig.tight_layout(pad=0.4)
@@ -602,6 +631,12 @@ def chart_yearly(yearly):
     ax.bar(x - 0.2, sv, 0.38, color=[B.GAIN if v > 0 else B.LOSS for v in sv], lw=0, label="Strategy")
     ax.bar(x + 0.2, nv, 0.38, color=B.NEELA[300], lw=0, label="NIFTYBEES")
     ax.axhline(0, color=B.SYAHI[100], lw=0.7)
+    span = max(max(sv), max(nv)) - min(min(sv), min(nv), 0)
+    for xi, v in zip(x, sv):                         # value labels: a near-zero year still reads as up or down
+        ax.text(xi - 0.2, v + (0.02 * span if v >= 0 else -0.02 * span), B.num(v, 1),
+                ha="center", va="bottom" if v >= 0 else "top", fontsize=6.2, color=B.GAIN if v > 0 else B.LOSS,
+                fontfamily="IBM Plex Mono")
+    ax.set_ylim(min(min(sv), min(nv), 0) - 0.12 * span, max(max(sv), max(nv)) + 0.18 * span)
     ax.set_xticks(x); ax.set_xticklabels([str(v) + ("*" if v == 2026 else "") for v in y])
     ax.set_ylabel("Calendar-year return, %")
     ax.grid(axis="x", visible=False)
@@ -634,7 +669,8 @@ def chart_perturb(ps):
         vals = [r[key] for r in rows]
         a.hist(vals, bins=28, color=B.NEELA[400], lw=0)
         a.axvline(base[key], color=B.NEELA[900], lw=1.2)
-        a.text(base[key], a.get_ylim()[1] * 0.95, " final", fontsize=6.6, color=B.NEELA[900], va="top")
+        a.text(base[key], 1.01, "final ", fontsize=6.6, color=B.NEELA[900], va="bottom", ha="center",
+               transform=a.get_xaxis_transform())
         a.set_xlabel(lab); a.set_ylabel("Perturbations")
         a.grid(axis="x", visible=False)
         mono_ticks(a)
@@ -671,7 +707,7 @@ def chart_spells(spells):
             fontsize=7, color=B.SYAHI[60])
     ax.axhline(0, color=B.SYAHI[100], lw=0.7)
     ax.set_ylabel("Spell return over cash, %")
-    ax.set_xlabel("Invested spells in date order (switch-on to switch-off)")
+    ax.set_xlabel("Invested spells in date order (each a maximal run of invested sessions)")
     ax.set_xticks([])
     ax.grid(axis="x", visible=False)
     mono_ticks(ax)
@@ -686,7 +722,7 @@ def chart_edge(edge):
     ax.bar(np.arange(len(y)), v, 0.6, color=[B.GAIN if t > 0 else B.LOSS for t in v], lw=0)
     ax.axhline(0, color=B.SYAHI[100], lw=0.7)
     ax.set_xticks(np.arange(len(y))); ax.set_xticklabels([str(t) for t in y])
-    ax.set_ylabel("Selection edge, % per 20 sessions")
+    ax.set_ylabel("Edge, % / 20 sessions")
     ax.grid(axis="x", visible=False)
     mono_ticks(ax)
     fig.tight_layout(pad=0.4)
@@ -733,7 +769,7 @@ def flow_diagram(width=CHART_W):
     top = h
     y_close = box(xs[0], top, "Close of day t", "indicators on data up to the close", dark=True)
     t_reg = y_close - 22
-    y_reg = box(xs[0], t_reg, "Regime in?", "NIFTY RSI(14) switch on above 57,\noff below 53; and RSI \u2264 80", hh=42)
+    y_reg = box(xs[0], t_reg, "Regime in?", "Nifty 50 RSI(14): switch on above 57,\noff below 53; and RSI \u2264 80", hh=42)
     path([(cx[0], y_close), (cx[0], t_reg)])
     y_yday = box(xs[1], t_reg, "Regime in yesterday?", "no: today is a formation day", hh=42)
     path([(xs[0] + bw, t_reg - 21), (xs[1], t_reg - 21)], "yes", (xs[0] + bw + 5, t_reg - 17))
@@ -796,14 +832,31 @@ def cohort_trace(md, W, p, start):
         t1 += 1
     w0 = W.iloc[t0]
     names = w0[w0 > 0].sort_values(ascending=False)
+    # the three factors of a fresh cohort's weight (strategy.py: beta_w / ivol_w^vol_power x age ramp x rung)
+    corr_w = ret.rolling(p["w_corr_n"], min_periods=p["w_corr_n"]).corr(idx_ret)
+    ivol_w = vol * np.sqrt((1.0 - corr_w ** 2).clip(lower=0.0))
+    beta_w = ((1.0 - p["beta_shrink"]) * corr_w * vol.div(nvol, axis=0) + p["beta_shrink"]).clip(lower=0.0)
+    base = beta_w / ivol_w.where(ivol_w > 0) ** p["vol_power"]
+    i_v = np.arange(len(c.index))[:, None]
+    age = pd.DataFrame(i_v - pd.DataFrame(np.where((shock | spike).values, i_v, np.nan)).ffill().values,
+                       index=c.index, columns=c.columns)
+    ramp = np.minimum(1.0, age / p["vwap_n"]).fillna(1.0)
+    rung = (c / vw3) ** p["rung_power"]
+    stretched = ef > es * (1.0 + p["ema_spread"])
+    d0 = W.index[t0]
+    stocks = [tk for tk in names.index if tk != "NIFTYBEES"]
+    b_sh = base.loc[d0, stocks] / base.loc[d0, stocks].sum()
+    prod = base.loc[d0, stocks] * ramp.loc[d0, stocks] * rung.loc[d0, stocks]
+    pred = float(w0.sum()) * prod / prod.sum()
+    replica_ok = bool((pred <= p["w_cap"] + 1e-12).all() and np.allclose(pred.values, w0[stocks].values, atol=1e-9))
     form = []
     for tk, wt in names.items():
         if tk == "NIFTYBEES":
-            form.append((tk, wt, None, None, None, None))
+            form.append(dict(tk=tk, w=wt))
             continue
-        d = W.index[t0]
-        form.append((tk, wt, float(c.at[d, tk] / vw.at[d, tk] - 1), float(ef.at[d, tk] / es.at[d, tk] - 1),
-                     float(sr.at[d, tk]), float(c.at[d, tk] / vw3.at[d, tk] - 1)))
+        form.append(dict(tk=tk, w=wt, base_share=float(b_sh[tk]), ramp=float(ramp.at[d0, tk]),
+                         rung=float(rung.at[d0, tk]), vs_vwap=float(c.at[d0, tk] / vw.at[d0, tk] - 1),
+                         ema_gap=float(ef.at[d0, tk] / es.at[d0, tk] - 1), srsi=float(sr.at[d0, tk])))
     events, unexplained = [], []
     prev = set(names.index)
     for k in range(t0 + 1, t1 + 2):
@@ -842,11 +895,20 @@ def cohort_trace(md, W, p, start):
         stocks0 = w0.drop("NIFTYBEES", errors="ignore")
         left = [tk for tk in prev if tk != "NIFTYBEES" and not flagged.get(tk)]
         exhausted = stocks0.sum() > 0 and stocks0.reindex(left).fillna(0).sum() < p["exhaust"] * stocks0.sum()
+        rerank = set()
+        if day == p["vol_cap_delay"] + 1 and not exhausted:     # replicate the one-time re-rank exactly
+            book = sorted((tk for tk in left if tk in prev), key=md.tickers.index)   # strategy's column order
+            k_drop = int(np.floor(p["rerank_drop"] * len(book)))
+            if len(book) >= 3 and k_drop > 0:
+                sc = (beta_w.loc[d, book] / ivol_w.loc[d, book] ** 2) * np.where(stretched.loc[d, book],
+                                                                                 p["stretch_score"], 1.0)
+                order = sorted(book, key=lambda tk: (sc[tk], book.index(tk)))
+                rerank = {tk for tk in order[:k_drop] if md.tradable.at[d, tk]}
         for tk in out:
             why = flagged[tk]
             if not why and exhausted:
                 why = ["exhaustion: the cohort is spent"]
-            elif not why and day == p["vol_cap_delay"] + 1:
+            elif not why and tk in rerank:
                 why = ["re-rank: bottom third by score"]
             elif not why:
                 why = ["unexplained"]
@@ -855,7 +917,7 @@ def cohort_trace(md, W, p, start):
         events.append((d, day, "Sold " + ", ".join(reasons), row.sum(), len(held)))
         prev = held
     return dict(t0=W.index[t0], t1=W.index[t1], formation=form, events=events, unexplained=unexplained,
-                gross0=float(w0.sum()), spell_days=t1 - t0 + 1)
+                gross0=float(w0.sum()), spell_days=t1 - t0 + 1, replica_ok=replica_ok)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -918,7 +980,7 @@ class NoteDoc(BaseDocTemplate):
             c.setFillColor(C(B.NEELA[100])); c.setFont("Plex", 7.6); c.drawString(x, ty + 18, lab)
             c.setFillColor(C(signed_colour(val, on_navy=True))); c.setFont("Outfit-Medium", 24)
             c.drawString(x, ty - 6, B.num(val, 2))
-        c.setFillColor(C(B.NEELA[100])); c.setFont("Plex", 7.6)
+        c.setFillColor(C(B.NEELA[100])); c.setFont("PlexMono", 7.4)
         c.drawString(ML, ty - 22, "Sharpe ratios of daily returns over the RBI repo rate, net of 15 bps one-way costs.")
         # foot
         c.setStrokeColor(C(B.NEELA[600])); c.line(ML, 24 * mm, PW - MR, 24 * mm)
@@ -972,29 +1034,35 @@ def load_inputs():
 
 LINEAGE_NOTES = {
     "baseline": "EMA20 > EMA50, close > EMA20 and > VWAP20, 50 < RSI < 70; Nifty above EMA200; top 20 equal weight",
-    "keep 1": "Regime from the NIFTY's own RSI(14) with hysteresis; stand aside while it is above 80",
+    "keep 1": "Regime from the Nifty 50's own RSI(14) with hysteresis; stand aside while it is above 80",
     "keep 2": "One cohort per regime switch-on, all confluence names, inverse-variance weights that ride; "
               "single exit: close under 0.985 × VWAP20",
     "keep 3": "Delete the close > EMA20 entry test (simpler, gate 4)",
-    "keep 4": "Entry adds: no RSI peak above 80 in 20 days, EMA20 within 6% of EMA50, calm volatility rank",
+    "keep 4": "Entry adds: no RSI peak above 80 in 20 days, smoothed RSI at most 12 points below the Nifty 50's, "
+              "EMA20 within 6% of EMA50, calm volatility rank",
     "keep 5": "Weights by inverse idiosyncratic variance",
-    "keep 6": "Exits on a 2.5-sigma idiosyncratic shock and a 4× volume spike",
-    "keep 7": "Trend-break stop at 0.975 × VWAP50",
-    "keep 8": "Weights by (Blume beta) / idiosyncratic variance; 40% name cap, excess in NIFTYBEES",
-    "keep 9": "VWAP-ladder stop (close < VWAP3 < VWAP50) replaces the VWAP50 stop",
-    "keep 10": "10% single-index volatility budget from day 3; volatility-rank exit deleted",
+    "keep 6": "Exits on a 2.5-sigma idiosyncratic shock, a 4× volume spike and a top-5% volatility-expansion rank",
+    "keep 7": "Bank Nifty variance-ratio sizing of fresh cohorts (half size after a whipsaw); trend-break stop at "
+              "0.975 × VWAP50",
+    "keep 8": "Weights by √(Blume beta) / idiosyncratic variance (15-day correlation); 40% name cap, excess in "
+              "NIFTYBEES",
+    "keep 9": "Weights ramp back over 20 days after a shock or volume spike; equal-weight re-entry cohorts; "
+              "VWAP-ladder stop (close < VWAP3 < VWAP50) replaces the VWAP50 stop",
+    "keep 10": "10% single-index volatility budget from day 3; weights become Blume beta / idiosyncratic "
+               "variance; the volatility-expansion exit deleted",
     "keep 11": "Re-entry weights by VWAP ladder height; every weight tilted by (close / VWAP3)^20",
     "keep 12": "Budget trims by score instead of pro rata",
-    "keep 13": "Re-entry cohort: top 5 by ladder height × RSI lead over the index",
+    "keep 13": "Exhaustion stop (sell the stock remainder once 60% of the cohort has exited); re-entry cohort: "
+               "top 5 by ladder height × RSI lead over the index; the RSI-lag entry filter deleted",
     "keep 14": "One-time day-3 re-rank sells the bottom third; stretched names count at half score",
     "final": "Breadth-dip top-up of a fresh cohort with idle cash, within the budget",
 }
 
 PARAM_DOC = [
-    ("Regime", [("regime_rsi_n", "NIFTY 50 RSI length for the regime switch"),
+    ("Regime", [("regime_rsi_n", "Nifty 50 RSI length for the regime switch"),
                 ("regime_rsi_mid", "centre of the hysteresis band"),
                 ("regime_rsi_band", "half-width: on above mid + band (57), off below mid − band (53)"),
-                ("regime_rsi_max", "stand aside while the NIFTY RSI is above this")]),
+                ("regime_rsi_max", "stand aside while the Nifty 50 RSI is above this")]),
     ("Entry", [("rsi_n", "stock RSI length (also the index RSI used for the re-entry lead)"),
                ("rsi_smooth", "EMA span that smooths the stock RSI"),
                ("rsi_hi", "smoothed RSI must be below this at entry"),
@@ -1005,8 +1073,8 @@ PARAM_DOC = [
                ("vwap_n", "VWAP window for entry and the exit band; also the volume, ramp and breadth windows"),
                ("vol_long_n", "long realised-vol window (calm filter, Bank Nifty sizing)"),
                ("vol_calm_q", "entry needs a vol20/vol120 rank below this quantile of members")]),
-    ("Weights", [("vol_n", "realised-vol window (stocks, NIFTY, Bank Nifty short leg)"),
-                 ("w_corr_n", "correlation window of the weight betas and the risk model"),
+    ("Weights", [("vol_n", "realised-vol window (stocks, Nifty 50, Bank Nifty short leg)"),
+                 ("w_corr_n", "correlation window of the Blume beta and of σε in the weights and the risk model"),
                  ("beta_shrink", "Blume shrinkage of beta towards 1"),
                  ("vol_power", "exponent on idiosyncratic vol in the weights (2 = variance)"),
                  ("rung_power", "tilt exponent on close / VWAP3"),
@@ -1014,7 +1082,7 @@ PARAM_DOC = [
                  ("re_k", "re-entry cohort size"),
                  ("rsi_lag", "re-entry lead: stock RSI above (index RSI − lag)")]),
     ("Sizing", [("size_index", "index whose variance ratio scales a fresh cohort"),
-                ("size_power", "exponent of the variance ratio (cap 1)"),
+                ("size_power", "exponent on the Bank Nifty vol ratio σ120/σ20 (2 = variance ratio; cap 1)"),
                 ("whipsaw_days", "a re-cross after this many days off or fewer is a whipsaw ..."),
                 ("whipsaw_size", "... and is bought at this fraction"),
                 ("gross", "maximum gross exposure (no leverage)")]),
@@ -1027,7 +1095,7 @@ PARAM_DOC = [
                  ("exhaust", "sell the stock remainder once less than this share of the cohort is left"),
                  ("vol_cap", "model-volatility budget of the riding book (annualised)"),
                  ("vol_cap_delay", "the budget and the re-rank start on day vol_cap_delay + 1"),
-                 ("rerank_drop", "share of the book sold by the one-time re-rank"),
+                 ("rerank_drop", "share of the held stock names, by count and rounded down, sold by the re-rank"),
                  ("stretch_score", "score multiplier for stretched names in the re-rank and trims"),
                  ("dip_k", "breadth dip: share above VWAP20 more than this below its 20-day mean")]),
 ]
@@ -1053,6 +1121,12 @@ def strategy_provenance(final_commit):
         return dict(listed="working tree", same_code=None, dirty=None)
     return dict(listed=head + (" + local changes" if dirty else ""), same_code=code_only(cur) == code_only(final_src),
                 dirty=dirty)
+
+
+def chosen_txt(label):
+    """'rsi_hix1.1' (validate.py's label for a perturbation) as 'rsi_hi × 1.1'."""
+    m_ = re.match(r"^(.+?)x([\d.]+)$", label)
+    return f"{code(m_.group(1))} × {m_.group(2)}" if m_ else code(label)
 
 
 def fmt_param(v):
@@ -1109,6 +1183,30 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     n_exp = len(tsv)
     rounds = tsv["description"].fillna("").str.extract(r"^\[r(\d+)")[0].dropna().astype(int).value_counts().sort_index()
     keeps = tsv[tsv.status == "keep"]
+    tags = tsv["description"].fillna("").str.extract(r"^\[r(\d+):([^\]]+)\]")
+    tsv_r = tsv.assign(rnd=tags[0], lens=tags[1]).dropna(subset=["rnd"])
+    active = {int(r_): sum(1 for ln, gg in g.groupby("lens") if ln != "combine" and not (gg.status == "crash").all())
+              for r_, g in tsv_r.groupby("rnd")}
+    words = {3: "three", 4: "four", 5: "five", 6: "six", 7: "seven"}
+    from collections import Counter
+    mode_n = Counter(active.values()).most_common(1)[0][0]
+    exceptions = [f"{words.get(n_, n_)} in round {r_}" for r_, n_ in sorted(active.items()) if n_ != mode_n]
+    lens_txt = f"{words.get(mode_n, mode_n).capitalize()} parallel researchers per round" + \
+        (f" ({'; '.join(exceptions)})" if exceptions else "")
+    n_round_rows = len(tsv_r)
+    n_trials = v["bootstrap"]["is"]["deflated"]["n_trials"]
+    n_crash = int((tsv.status == "crash").sum())
+    n_keep_rows = len(keeps)
+    neg_is = [str(r_["year"]) for r_ in dg["selection_edge_by_year"] if r_["year"] < 2024 and r_["edge"] < 0]
+    pos_is = [str(r_["year"]) for r_ in dg["selection_edge_by_year"] if r_["year"] < 2024 and r_["edge"] > 0]
+    pos_is_list = list(pos_is)
+    if len(pos_is) > 1:
+        pos_is = [", ".join(pos_is[:-1]) + " and " + pos_is[-1]]
+    hl = pd.read_csv(os.path.join(R, "holdout_log.tsv"), sep="\t")
+    hl = hl[hl.git_commit.astype(str) == str(final["commit"])]
+    hold_idx_cagr = float(hl.bench_cagr_pre.iloc[-1]) if len(hl) else float("nan")
+    assert all(r_["edge"] < 0 for r_ in dg["selection_edge_by_year"] if r_["year"] >= 2024)
+    n_harness_keeps = int(keeps.description.fillna("").str.startswith("[harness]").sum())
     summ = dg["summary"]
     s_is, s_oos = summ["2020-23"], summ["2024-26"]
     edge = dg["selection_edge_by_year"]
@@ -1130,10 +1228,13 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     rf_oos = md.rf.loc[Pp.OOS_START:]
     cash_oos = float((1 + rf_oos).prod() ** (252 / len(rf_oos)) - 1)
     n_after_best = len(lin) - 1 - lin.index(best_pre)
+    dd_kill = float(np.ceil(1.25 * max(abs(m["maxdd_full"]), abs(final["maxdd_pre"])) * 100) / 100)
     ex_start = "2023-09-05"
     trace = cohort_trace(md, W, p, ex_start)
     if trace["unexplained"]:
         raise RuntimeError(f"worked example: exits not explained by the strategy's rules: {trace['unexplained']}")
+    if not trace["replica_ok"]:
+        raise RuntimeError("worked example: the weight decomposition does not reproduce the strategy's weights")
 
     story = [NextPageTemplate("body"), PageBreak()]
 
@@ -1153,7 +1254,7 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     story.append(Spacer(1, 14))
     toc = TableOfContents()
     toc.levelStyles = [ST["toc0"], ST["toc1"]]
-    toc.dotsMinLevel = 0
+    toc.dotsMinLevel = -1                    # no dot leaders: page numbers flush right, no uneven gaps
     story.append(toc)
 
     # ---------------------------------------------------------------- summary
@@ -1163,43 +1264,47 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
                                     "earns less than cash.")
     story.append(stat_tiles([
         ("Selection window", "2020–23, the loop maximised this", m["sharpe_is"], f"baseline {B.num(base['sharpe_is'])}"),
-        ("Validation window", "2024 – Oct 2026, never selected on", m["sharpe_oos"], f"Nifty {B.num(m['bench_sharpe_oos'])}"),
-        ("Sealed hold-out", "Apr 2017–2019, scored once", final["sharpe_pre"], f"Nifty {B.num(final['bench_sharpe_pre'])}"),
-        ("Whole period", "2020 – Oct 2026", m["sharpe_full"], "selection + validation"),
+        ("Validation window", "2024–Oct 2026, not used to select", m["sharpe_oos"],
+         f"Nifty 50 {B.num(m['bench_sharpe_oos'])}"),
+        ("Sealed hold-out", "Apr 2017–Dec 2019, scored once", final["sharpe_pre"],
+         f"Nifty 50 {B.num(final['bench_sharpe_pre'])}"),
+        ("Whole period", "2020–Oct 2026, both windows", m["sharpe_full"], f"Nifty 50 {B.num(m['bench_sharpe_full'])}"),
     ]))
     story.append(P(f"Sharpe ratios of daily returns over the RBI repo rate, net of 15 bps one-way costs, next-open "
-                   f"execution. {n_exp:,} experiments logged.", "source"))
+                   f"execution. {n_exp:,} rows in the research log; {n_trials:,} scored experiments.", "source"))
     story.append(h2("What we did"))
     story.append(P(
         "The brief was a single image: <i>RSI + EMA + VWAP</i>. We turned it into a long-only strategy on the "
         "point-in-time Nifty 50, backtested it on NSE daily data from January 2020 to October 2026, and handed it "
         "to an autonomous research loop modelled on Karpathy's <i>autoresearch</i>: one editable strategy file, a "
         "fixed backtest harness, one metric (the 2020–2023 Sharpe ratio net of costs) and a keep-or-discard "
-        f"decision on every experiment. Six parallel researchers per round ran {len(rounds)} rounds and logged "
-        f"{n_exp:,} experiments; {len(lin) - 1} of them were merged into the strategy."))
+        f"decision on every experiment. {lens_txt} ran {len(rounds)} rounds and {n_round_rows:,} experiments; "
+        f"{len(lin) - 1} of them were merged into the strategy."))
     story.append(h2("What we found"))
     story += bullets([
-        f"<b>In sample the loop worked.</b> The 2020–2023 Sharpe rose from {B.num(base['sharpe_is'])} to "
-        f"{B.num(m['sharpe_is'])}: {B.num(m['cagr_is'] * 100, 1)}% a year with a {B.num(m['maxdd_is'] * 100, 1)}% "
+        f"<b>In sample the loop worked.</b> The 2020–2023 Sharpe rose from {pnum(base['sharpe_is'])} to "
+        f"{pnum(m['sharpe_is'])}: {pnum(m['cagr_is'], 1, pct=True)} a year with a {pnum(m['maxdd_is'], 1, pct=True)} "
         "worst drawdown. From round 2 every merge also had to pass in-sample robustness gates (both halves, the "
         "five best days removed, parameter plateaus; from round 5, leave-one-spell-out).",
-        f"<b>Out of sample it did not.</b> On 2024–2026, which no selection ever used, the Sharpe is "
-        f"{snum(m['sharpe_oos'])}: {B.num(m['cagr_oos'] * 100, 1)}% a year while cash earned "
-        f"{B.num(cash_oos * 100, 1)}%. On the sealed April 2017 to December 2019 "
-        f"hold-out, scored once after the research ended, it is {snum(final['sharpe_pre'])} against "
-        f"{snum(final['bench_sharpe_pre'])} for the Nifty.",
+        f"<b>Out of sample it did not.</b> On 2024–2026, which the keep rule never used, the Sharpe is "
+        f"{pnum(m['sharpe_oos'])}: {pnum(m['cagr_oos'], 1, pct=True)} a year while cash earned "
+        f"{pnum(cash_oos, 1, pct=True)}. On the sealed April 2017 to December 2019 hold-out, scored once after the "
+        f"research ended, it is {pnum(final['sharpe_pre'])} against {pnum(final['bench_sharpe_pre'])} for the "
+        "Nifty 50. (The lead researcher saw the 2024–2026 numbers after round 1 and tightened the protocol; the "
+        "2017–2019 window stayed sealed until the end.)",
         f"<b>It is not one unlucky strategy.</b> {neg_oos} of the {len(lin)} strategies the loop kept, baseline "
         f"included, are negative on 2024–2026, and {neg_pre} of {len(lin)} on the hold-out. The hold-out "
-        f"score peaked at {best_pre['stage']} ({B.num(best_pre['sharpe_pre'])}); all {n_after_best} incumbents "
+        f"score peaked at {best_pre['stage']} ({pnum(best_pre['sharpe_pre'])}); all {n_after_best} incumbents "
         "kept after it score lower.",
         f"<b>Costs are not the cause.</b> Before any cost the 2024–2026 Sharpe is "
-        f"{snum(cost_tab[0]['sharpe_oos'])}. The edge itself is gone: {B.num(s_is['hit_rate'] * 100, 0)}% of the "
-        f"{s_is['spells']} invested spells of 2020–2023 beat cash, {B.num(s_oos['hit_rate'] * 100, 0)}% of the "
-        f"{s_oos['spells']} since; the names the strategy buys have lagged the average member in every year from 2024.",
+        f"{pnum(cost_tab[0]['sharpe_oos'])}. The edge itself is gone: {pnum(s_is['hit_rate'], 0, pct=True)} of the "
+        f"{s_is['spells']} invested spells of 2020–2023 beat cash, {pnum(s_oos['hit_rate'], 0, pct=True)} of the "
+        f"{s_oos['spells']} since; the names the strategy buys have lagged the average member in every year from "
+        f"2024{(' (and in ' + ', '.join(neg_is) + ')') if neg_is else ''}, after leading it in {', '.join(pos_is)}.",
     ])
     story.append(Spacer(1, 6))
     story.append(navy_card("Verdict: a measure of fit, not of expected return", [
-        f"The {B.num(m['sharpe_is'])} in-sample Sharpe describes how well the rules explain 2020–2023, a "
+        f"The {pnum(m['sharpe_is'])} in-sample Sharpe describes how well the rules explain 2020–2023, a "
         "crash and a strong recovery that a regime-timed, concentrated book with fast exits could exploit. "
         "The rules do not transfer to the years before or after. <b>We do not recommend allocating capital to "
         "this strategy.</b> If the desk wants a live answer, paper-trade it under the kill rules in Part 8 and "
@@ -1210,9 +1315,9 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     story += bullets([
         "The harness: point-in-time universe, next-open execution with exact drifted-state accounting, a "
         "dense lookahead detector, repo-rate cash and an honest 15 bps cost stack. It is strategy-agnostic.",
-        "The protocol: hidden validation data, a sealed and pre-registered hold-out, an append-only log of "
-        "every look, and a lineage scored on every window. That is what made this failure visible before any "
-        "capital was at risk.",
+        "The protocol: validation data hidden from the researchers (from round 2), a sealed and pre-registered "
+        "hold-out, an append-only log of every look at it, and a lineage scored on every window. That is what "
+        "made this failure visible before any capital was at risk.",
         "The finding itself: in-sample robustness gates test stability inside one regime. They cannot "
         "substitute for data the search never saw.",
     ])
@@ -1224,7 +1329,7 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
                                     "their confluence.")
     story.append(P(
         "All indicators are computed on daily bars, per stock, from data up to and including the close of the day "
-        "(they are causal). The definitions below are the exact ones in <font name='PlexMono'>indicators.py</font> "
+        f"(they are causal). The definitions below are the exact ones in {code('indicators.py')} "
         "(Appendix B); the strategy uses nothing else."))
     story.append(h2("Relative strength index (Wilder)"))
     story.append(formula_card([
@@ -1233,11 +1338,11 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
         "AU<sub>t</sub>, AD<sub>t</sub> = exponential averages of U and D with α = 1/n",
         "RSI<sub>t</sub> = 100 − 100 / (1 + AU<sub>t</sub> / AD<sub>t</sub>)   (100 if AD = 0; 50 if both are 0)",
     ], note=f"n = {p['rsi_n']}. For stocks the RSI is smoothed again by an EMA of span {p['rsi_smooth']} "
-            "(\"smoothed RSI\"). The regime uses the raw RSI(14) of the NIFTY 50 index."))
+            "(\"smoothed RSI\"). The regime uses the raw RSI(14) of the Nifty 50 index."))
     story.append(P(
         "Two readings matter. A smoothed RSI below 70 means the stock is not overbought at entry; a 20-day "
         "maximum below 80 means it has not had a fresh blow-off. On the index, RSI is the regime switch: the book "
-        "is invested only while the NIFTY's own RSI says the market is in an up-leg, and stands aside when the "
+        "is invested only while the Nifty 50's own RSI says the market is in an up-leg, and stands aside when the "
         "index itself is overbought (above 80)."))
     story.append(h2("Exponential moving average"))
     story.append(formula_card([
@@ -1252,40 +1357,39 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
         "TP<sub>t</sub> = (H<sub>t</sub> + L<sub>t</sub> + C<sub>t</sub>) / 3",
         "VWAP<sub>n,t</sub> = Σ TP<sub>s</sub> · V<sub>s</sub> / Σ V<sub>s</sub>,   "
         "s = t − n + 1 … t",
-    ], note="Three windows are used: VWAP3 (where the last three sessions traded), VWAP20 (the month) and "
-            "VWAP50 (the quarter)."))
+    ], note="Three windows are used: VWAP3 (where the last three sessions traded), VWAP20 (about a month) and "
+            "VWAP50 (about two and a half months)."))
     story.append(P(
         "A note on VWAP. Intraday traders use a session VWAP that resets every morning. That needs intraday bars; "
         "the vendor's NSE intraday history starts in 2023, so it cannot cover 2020–2026. The strategy "
         "therefore uses rolling multi-day VWAPs of the typical price, which keep the idea (the average price "
         "paid, weighted by volume) at a daily horizon. Close above VWAP20 means recent buyers are in profit; "
         "the VWAP <i>ladder</i> (VWAP3 against VWAP50) says whether short-term trading is above or below the "
-        "quarter's average cost."))
-    ex_tk = trace["formation"][0][0]
+        "50-session average cost."))
+    ex_tk = trace["formation"][0]["tk"]
     exit_day = next((e[0] for e in trace["events"] if ex_tk in e[2]), trace["t1"])
     story.append(figure(
         chart_indicators(md, p, ex_tk, "2023-07-10", str((pd.Timestamp(exit_day) + pd.Timedelta(days=12)).date()),
                          trace["t0"], exit_day),
         f"Figure 1. The three indicators on {ex_tk}, the largest position of the cohort traced in Part 4.7. The name "
-        f"entered on the close of {trace['t0']:%d %b %Y} (EMA20 above EMA50 by less than 6%, close above VWAP20, "
-        "smoothed RSI under 70) and left on the exit close marked.",
-        "Source: FMP daily bars; indicators.py; RAAS Capital Quant Desk."))
-    story.append(h2("Supporting measures"))
-    story.append(P("The final strategy adds risk measures that the three indicators do not provide. All are "
-                   "standard and all are computed from the same daily closes:"))
-    story.append(data_table(
+        f"was selected at the close of {trace['t0']:%d %b %Y} (EMA20 above EMA50 by less than 6%, close above VWAP20, "
+        "smoothed RSI under 70) and bought at the next open; it was sold at the open after the exit close marked.",
+        "Source: Financial Modeling Prep daily bars; indicators.py; RAAS Capital Quant Desk."))
+    story.append(KeepTogether([h2("Supporting measures"), P("The final strategy adds risk measures that the three indicators do not provide. All are "
+                   "standard and all are computed from the same daily bars:"), data_table(
         ["Measure", "Definition", "Used for"],
         [["Realised volatility σ<sub>n</sub>", "standard deviation of daily returns over n days × √252",
           "calm filter, risk model, Bank Nifty sizing"],
-         ["Correlation ρ<sub>n</sub>", "n-day correlation of the stock's daily return with the NIFTY 50's",
+         ["Correlation ρ<sub>n</sub>", "n-day correlation of the stock's daily return with the Nifty 50's",
           "beta, idiosyncratic volatility"],
-         ["Beta β", "ρ · σ<sub>stock</sub> / σ<sub>NIFTY</sub>", "shock test, risk model"],
-         ["Blume beta β<sup>B</sup>", f"max(0, (1 − {fmt_param(p['beta_shrink'])}) · β + "
-          f"{fmt_param(p['beta_shrink'])}), with a {p['w_corr_n']}-day correlation", "weights, risk model"],
-         ["Idiosyncratic vol σ<sub>ε</sub>", "σ · √(1 − ρ²)",
+         ["Beta β", f"ρ<sub>{p['corr_n']}</sub> · σ<sub>stock</sub> / σ<sub>Nifty</sub>", "shock test"],
+         ["Blume beta β<sub>B</sub>", f"max(0, (1 − {fmt_param(p['beta_shrink'])}) · β + "
+          f"{fmt_param(p['beta_shrink'])}), with β on ρ<sub>{p['w_corr_n']}</sub>", "weights, risk model"],
+         ["Idiosyncratic vol σ<sub>ε</sub>", f"σ<sub>{p['vol_n']}</sub> · √(1 − ρ²): with ρ<sub>{p['w_corr_n']}</sub> "
+          f"for the weights and the risk model, with ρ<sub>{p['corr_n']}</sub> for the shock test",
           "weights, shock test, risk model"],
          ["Breadth", "share of eligible members whose close is above their VWAP20", "dip top-up"]],
-        [40 * mm, 82 * mm, FW - 122 * mm]))
+        [40 * mm, 82 * mm, FW - 122 * mm], keep=False)]))
 
     # ---------------------------------------------------------------- part 2: data and harness
     story += [PageBreak()] + opener("Part 2", "Data, universe and the backtest harness",
@@ -1294,15 +1398,16 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     story.append(h2("Universe and data"))
     story += bullets([
         "<b>Universe.</b> The point-in-time Nifty 50: a stock can be held only on days it is an index member. "
-        "Membership comes from the <i>Historical Nifty 50 Constituent Weights</i> dataset (NSE Indices, CC "
-        "BY-NC-SA 4.0), extended with NSE's official changes to September 2026 and re-dated to NSE effective "
-        "dates. 66 stocks were members at some point in 2020–2026; the sealed hold-out adds the 11 that left "
+        "Membership comes from the <i>Historical Nifty 50 Constituent Weights</i> dataset (Bera, 2025, CC "
+        "BY-NC-SA 4.0; sourced from NSE Indices), extended with NSE's official changes to September 2026 and "
+        "re-dated to NSE effective dates. 66 stocks were members at some point in 2020–2026; the sealed hold-out adds the 11 that left "
         "before 2020. There is no survivorship bias.",
         "<b>Prices.</b> Financial Modeling Prep end-of-day bars from June 2016 (3.5 years of indicator warm-up "
-        "before 2020), split and bonus adjusted. The four demergers in the window (Reliance–Jio Financial, "
-        "ITC–ITC Hotels, Tata Motors–TMCV, HUL–Kwality Wall's) are corrected to the NSE special-"
-        "session prices. Spin-offs that sat in the index at a frozen price are not tradable.",
-        "<b>Index and ETF.</b> NIFTY 50 and BANK NIFTY are signals only and can never be traded. NIFTYBEES is the "
+        "before 2020), split and bonus adjusted. The vendor adjusts the four demergers in the window "
+        "(Reliance–Jio Financial, ITC–ITC Hotels, Tata Motors–TMCV, HUL–Kwality Wall's); the three whose "
+        "factors differ from the NSE special-session ex-prices (Reliance, ITC, Tata Motors) are rescaled to those "
+        "prices. Spin-offs that sat in the index at a frozen price are not tradable.",
+        "<b>Index and ETF.</b> The Nifty 50 and Bank Nifty indices are signals only and can never be traded. NIFTYBEES is the "
         "tradable index proxy; its vendor opens are replaced by the index's open gap applied to the ETF's "
         "previous close.",
         "<b>Calendar.</b> A trading day is a day on which at least 30 stocks have a bar, minus Muhurat and the "
@@ -1310,7 +1415,7 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
         "rebuilt from the constituents and pinned to NSE's published closes.",
         "<b>Cash.</b> Idle capital earns the RBI repo rate, accrued daily. Sharpe ratios are measured over it.",
     ])
-    story.append(h2("Execution: decision at the close of T, fill at the open of T+1"))
+    story.append(h2("Execution: decision at the close of t, fill at the open of t+1"))
     story.append(P(
         "The strategy returns target weights computed from data up to the close of day <i>t</i>. The harness "
         "executes them at the <b>open of day t+1</b>, never at the same close. It keeps exact portfolio state in "
@@ -1326,17 +1431,18 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
          ["<b>Total charged by the harness</b>", "<b>15.0</b>", "applied to every rupee traded, both sides"]],
         [70 * mm, 32 * mm, FW - 102 * mm], num_cols=(1,)))
     story.append(P("Harness rules the strategy cannot override: long-only, gross exposure at most 100%, members "
-                   "only (a name leaving the index is sold at the next open), a stock with no fresh bar keeps its "
-                   "position (it cannot trade that day), and a stock that stops trading is liquidated at its last "
-                   "close.", "body"))
+                   "only (a name leaving the index is sold at the next open), a target set on a day the stock has "
+                   "no fresh bar is ignored (the previous target is carried until the stock trades again), and a "
+                   "stock that stops trading is liquidated at its last close.", "body"))
     story.append(h2("Lookahead detector"))
     story.append(P(
         f"Every run recomputes the weights on data truncated at about 60 dates, and on about 30 dates where every "
         f"later bar (prices, volumes, membership, index, rates) is replaced by a random permutation of later bars. "
         f"The weights up to each date must be identical to the full-sample run. The final strategy passes "
         f"{la['n_checks']} checks ({la['n_checks_with_holdings']} with open positions), maximum difference "
-        f"{la['max_abs_diff']:g}. Any use of a future bar, including 'neutral when the future is missing' "
-        f"constructions, fails the run."))
+        f"{la['max_abs_diff']:g}. A use of a future bar that changes the weights on any checked date, including "
+        f"'neutral when the future is missing' constructions, fails the run. The check is a dense sample of "
+        f"dates, not a proof of causality; the code itself only reads data up to each close (Appendix A)."))
     story.append(h2("Metrics"))
     story.append(formula_card([
         "Sharpe = mean(r<sub>t</sub> − rf<sub>t</sub>) / sd(r<sub>t</sub> − rf<sub>t</sub>) · √252",
@@ -1355,9 +1461,9 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
         "2020–2023 window. It prints in-sample numbers only.",
         "If the Sharpe rises and every gate passes, the commit is kept and becomes the new incumbent; otherwise "
         "it is reset. Every experiment, kept or not, is a row in <font name='PlexMono'>results.tsv</font>.",
-        "Each round, six researchers work in parallel on separate git worktrees, each through one lens (for example entry, "
-        "exits, weights, regime, risk, simplification). The lead verifies, merges the winners best-first, and "
-        "runs a combination pass on the merged book.",
+        "Each round, up to six researchers work in parallel on separate git worktrees, each through one lens (for "
+        "example entry, exits, weights, regime, risk or simplification). The lead verifies, merges the winners "
+        "best-first, and runs a combination pass on the merged book.",
     ])
     story.append(h2("Protocol and gates"))
     story.append(data_table(
@@ -1385,57 +1491,73 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
         f"that add less than 0.10 of Sharpe. Round 8 added {B.num(final['sharpe_is'] - lin[-3]['sharpe_is'])}, so "
         f"the loop stopped on the round limit."))
     story.append(h2("Experiments by round"))
+    n_other = n_exp - int(rounds.sum())
     story.append(data_table(
-        ["Round"] + [str(k) for k in rounds.index] + ["Total"],
-        [["Experiments"] + [f"{n:,}" for n in rounds.values] + [f"{n_exp:,}"]],
-        [24 * mm] + [(FW - 44 * mm) / len(rounds)] * len(rounds) + [20 * mm],
-        num_cols=tuple(range(1, len(rounds) + 2)), zebra=False))
-    story.append(P(f"{n_exp - rounds.sum()} further rows are the baseline and harness re-measurements. "
-                   f"{int((tsv.status == 'crash').sum())} experiments crashed and were logged as such.", "source"))
+        ["Round"] + [str(k) for k in rounds.index] + ["Other", "Total"],
+        [["Log rows"] + [f"{n:,}" for n in rounds.values] + [str(n_other), f"{n_exp:,}"],
+         ["Researchers"] + [str(active.get(int(k), "")) for k in rounds.index] + ["", ""]],
+        [24 * mm] + [(FW - 60 * mm) / len(rounds)] * len(rounds) + [16 * mm, 20 * mm],
+        num_cols=tuple(range(1, len(rounds) + 3)), zebra=False))
+    assert n_exp - n_crash - n_other == n_trials, "scored-trial count no longer matches the log"
+    crash_rows = tsv[tsv.status == "crash"].description.fillna("")
+    n_norun = int(crash_rows.str.contains("did not run").sum())
+    n_degen = int(crash_rows.str.contains("degenerate").sum())
+    story.append(P(f"Other: the baseline and {n_other - 1} harness re-measurements of an incumbent. {n_crash} rows are "
+                   f"logged as crashes: {n_crash - n_norun - n_degen} runs that failed and were fixed and re-run, "
+                   f"{n_degen} degenerate test and {n_norun} round-8 researchers that never started (subagent access "
+                   f"was disabled mid-round). The {n_trials:,} scored experiments exclude those {n_crash + n_other} "
+                   "rows.", "source"))
     story.append(CondPageBreak(120 * mm))
     story.append(h2("The lineage: every kept strategy on every window"))
+    is_up = all(b_["sharpe_is"] > a_["sharpe_is"] for a_, b_ in zip(lin[:-1], lin[1:]))
+    story.append(figure(chart_lineage(lin),
+                        "Figure 2. " + ("In-sample Sharpe rose at every stage; " if is_up else
+                                        "In-sample Sharpe rose from stage to stage; ") +
+                        "the two windows the keep rule never used did not follow. The dashed line is buy-and-hold "
+                        "Nifty 50 over the hold-out."))
     rows = []
     for o in lin:
         rows.append([esc(o["stage"]), f"<font name='PlexMono'>{esc(o['commit'])}</font>",
-                     esc(LINEAGE_NOTES.get(o["stage"], "")), B.num(o["sharpe_is"]),
+                     esc(LINEAGE_NOTES.get(o["stage"], "")), snum(o["sharpe_is"]),
                      snum(o["sharpe_oos"]), snum(o.get("sharpe_pre"))])
     story.append(data_table(["Stage", "Commit", "What it added", "2020–23", "2024–26", "2017–19"], rows,
                             [16 * mm, 17 * mm, FW - 87 * mm, 18 * mm, 18 * mm, 18 * mm], num_cols=(3, 4, 5)))
     story.append(P("All strategies re-scored on the final harness. The 2017–19 column is the first and only look "
-                   "at those years for each strategy (reports/holdout_log.tsv).", "source"))
-    story.append(figure(chart_lineage(lin),
-                        "Figure 2. In-sample Sharpe rose at every stage; the two windows the loop never used did not "
-                        "follow. The dashed line is buy-and-hold Nifty over the hold-out."))
+                   "at those years for each strategy (reports/holdout_log.tsv). 'What it added' summarises the "
+                   "merge commit; the final rules are in Part 4.", "source"))
 
     # ---------------------------------------------------------------- part 4: the strategy
     story += [PageBreak()] + opener("Part 4", "The final strategy, rule by rule",
-                                    "Everything below is what strategy.py does, in the order it does it. The "
+                                    "Everything below is what the strategy file does, in the order it does it. The "
                                     "source is reproduced in full in Appendix A.")
     story.append(P(
-        "In one paragraph: the book is in the market only while the NIFTY 50's own RSI says the index is in an "
+        "In one paragraph: the book is in the market only while the Nifty 50's own RSI says the index is in an "
         "up-leg. On the first day of each up-leg it buys one basket (a <i>cohort</i>) of Nifty 50 stocks that "
         "show the RSI + EMA + VWAP confluence, weighted towards names whose risk is mostly market risk. It then "
         "lets the cohort ride without rebalancing or adding names, sells names one by one on VWAP and news "
-        "signals, keeps the book inside a volatility budget, and goes entirely to cash when the up-leg ends."))
+        "signals, and keeps the book inside a volatility budget. If the index becomes overbought (RSI above 80) "
+        "the book stands aside in cash and, when the RSI comes back with the up-leg intact, buys a second, "
+        "momentum cohort. When the up-leg ends, everything goes to cash."))
     story.append(figure(flow_diagram(), "Figure 3. One day of the strategy. Signals use data to the close of day t; "
-                                        "the harness trades at the open of day t+1."))
+                                        "the harness trades at the open of day t+1.", source=None))
     story.append(h2("4.1  Regime: when to be in the market"))
     on_lvl = p["regime_rsi_mid"] + p["regime_rsi_band"]
     off_lvl = p["regime_rsi_mid"] - p["regime_rsi_band"]
     story.append(formula_card([
-        f"Switch<sub>t</sub> = on if RSI<sup>N</sup><sub>t</sub> > {on_lvl:g};   off if RSI<sup>N</sup><sub>t</sub> < "
+        f"Switch<sub>t</sub> = on if RSI<sub>N,t</sub> > {on_lvl:g};   off if RSI<sub>N,t</sub> < "
         f"{off_lvl:g};   otherwise unchanged",
-        f"In market<sub>t</sub> = Switch<sub>t</sub> and RSI<sup>N</sup><sub>t</sub> ≤ {p['regime_rsi_max']:g}",
-    ], note=f"RSI<sup>N</sup>: Wilder RSI({p['regime_rsi_n']}) of the NIFTY 50 close. Not in market: the target is "
-            "100% cash, executed at the next open."))
+        f"In market<sub>t</sub> = Switch<sub>t</sub> and RSI<sub>N,t</sub> ≤ {p['regime_rsi_max']:g}",
+    ], note=f"RSI<sub>N,t</sub>: Wilder RSI({p['regime_rsi_n']}) of the Nifty 50 close on day t. Not in market: the "
+            "target is 100% cash, executed at the next open."))
     story.append(P(
-        "The hysteresis band (on above 57, off below 53) stops the book from flickering in and out around a single "
-        "threshold. The stand-aside above 80 keeps it out of an index that is already overbought; when the index "
-        "RSI falls back to 80 or below while the switch is still on, the book re-enters with a different cohort "
-        "(4.3)."))
+        f"The hysteresis band (on above {on_lvl:g}, off below {off_lvl:g}) stops the book from flickering in and out "
+        f"around a single threshold. The stand-aside above {p['regime_rsi_max']:g} keeps it out of an index that is "
+        f"already overbought; when the index RSI falls back to {p['regime_rsi_max']:g} or below while the switch is "
+        "still on, the book re-enters with a different cohort (4.3)."))
     story.append(figure(chart_regime(md, S_mod, p, "2023"),
-                        "Figure 4. The regime in 2023. Shaded: in market. The switch turns on above 57 and stays on "
-                        "until the RSI falls below 53; above 80 the book stands aside."))
+                        f"Figure 4. The regime in 2023. Shaded: in market. The switch turns on above {on_lvl:g} and "
+                        f"stays on until the RSI falls below {off_lvl:g}; above {p['regime_rsi_max']:g} the book "
+                        "stands aside."))
     story.append(h2("4.2  Entry: which names qualify"))
     story.append(P("On a formation day (the first day <i>in market</i> after a day out), a stock qualifies if "
                    "every one of these holds at that close:"))
@@ -1455,126 +1577,144 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     story.append(h2("4.3  Weights: how much of each"))
     story.append(h3("Fresh cohort (the switch has just turned on)"))
     story.append(formula_card([
-        "score<sub>i</sub> = β<sup>B</sup><sub>i</sub> / σ<sub>ε,i</sub><sup>2</sup>  ×  "
+        "score<sub>i</sub> = β<sub>B,i</sub> / σ<sub>ε,i</sub>²  ×  "
         f"min(1, a<sub>i</sub> / {p['vwap_n']})  ×  (C<sub>i</sub> / VWAP3<sub>i</sub>)<sup>{p['rung_power']:g}</sup>",
         "w<sub>i</sub> = g · score<sub>i</sub> / Σ score,   then capped",
-    ], note=f"β<sup>B</sup>: Blume beta ({p['w_corr_n']}-day correlation, shrunk one third towards 1). "
-            f"σ<sub>ε</sub>: idiosyncratic vol ({p['vol_n']}-day). a<sub>i</sub>: sessions since the name's "
-            "last shock or volume spike (no record: weight not reduced). g: the cohort's gross size (4.4)."))
+    ], note=f"β<sub>B</sub>: Blume beta (beta on a {p['w_corr_n']}-day correlation, shrunk one third towards 1). "
+            f"σ<sub>ε</sub>: idiosyncratic vol (the {p['vol_n']}-day vol with the market part removed using the "
+            f"{p['w_corr_n']}-day correlation). a<sub>i</sub>: sessions since the name's last shock or volume spike "
+            "(no record: weight not reduced). g: the cohort's gross size (4.4)."))
     story.append(P(
         "The first term is the single-index mean-variance weight for a timed bet on the market's up-leg: it buys "
         "market exposure (beta) per unit of stock-specific risk. The second term buys names with recent news "
         "small and lets them grow back over a month. The third, with a steep exponent, tilts towards the "
-        "names closest to or above the bottom rung of their VWAP ladder."))
+        "names trading above their three-day VWAP, the bottom rung of the VWAP ladder. 4.7 shows the three "
+        "terms at work on one cohort."))
     story.append(h3("Re-entry cohort (after the stand-aside above 80)"))
     story.append(formula_card([
         f"h<sub>i</sub> = max(0, VWAP20<sub>i</sub> / VWAP50<sub>i</sub> − 1)  ×  "
-        f"max(0, sRSI<sub>i</sub> − (sRSI<sup>N</sup> − {p['rsi_lag']:g}))",
+        f"max(0, sRSI<sub>i</sub> − (sRSI<sub>N</sub> − {p['rsi_lag']:g}))",
         f"buy the {p['re_k']} names with the largest h (h > 0 only); w<sub>i</sub> = h<sub>i</sub> / Σ h,  "
         "gross 100%",
-    ], note="sRSI: smoothed RSI(14) of the stock; sRSI<sup>N</sup>: the same on the NIFTY 50. A re-entry is "
-            "momentum inside a hot market: names whose month VWAP leads their quarter VWAP and whose RSI keeps "
+    ], note="sRSI: smoothed RSI(14) of the stock; sRSI<sub>N</sub>: the same on the Nifty 50. A re-entry is "
+            "momentum inside a hot market: names whose 20-day VWAP leads their 50-day VWAP and whose RSI keeps "
             "up with the index."))
     story.append(h3("Single-name cap"))
     story.append(P(f"No stock may exceed {p['w_cap'] * 100:g}% of a cohort. The share above the cap is parked in "
-                   "NIFTYBEES, which holds index exposure until the regime switches off and is never trimmed."))
+                   "NIFTYBEES, which holds index exposure until the regime switches off. The vol budget never "
+                   "trims it unless NIFTYBEES alone exceeds the budget, which did not happen in the backtest."))
     story.append(h2("4.4  Size: how much of the book"))
     story.append(formula_card([
         f"g = min(1, (σ<sub>{p['vol_long_n']}</sub> / σ<sub>{p['vol_n']}</sub>)<sup>{p['size_power']:g}</sup>"
         f" of {p['size_index']})   for a fresh cohort",
         f"g ← {p['whipsaw_size']:g} · g   if the book was out for {p['whipsaw_days']} sessions or fewer (a whipsaw)",
         "g = 1   for a re-entry cohort",
-    ], note="Bank Nifty is the most liquid, most leveraged sector. When it has just become more volatile than its "
-            "six-month norm, a new up-leg is less trustworthy and the cohort is bought smaller."))
-    story.append(h2("4.5  While the cohort rides"))
-    story.append(P("Weights drift with prices; nothing is rebalanced and no name is added until the next formation "
-                   "day. Each close, in this order:"))
-    story.append(data_table(
+    ], note=f"With the exponent {p['size_power']:g} the ratio is a variance ratio. Bank Nifty is the most liquid, "
+            "most leveraged sector: when it has just become more volatile than its six-month norm, a new up-leg is "
+            "less trustworthy and the cohort is bought smaller."))
+    steps = data_table(
         ["Step", "Rule"],
         [["1  Exits", f"sell a held stock if (a) close < {p['vwap_exit']:g} × VWAP{p['vwap_n']}; (b) the VWAP "
           f"ladder breaks: close < VWAP{p['vwap_short_n']} < VWAP{p['vwap_long_n']}; (c) an idiosyncratic shock: "
-          f"r<sub>i</sub> − β<sub>i</sub> r<sub>N</sub> < −{p['shock_k']:g} · "
-          f"σ<sub>ε,i</sub> / √252 (yesterday's {p['corr_n']}-day beta and vol); (d) a volume spike: "
-          f"volume > {p['vspike_k']:g} × its average over the previous {p['vwap_n']} sessions; or it leaves the index"],
+          f"the stock's return less β times the Nifty 50's is below −{p['shock_k']:g} daily idiosyncratic sigmas "
+          f"(yesterday's {p['corr_n']}-day beta and vol); (d) a volume spike: volume > {p['vspike_k']:g} × its "
+          f"average over the previous {p['vwap_n']} sessions; or it leaves the index"],
          ["2  Exhaustion", f"if the names still held carry less than {p['exhaust'] * 100:g}% of the cohort's "
           "formation stock weight, sell the stock remainder (NIFTYBEES rides on)"],
          ["3  Re-rank", f"once, on the close of day {p['vol_cap_delay'] + 1} after formation: if three or more stocks "
-          f"are held, sell the bottom {fmt_param(p['rerank_drop'])} (rounded down) by score (fresh: β<sup>B</sup>/"
-          f"σ<sub>ε</sub><sup>2</sup>; re-entry: h); a stretched name counts at {p['stretch_score']:g}× its score"],
+          f"are held, sell the bottom {fmt_param(p['rerank_drop'])} of them by count (rounded down), ranked by "
+          f"score (fresh: β<sub>B</sub> / σ<sub>ε</sub>²; re-entry: h); a stretched name counts at "
+          f"{p['stretch_score']:g}× its score"],
          ["4  Vol budget", f"from day {p['vol_cap_delay'] + 1}: if the model vol of the book exceeds "
-          f"{p['vol_cap'] * 100:g}%, name i keeps min(1, λ · score<sub>i</sub>) of its weight with "
+          f"{p['vol_cap'] * 100:g}%, each name keeps min(1, λ × its score) of its weight, with "
           "λ set by bisection so the model vol equals the budget: the names the cohort's own weighting likes "
           "least go first. Trims never add"],
          ["5  Dip top-up", f"fresh cohorts only: if breadth was more than {p['dip_k'] * 100:g} points below its "
           f"{p['vwap_n']}-day mean yesterday and rises today, top up the riding stocks pro rata with idle cash, as "
           "far as the vol budget allows"],
          ["Regime off", "everything is sold at the next open"]],
-        [24 * mm, FW - 24 * mm]))
+        [24 * mm, FW - 24 * mm], keep=False)
+    story.append(KeepTogether([h2("4.5  While the cohort rides"),
+                               P("Weights drift with prices; nothing is rebalanced and no name is added until the "
+                                 "next formation day. Each close, in this order:"), steps]))
     story.append(formula_card([
-        "σ<sub>P</sub> = √( (Σ w<sub>i</sub> β<sup>B</sup><sub>i</sub>)<sup>2</sup> · "
-        "σ<sub>N</sub><sup>2</sup> + Σ w<sub>i</sub><sup>2</sup> σ<sub>ε,i</sub><sup>2</sup> )",
+        "σ<sub>P</sub> = √( (Σ w<sub>i</sub> β<sub>B,i</sub>)² · σ<sub>N</sub>² + Σ w<sub>i</sub>² σ<sub>ε,i</sub>² )",
     ], note="The single-index risk model of the vol budget. NIFTYBEES has beta 1 and no idiosyncratic risk. "
-            "σ<sub>N</sub>: 20-day NIFTY 50 volatility."))
-    story.append(h2("4.6  Parameter register"))
+            "σ<sub>N</sub>: 20-day Nifty 50 volatility."))
+    story.append(CondPageBreak(60 * mm))
+    story.append(Heading(esc("4.6  Parameter register"), "h2_split", 1))
     prow = []
     for block, items in PARAM_DOC:
         for k, (name, desc) in enumerate(items):
-            prow.append([esc(block) if k == 0 else "", f"<font name='PlexMono'>{esc(name)}</font>",
-                         f"<font name='PlexMono'>{esc(fmt_param(p[name]))}</font>", esc(desc)])
+            prow.append([esc(block) if k == 0 else "", code(name), code(fmt_param(p[name])), esc(desc)])
     documented = {n for _, items in PARAM_DOC for n, _ in items}
     assert documented == set(p), f"parameter register out of date: {set(p) ^ documented}"
     story.append(data_table(["Block", "Parameter", "Value", "Meaning"], prow, [18 * mm, 30 * mm, 20 * mm, FW - 68 * mm],
                             compact=True, keep=False))
     story.append(P(f"All {len(p)} entries of PARAMS in strategy.py, checked against the code at build time.", "source"))
-    story.append(CondPageBreak(70 * mm))
+    story.append(CondPageBreak(90 * mm))
     story.append(h2("4.7  A cohort traced through the backtest"))
+    form = trace["formation"]
+    stocks_f = [f for f in form if f["tk"] != "NIFTYBEES"]
+    by_base = sorted(stocks_f, key=lambda f: -f["base_share"])
+    cut = min(stocks_f, key=lambda f: f["ramp"])
+    rank_cut = by_base.index(cut) + 1
+    rungs = sorted(stocks_f, key=lambda f: -f["rung"])
     form_rows = []
-    for tk, wt, d_vw, d_ema, srsi, rung in trace["formation"]:
-        if d_vw is None:
-            form_rows.append([esc(tk), B.num(wt * 100, 1), "–", "–", "–", "–"])
+    for f in form:
+        if f["tk"] == "NIFTYBEES":
+            form_rows.append([code(f["tk"]), B.num(f["w"], 1, pct=True), "–", "–", "–", "–", "–", "–"])
         else:
-            form_rows.append([esc(tk), B.num(wt * 100, 1), B.num(d_vw * 100, 1, sign=True),
-                              B.num(d_ema * 100, 1, sign=True), B.num(srsi, 1), B.num(rung * 100, 1, sign=True)])
+            form_rows.append([code(f["tk"]), B.num(f["w"], 1, pct=True), B.num(f["base_share"], 1, pct=True),
+                              B.num(f["ramp"], 2), B.num(f["rung"], 2), B.num(f["vs_vwap"], 1, pct=True, sign=True),
+                              B.num(f["ema_gap"], 1, pct=True, sign=True), B.num(f["srsi"], 1)])
     story.append(P(
-        f"The cohort formed on the close of <b>{trace['t0']:%d %B %Y}</b>, a fresh start of the regime, bought at "
-        f"the open of the next session with gross {B.num(trace['gross0'] * 100, 0)}%. It held for "
-        f"{trace['spell_days']} sessions. The weights favour the names with the most market risk per unit of "
-        "stock-specific risk; the rung tilt pushed the largest weights to names trading above their three-day VWAP."))
-    story.append(data_table(["Stock", "Weight, %", "Close vs VWAP20, %", "EMA20 vs EMA50, %", "Smoothed RSI",
-                             "Close vs VWAP3, %"],
-                            form_rows, [30 * mm, 24 * mm, 29 * mm, 29 * mm, 29 * mm, FW - 141 * mm],
-                            num_cols=(1, 2, 3, 4, 5)))
-    story.append(P("Values at the formation close. All six columns come from the backtest run at build time.",
-                   "source"))
-    ev_rows = [[f"{d:%d %b}", str(day), esc(txt), B.num(g * 100, 1), str(n)] for d, day, txt, g, n in trace["events"]]
+        f"The cohort was selected at the close of <b>{trace['t0']:%d %B %Y}</b>, a fresh start of the regime, and "
+        f"bought at the next open with gross {pnum(trace['gross0'], 0, pct=True)}. It stayed invested for "
+        f"{trace['spell_days']} sessions. The table splits each weight into the three terms of 4.3. The first "
+        f"term does most of the work: {by_base[0]['tk']} and {by_base[1]['tk']} lead on β<sub>B</sub> / "
+        f"σ<sub>ε</sub>² alone ({pnum(by_base[0]['base_share'], 1, pct=True)} and "
+        f"{pnum(by_base[1]['base_share'], 1, pct=True)}). The rung tilt ranges from {pnum(rungs[-1]['rung'], 2)} "
+        f"to {pnum(rungs[0]['rung'], 2)}. The largest single adjustment is the news ramp: {cut['tk']}, "
+        f"number {rank_cut} on the first term, had a shock or volume spike shortly before formation, so its "
+        f"weight was multiplied by {pnum(cut['ramp'], 2)}."))
+    story.append(data_table(["Stock", "Weight", "β/σ² share", "Ramp", "Rung", "vs VWAP20", "EMA20/50", "sRSI"],
+                            form_rows, [24 * mm, 19 * mm, 22 * mm, 17 * mm, 17 * mm, 24 * mm, 24 * mm, FW - 147 * mm],
+                            num_cols=(1, 2, 3, 4, 5, 6, 7), mono_cols=(0,)))
+    story.append(P("Weight: share of capital. β/σ² share: the first term's share of the cohort. Ramp: min(1, sessions "
+                   "since the last shock or spike / 20). Rung: (close / VWAP3)^20. vs VWAP20 and EMA20/50: per cent "
+                   "above. All values at the formation close, recomputed at build time; the three terms reproduce "
+                   "the strategy's weights exactly.", "note_source"))
+    ev_rows = [[code(f"{d:%d %b}"), str(day), esc(txt), B.num(g, 1, pct=True), str(n)]
+               for d, day, txt, g, n in trace["events"]]
     story.append(KeepTogether([
-        data_table(["Close", "Day", "Event", "Gross, %", "Names"], ev_rows,
+        data_table(["Close", "Day", "Event", "Gross", "Names"], ev_rows,
                    [16 * mm, 11 * mm, FW - 61 * mm, 18 * mm, 16 * mm], num_cols=(1, 3, 4), keep=False),
         P("Each event is a signal at that close, traded at the next open. Day counts sessions after the formation "
-          "close. Reasons are recomputed from the strategy's own formulas (exit flags, exhaustion from the "
-          "formation weights, the day-3 re-rank); the build fails if any sale is left unexplained.", "source")]))
+          "close. Exit flags, exhaustion and the day-3 re-rank (ranked by score, as in the code) are recomputed "
+          "from the strategy's formulas; the build fails if any sale is left unexplained.", "source")]))
     # ---------------------------------------------------------------- part 5: results
     story += [PageBreak()] + opener("Part 5", "Results",
                                     "Net of costs, at the next open, against buy-and-hold and against cash.")
     story.append(figure(chart_equity(eq, res["exposure"].loc["2020-01-01":]),
                         "Figure 5. Growth of 1, log scale, and the share of capital invested. The book is in stocks on "
-                        f"{B.num(m['pct_days_invested_full'] * 100, 0)}% of sessions and invests "
-                        f"{B.num(m['exposure_full'] * 100, 0)}% of capital on average; the rest earns the repo rate.",
-                        "Source: RAAS Capital Quant Desk backtest; NIFTYBEES at its traded price."))
-    hdr = ["Window", "Sharpe", "CAGR", "Max DD", "Turnover", "Exposure", "Names", "Nifty Sharpe"]
+                        f"{B.num(m['pct_days_invested_full'], 0, pct=True)} of sessions and invests "
+                        f"{B.num(m['exposure_full'], 0, pct=True)} of capital on average; the rest earns the repo rate.",
+                        SOURCE[:-1] + "; NIFTYBEES at its traded price."))
+    hdr = ["Window", "Sharpe", "CAGR", "Max DD", "Turnover", "Exposure", "Names", "Nifty"]
     wrows = []
     for lab, sfx in [("2020–23 selection", "is"), ("2024–26 validation", "oos"), ("2020–26 whole", "full")]:
         wrows.append([esc(lab), snum(m[f"sharpe_{sfx}"]), snum(m[f"cagr_{sfx}"], 1, pct=True),
                       snum(m[f"maxdd_{sfx}"], 1, pct=True), B.num(m[f"turnover_yr_{sfx}"], 1),
-                      B.num(m[f"exposure_{sfx}"] * 100, 0) + "%", B.num(m[f"n_names_avg_{sfx}"], 1),
+                      B.num(m[f"exposure_{sfx}"], 0, pct=True), B.num(m[f"n_names_avg_{sfx}"], 1),
                       snum(m[f"bench_sharpe_{sfx}"])])
     wrows.append([esc("2017–19 sealed hold-out"), snum(final["sharpe_pre"]), snum(final["cagr_pre"], 1, pct=True),
                   snum(final["maxdd_pre"], 1, pct=True), "–", "–", "–", snum(final["bench_sharpe_pre"])])
     story.append(data_table(hdr, wrows, [40 * mm] + [(FW - 40 * mm) / 7] * 7, num_cols=tuple(range(1, 8))))
-    story.append(P("Names: average number of positions on invested days. Turnover: both sides, multiples of capital.",
-                   "source"))
+    story.append(P("Names: average number of positions on invested days. Turnover: both sides, multiples of capital per "
+                   "year. Nifty: Sharpe of the Nifty 50 price index over the same window.", "source"))
     story.append(figure(chart_drawdown(eq), "Figure 6. Drawdowns. The strategy's worst fall over 2020–2026 is "
-                        f"{B.num(m['maxdd_full'] * 100, 1)}%; the index's is several times larger, because the "
+                        f"{B.num(m['maxdd_full'], 1, pct=True)}; the index's is several times larger, because the "
                         "strategy is in cash most of the time."))
     story.append(CondPageBreak(110 * mm))
     story.append(h2("Year by year"))
@@ -1582,15 +1722,15 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     for r_ in yearly:
         yrows.append([str(r_["year"]) + ("*" if r_["year"] == 2026 else ""), snum(r_["strat_ret"], 1, pct=True),
                       snum(r_["strat_sharpe"]), snum(r_["strat_maxdd"], 1, pct=True),
-                      B.num(r_["exposure"] * 100, 0) + "%", snum(r_["bees_ret"], 1, pct=True), snum(r_["nifty_sharpe"]),
-                      B.num(r_["rf"] * 100, 1) + "%"])
+                      B.num(r_["exposure"], 0, pct=True), snum(r_["bees_ret"], 1, pct=True), snum(r_["nifty_sharpe"]),
+                      B.num(r_["rf"], 1, pct=True)])
     story.append(data_table(["Year", "Return", "Sharpe", "Max DD", "Exposure", "NIFTYBEES", "Nifty Sharpe", "Cash"],
-                            yrows, [18 * mm] + [(FW - 18 * mm) / 7] * 7, num_cols=tuple(range(1, 8))))
-    story.append(P("* 2026 to 9 October. Cash: the repo-rate accrual earned by idle capital that year.", "source"))
+                            yrows, [18 * mm] + [(FW - 18 * mm) / 7] * 7, num_cols=tuple(range(1, 8)), mono_cols=(0,)))
+    story.append(P(f"* 2026 to {pd.Timestamp(data_end):%d %B}. Cash: the repo rate compounded over the year, the "
+                   "return of capital held entirely in cash (the Sharpe hurdle). Colour marks gains and losses; "
+                   "rates, exposure and counts stay in ink.", "source"))
     story.append(figure(chart_yearly(yearly), "Figure 7. Calendar-year returns. Green and red mark the strategy's "
                                               "up and down years; NIFTYBEES in neela."))
-    story.append(figure(chart_rolling(res["ret"].loc["2020-01-01":], md.rf),
-                        "Figure 8. Rolling 126-session Sharpe ratio of the strategy. Shaded: the validation window."))
 
     # ---------------------------------------------------------------- part 6: robustness
     story += [PageBreak()] + opener("Part 6", "Robustness checks",
@@ -1599,7 +1739,7 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     story.append(h2("Costs"))
     story.append(data_table(["One-way cost, bps", "2020–23", "2024–26", "2020–26", "CAGR 2020–26",
                              "Max DD 2020–26"],
-                            [[str(r_["cost_bps"]), snum(r_["sharpe_is"]), snum(r_["sharpe_oos"]), snum(r_["sharpe_full"]),
+                            [[code(str(r_["cost_bps"])), snum(r_["sharpe_is"]), snum(r_["sharpe_oos"]), snum(r_["sharpe_full"]),
                               snum(r_["cagr_full"], 1, pct=True), snum(r_["maxdd_full"], 1, pct=True)]
                              for r_ in v["cost_sensitivity"]],
                             [34 * mm] + [(FW - 34 * mm) / 5] * 5, num_cols=(1, 2, 3, 4, 5)))
@@ -1610,7 +1750,7 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     story.append(data_table(["Window", "Sharpe", "95% block-bootstrap interval", "P(Sharpe > 0)"],
                             [[esc(lab), snum(bs[k]["sharpe"]),
                               f"{B.num(bs[k]['ci95'][0])} to {B.num(bs[k]['ci95'][1])}",
-                              B.num(bs[k]["p_sharpe_gt_0"] * 100, 0) + "%"]
+                              B.num(bs[k]["p_sharpe_gt_0"], 0, pct=True)]
                              for k, lab in [("is", "2020–23"), ("oos", "2024–26"), ("full", "2020–26")]],
                             [40 * mm, 30 * mm, 60 * mm, FW - 130 * mm], num_cols=(1, 2, 3)))
     story.append(P("Stationary block bootstrap (Politis and Romano), mean block 20 sessions, 2,000 resamples.",
@@ -1618,86 +1758,98 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     dsr = bs["is"]["deflated"]
     story.append(h2("Multiple testing"))
     story.append(P(
-        f"The deflated Sharpe ratio corrects the in-sample Sharpe for the number of trials. Over "
-        f"{dsr['n_trials']:,} logged trials the hurdle is {B.num(dsr['sr0_ann'])}, and the deflated probability "
-        f"that the true Sharpe is above zero comes out at {B.num(dsr['dsr'], 3)}. That figure assumes independent "
-        "trials. These were sequential refinements of one design, so the effective number of trials and the "
-        "dispersion between them are both misstated; the statistic overstates confidence. The out-of-sample "
-        "record is the better guide."))
+        f"The deflated Sharpe ratio corrects the in-sample Sharpe for the number of trials. Over the "
+        f"{dsr['n_trials']:,} scored experiments the hurdle is {B.num(dsr['sr0_ann'])}, and the deflated probability "
+        f"that the true Sharpe is above zero comes out at {B.num(dsr['dsr'], 3)}. That calculation treats the trials "
+        "as independent draws from one distribution. A search that keeps building on its own best result on the "
+        "same four years is not that, and the statistic cannot account for it: read it as a check on the "
+        "arithmetic of selection, not as evidence of an edge. The out-of-sample record is the better guide."))
     story.append(h2("Parameter perturbations"))
     story.append(P(
-        f"Each of the {ps_sum['n_perturbations']} perturbations moves one parameter by ±10% or ±20% "
-        f"(bands are moved through their gap to 1). Median in-sample Sharpe {B.num(ps_sum['median_sharpe_is'])} "
-        f"against {B.num(m['sharpe_is'])} for the final strategy; {B.num(ps_sum['frac_within_0.2_of_base_is'] * 100, 0)}% "
-        f"within 0.2 of it. The median 2024–2026 Sharpe across the same perturbations is "
-        f"{snum(ps_sum['median_sharpe_oos'])}: no nearby parameter set rescues the validation window."))
+        f"Each of the {ps_sum['n_perturbations']} perturbations scales one numeric parameter by 0.8, 0.9, 1.1 or 1.2. "
+        "Integer windows are rounded (a three-day window moves to two or four; a parameter that rounds back to "
+        "its own value is skipped), and the 0.985 VWAP stop is moved through its gap to 1. Median in-sample "
+        f"Sharpe {pnum(ps_sum['median_sharpe_is'])} against {pnum(m['sharpe_is'])} for the final strategy; "
+        f"{pnum(ps_sum['frac_within_0.2_of_base_is'], 0, pct=True)} within 0.2 of it. The median 2024–2026 Sharpe "
+        f"across the same perturbations is {pnum(ps_sum['median_sharpe_oos'])}: no nearby parameter set rescues "
+        "the validation window."))
     story.append(figure(chart_perturb(v["param_sensitivity"]),
                         "Figure 9. Distribution of Sharpe ratios across one-at-a-time parameter perturbations."))
     story.append(h2("Walk-forward parameter choice"))
     story.append(data_table(["Test year", "Chosen on prior years", "Train Sharpe", "Test Sharpe", "Test return"],
-                            [[str(y["test_year"]), f"<font name='PlexMono'>{esc(y['chosen'])}</font>",
-                              B.num(y["sharpe_train"]), snum(y["sharpe_test"]), snum(y["ret_test"], 1, pct=True)]
+                            [[code(str(y["test_year"])), chosen_txt(y["chosen"]),
+                              snum(y["sharpe_train"]), snum(y["sharpe_test"]), snum(y["ret_test"], 1, pct=True)]
                              for y in wf["years"]],
                             [24 * mm, 50 * mm, 30 * mm, 30 * mm, FW - 134 * mm], num_cols=(2, 3, 4)))
-    story.append(P(f"Each year picks the best perturbation on the years before it. Concatenated 2021–2026 Sharpe "
-                   f"{B.num(wf['sharpe_concat'])}, CAGR {B.num(wf['cagr_concat'] * 100, 1)}%. This tests the choice "
-                   "of parameters, not of the rules, which were chosen on 2020–2023.", "source"))
+    oos_wf = [y for y in wf["years"] if y["test_year"] >= 2024]
+    story.append(P("Each year picks the best grid point on the years before it. The grid is centred on parameters "
+                   "tuned on 2020–2023, so only the test years from 2024 are true out-of-sample tests ("
+                   + ", ".join(f"{y['test_year']}: {pnum(y['sharpe_test'])}" for y in oos_wf) +
+                   f"). The concatenated 2021–2026 Sharpe of {pnum(wf['sharpe_concat'])} is mostly in-sample.",
+                   "source"))
     story.append(h2("Monte Carlo and regimes"))
     story.append(P(
         f"Resampling the 2020–2026 daily returns in blocks gives a median terminal wealth of "
         f"{B.num(mc['terminal_wealth_p50'])} (5th–95th percentile {B.num(mc['terminal_wealth_p5'])} to "
-        f"{B.num(mc['terminal_wealth_p95'])}) and a median maximum drawdown of {B.num(mc['maxdd_p50'] * 100, 1)}%. "
+        f"{B.num(mc['terminal_wealth_p95'])}) and a median maximum drawdown of {B.num(mc['maxdd_p50'], 1, pct=True)}. "
         "This describes the variability of the backtest path; it inherits the in-sample years and says nothing "
-        "about whether the edge persists. Split by the Nifty against its 200-day EMA, the Sharpe is "
+        "about whether the edge persists. Split by the Nifty 50 against its 200-day EMA, the Sharpe is "
         f"{B.num(rg['sharpe_above'])} on {rg['days_above']:,} days above and {B.num(rg['sharpe_below'])} on "
         f"{rg['days_below']:,} days below."))
 
     # ---------------------------------------------------------------- part 7: out of sample
     story += [PageBreak()] + opener("Part 7", "Out of sample: what broke",
-                                    "Two windows the search never touched, and a diagnosis of why the rules "
+                                    "Two windows the keep rule never used, and a diagnosis of why the rules "
                                     "stopped working.")
     story.append(h2("The validation window, 2024 to October 2026"))
     oos_years = [r_ for r_ in yearly if r_["year"] >= 2024]
     story.append(P(
-        "Year by year: " + "; ".join(f"{r_['year']}{'*' if r_['year'] == 2026 else ''} return "
-                                     f"{snum(r_['strat_ret'], 1, pct=True)} at a Sharpe of {snum(r_['strat_sharpe'])}, "
-                                     f"against {snum(r_['bees_ret'], 1, pct=True)} for NIFTYBEES"
-                                     for r_ in oos_years) +
-        f". Over the window the strategy compounds at {B.num(m['cagr_oos'] * 100, 1)}% a year while cash earned more; "
-        f"its Sharpe over cash is {snum(m['sharpe_oos'])}."))
+        "The researchers never saw this window and the keep rule never used it; the lead researcher looked at the "
+        "round-1 results and tightened the protocol because of them (Part 3). Year by year: " +
+        "; ".join(f"{r_['year']}{'*' if r_['year'] == 2026 else ''} return {pnum(r_['strat_ret'], 1, pct=True)} at "
+                  f"a Sharpe of {pnum(r_['strat_sharpe'])}, against {pnum(r_['bees_ret'], 1, pct=True)} for NIFTYBEES"
+                  for r_ in oos_years) +
+        f". Over the window the strategy compounds at {pnum(m['cagr_oos'], 1, pct=True)} a year while cash earned "
+        f"{pnum(cash_oos, 1, pct=True)}; its Sharpe over cash is {pnum(m['sharpe_oos'])}."))
+    story.append(figure(chart_rolling(res["ret"].loc["2020-01-01":], md.rf),
+                        "Figure 10. Rolling 126-session Sharpe ratio of the strategy. Shaded: the validation window."))
     story.append(h2("The sealed hold-out, April 2017 to December 2019"))
     story.append(P(
         f"Point-in-time Nifty 50 of those years, including the 11 names that left the index before 2020; scored "
         f"once, after the research ended, for the pre-registered lineage only. The final strategy grew "
-        f"{B.num(hold_s * 100, 1)}% a year, the Nifty {B.num(hold_b * 100, 1)}%, and cash {B.num(hold_c * 100, 1)}%. "
-        f"Sharpe over cash: {snum(final['sharpe_pre'])} against {snum(final['bench_sharpe_pre'])} for the index. "
-        f"By year: 2017 {snum(final['sharpe_2017'])}, 2018 {snum(final['sharpe_2018'])}, "
-        f"2019 {snum(final['sharpe_2019'])}."))
-    story.append(figure(chart_holdout(hold), "Figure 10. The sealed hold-out. The strategy keeps pace with the index "
+        f"{pnum(hold_s, 1, pct=True)} a year, NIFTYBEES {pnum(hold_b, 1, pct=True)} (the Nifty 50 index "
+        f"{pnum(hold_idx_cagr, 1, pct=True)}) and cash {pnum(hold_c, 1, pct=True)}. Sharpe over cash: "
+        f"{pnum(final['sharpe_pre'])} against {pnum(final['bench_sharpe_pre'])} for the Nifty 50. By year: 2017 "
+        f"{pnum(final['sharpe_2017'])}, 2018 {pnum(final['sharpe_2018'])}, 2019 {pnum(final['sharpe_2019'])}."))
+    story.append(figure(chart_holdout(hold), "Figure 11. The sealed hold-out. The strategy keeps pace with the index "
                                             "in 2017 and then stalls below cash."))
     story.append(h2("Diagnosis: the edge was in 2020–2023, not in the rules"))
     story.append(data_table(
         ["Window", "Spells", "Won", "Mean excess", "Median", "Nifty up", "Nifty down", "Cost drag/yr"],
-        [[esc(k), str(s["spells"]), B.num(s["hit_rate"] * 100, 0) + "%", snum(s["mean_spell_excess"], 2, pct=True),
-          snum(s["median_spell_excess"], 2, pct=True), snum(s["mean_excess_when_nifty_up"], 2, pct=True),
-          snum(s["mean_excess_when_nifty_down"], 2, pct=True), B.num(s["cost_drag_per_yr"] * 100, 2) + "%"]
+        [[code(k.replace("-", "–")), str(s["spells"]), B.num(s["hit_rate"], 0, pct=True),
+          snum(s["mean_spell_excess"], 2, pct=True), snum(s["median_spell_excess"], 2, pct=True),
+          snum(s["mean_excess_when_nifty_up"], 2, pct=True), snum(s["mean_excess_when_nifty_down"], 2, pct=True),
+          B.num(s["cost_drag_per_yr"], 2, pct=True)]
          for k, s in summ.items()],
         [24 * mm] + [(FW - 24 * mm) / 7] * 7, num_cols=tuple(range(1, 8))))
-    story.append(P("A spell runs from a regime switch-on to the switch-off. Excess: the spell's return over cash. "
-                   "Nifty up/down: mean excess of spells over which the index rose or fell.", "source"))
+    story.append(P("A spell is a maximal run of invested sessions: it starts at a switch-on or a re-entry and ends "
+                   "at the switch-off or when the exits empty the book. Excess: the spell's return over cash. Nifty "
+                   "up/down: mean excess of spells over which the Nifty 50 rose or fell. Cost drag: costs per year "
+                   "of the window.", "source"))
     story.append(figure(chart_spells(dg["spells"]),
-                        "Figure 11. Every invested spell, in date order. In 2020–2023 the spells that made "
+                        "Figure 12. Every invested spell, in date order. In 2020–2023 the spells that made "
                         "money were large and frequent; since 2024 they are small and outnumbered."))
     story.append(P(
-        f"In 2020–2023 the book won {B.num(s_is['hit_rate'] * 100, 0)}% of its spells and made money over cash "
-        f"even in spells where the index fell ({snum(s_is['mean_excess_when_nifty_down'], 2, pct=True)} on average): "
+        f"In 2020–2023 the book won {pnum(s_is['hit_rate'], 0, pct=True)} of its spells and made money over cash "
+        f"even in spells where the index fell ({pnum(s_is['mean_excess_when_nifty_down'], 2, pct=True)} on average): "
         "the stock selection added value on top of the timing. Since 2024 it wins "
-        f"{B.num(s_oos['hit_rate'] * 100, 0)}% of spells, loses when the index falls "
-        f"({snum(s_oos['mean_excess_when_nifty_down'], 2, pct=True)}) and barely gains when it rises. The "
+        f"{pnum(s_oos['hit_rate'], 0, pct=True)} of spells, loses when the index falls "
+        f"({pnum(s_oos['mean_excess_when_nifty_down'], 2, pct=True)}) and barely gains when it rises. The "
         "selection edge (the next-20-session return of the names a cohort bought, less the average member's on "
         "the same days) shows the same break:"))
-    story.append(figure(chart_edge(edge), "Figure 12. Selection edge by year. Positive in three of the four selection "
-                                          "years, negative in every year since."))
+    story.append(figure(chart_edge(edge), f"Figure 13. Selection edge by year. Positive in {len(pos_is_list)} of the "
+                                          f"{len(pos_is_list) + len(neg_is)} selection years, negative in every year "
+                                          "since."))
     story.append(P(
         "The loop could not have seen this. Its gates (both halves, the five best days, plateaus, leave-one-spell-out) "
         "measure stability <i>inside</i> 2020–2023. A rule that fits that regime well is stable inside it "
@@ -1710,25 +1862,28 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
                                     "kill rules fixed in advance.")
     story.append(h2("Conclusions"))
     story += numbered([
-        f"The strategy is a fit to 2020–2023. In-sample Sharpe {B.num(m['sharpe_is'])}; validation "
-        f"{snum(m['sharpe_oos'])}; sealed hold-out {snum(final['sharpe_pre'])} against {snum(final['bench_sharpe_pre'])} "
-        "for the index.",
-        f"More research made it worse out of sample. The hold-out score peaked at {best_pre['stage']} and all "
-        f"{n_after_best} later incumbents score lower; the validation score of every incumbent after the baseline "
-        "is below the baseline's.",
+        f"The strategy is a fit to 2020–2023. In-sample Sharpe {pnum(m['sharpe_is'])}; validation "
+        f"{pnum(m['sharpe_oos'])}; sealed hold-out {pnum(final['sharpe_pre'])} against "
+        f"{pnum(final['bench_sharpe_pre'])} for the Nifty 50.",
+        f"More research did not help out of sample. The hold-out score rose from {pnum(base['sharpe_pre'])} "
+        f"(baseline) to {pnum(best_pre['sharpe_pre'])} at {best_pre['stage']}, then fell over the {n_after_best} "
+        f"later incumbents to {pnum(final['sharpe_pre'])}. Every incumbent after the baseline scores below the "
+        f"baseline's {pnum(base['sharpe_oos'])} on 2024–2026, although that score improved from "
+        f"{pnum(lin[1]['sharpe_oos'])} at keep 1 to {pnum(final['sharpe_oos'])} at the final.",
         "In-sample robustness gates are necessary and not sufficient. They removed fragile one-day and one-value "
         "results; they could not remove a regime fit.",
-        "The research infrastructure is sound and reusable: harness, lookahead detector, hidden validation data, "
-        "sealed and logged hold-out, lineage scoring.",
+        "The research infrastructure is sound and reusable: harness, lookahead detector, validation data hidden "
+        "from researchers, sealed and logged hold-out, lineage scoring.",
     ])
     story.append(h2("If the desk runs a paper trial"))
-    story.append(P("Operating loop, using <font name='PlexMono'>signals.py</font> (Appendix D):"))
+    story.append(P(f"Operating loop, using {code('signals.py')} (Appendix D):"))
     story += numbered([
-        "After the NSE close, update the data (<font name='PlexMono'>python fetch_fmp.py --update</font>) and keep "
-        "the index-membership file current when NSE announces changes.",
-        f"Run <font name='PlexMono'>python signals.py --capital 1000000 --holdings book.csv</font>. It prints the "
-        f"target weights for the next open, the rupee amounts (for example {B.inr(1000000)} of capital) and the "
-        "orders against current holdings. Pass the current book: the strategy is path-dependent.",
+        f"After the NSE close, update the data ({code('python fetch_fmp.py --update')}) and keep the "
+        "index-membership file current when NSE announces changes.",
+        f"Run {code('python signals.py --capital 1000000 --holdings book.csv')}. It prints the target weights for "
+        f"the next open, the rupee amounts (for example on {B.inr(1000000)} of capital) and, from the current "
+        "book, the orders (target shares less shares held). The targets come from replaying the strategy over "
+        "the whole history, so they stay valid only while the paper book follows them exactly.",
         "Record the orders at the next open as market-on-open fills. Never price them off the previous close.",
         "Weekly: reconcile the paper book against a backtest re-run on the same data. Any difference is a data or "
         "code problem before it is a market one.",
@@ -1736,13 +1891,14 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
     story.append(KeepTogether([h2("Kill rules (fixed before the first trade)"), data_table(
         ["Rule", "Stop the trial when"],
         [["Spell hit rate", f"after 15 completed spells, fewer than half have beaten cash (backtest: "
-          f"{B.num(s_is['hit_rate'] * 100, 0)}% in sample, {B.num(s_oos['hit_rate'] * 100, 0)}% since 2024)"],
+          f"{B.num(s_is['hit_rate'], 0, pct=True)} in sample, {B.num(s_oos['hit_rate'], 0, pct=True)} since 2024)"],
          ["Sharpe", "after 12 months, the paper Sharpe over cash is below zero"],
-         ["Drawdown", f"the paper book falls more than 10% from its peak (1.5× the backtest's "
-          f"{B.num(m['maxdd_full'] * 100, 1)}% worst)"],
+         ["Drawdown", f"the paper book falls more than {B.num(dd_kill, 0, pct=True)} from its peak (beyond both "
+          f"the 2020–2026 worst, {B.num(m['maxdd_full'], 1, pct=True)}, and the 2017–2019 hold-out's, "
+          f"{B.num(final['maxdd_pre'], 1, pct=True)})"],
          ["Selection edge", "the bought names lag the average member over two consecutive quarters"],
          ["Reconciliation", "a weekly re-run on the same data does not reproduce the paper orders"],
-         ["Costs", "measured round-trip cost exceeds twice the 15 bps one-way assumption"]],
+         ["Costs", "measured one-way cost exceeds 30 bps, twice the 15 bps assumption (a round trip above 60 bps)"]],
         [32 * mm, FW - 32 * mm], keep=False)]))
     story.append(P("These thresholds are proposals for the desk's register; they are not results of this study.",
                    "source"))
@@ -1754,33 +1910,38 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
         "than add rules, and should pre-register a fresh hold-out before its first experiment."))
 
     # ---------------------------------------------------------------- appendices: code
-    code_files = [
-        ("Appendix A", "The strategy: strategy.py", "strategy.py",
-         "The only file the research loop edited. compute_target_weights(md) returns the target weights for every "
-         "close; the harness executes them at the next open. Complete and unedited: " + prov_txt + "."),
-        ("Appendix B", "The indicators: indicators.py", "indicators.py",
-         "Fixed harness file. Every indicator is causal: the value at a date uses data up to that date only."),
-    ]
-    for label, title, fname, intro in code_files:
-        story += [PageBreak()] + opener(label, title, None)
-        story.append(P(intro))
-        src = open(os.path.join(HERE, fname)).read()
-        story.append(CodeBlock.from_source(src, FW))
-    story += [PageBreak()] + opener("Appendix C", "The execution engine: prepare.py (excerpt)", None)
-    story.append(P("The functions of the fixed harness that turn target weights into returns and score them. The "
-                   "complete file (data loading, calendar, universe, lookahead detector) is in the repository."))
+    story += [PageBreak()] + opener("Appendix A", "The strategy", None, level_text="Appendix A  ·  The strategy")
+    story.append(P(f"{code('strategy.py')}: the only file the research loop edited. "
+                   f"{code('compute_target_weights(md)')} returns the target weights for every close; the harness "
+                   "executes them at the next open. Complete and unedited: " + prov_txt + "."))
+    story.append(CodeBlock.from_source(open(os.path.join(HERE, "strategy.py")).read(), FW))
+    story += [CondPageBreak(170 * mm)] + opener("Appendix B", "The indicators", None,
+                                                level_text="Appendix B  ·  The indicators")
+    story.append(P(f"{code('indicators.py')}: a fixed harness file. Every indicator is causal: the value at a date "
+                   "uses data up to that date only."))
+    story.append(CodeBlock.from_source(open(os.path.join(HERE, "indicators.py")).read(), FW))
+    story += [CondPageBreak(170 * mm)] + opener("Appendix C  ·  excerpt", "The execution engine", None,
+                                                level_text="Appendix C  ·  The execution engine")
+    story.append(P(f"The functions of the fixed harness {code('prepare.py')} that turn target weights into returns "
+                   "and score them. The complete file (data loading, calendar, universe, lookahead detector) is in "
+                   "the repository."))
     for fn in ["apply_harness_rules", "run_backtest", "sharpe", "max_drawdown", "cagr"]:
         src, start = inspect.getsourcelines(getattr(Pp, fn))
-        story.append(h3(f"prepare.{fn}  (line {start})"))
-        story.append(CodeBlock.from_source("".join(src), FW, first_line=start))
-        story.append(Spacer(1, 6))
-    story += [PageBreak()] + opener("Appendix D", "Live signals: signals.py", None)
-    story.append(P("Computes the target portfolio for the next session's open from data through the latest close, "
-                   "with the same harness rules as the backtest, and the orders against a current book."))
+        block = [P(f"<font name='PlexMono-SemiBold'>prepare.{fn}</font>  <font color='{B.SYAHI[60]}'>line {start}"
+                   "</font>", "h3"), CodeBlock.from_source("".join(src), FW, first_line=start), Spacer(1, 6)]
+        story.append(KeepTogether(block) if len(src) < 40 else block[0])
+        if len(src) >= 40:
+            story += block[1:]
+    story += [CondPageBreak(170 * mm)] + opener("Appendix D", "Live signals", None,
+                                                level_text="Appendix D  ·  Live signals")
+    story.append(P(f"{code('signals.py')} computes the target portfolio for the next session's open from data "
+                   "through the latest close, with the same harness rules as the backtest, and the orders against "
+                   "a current book."))
     story.append(CodeBlock.from_source(open(os.path.join(HERE, "signals.py")).read(), FW))
 
     # ---------------------------------------------------------------- appendix E: reproduce, glossary, notes
-    story += [PageBreak()] + opener("Appendix E", "Reproduce, glossary and important information", None)
+    story += [PageBreak()] + opener("Appendix E", "Reproduce, glossary, notices", None,
+                                    level_text="Appendix E  ·  Reproduce, glossary, notices")
     story.append(h2("Reproduce every number in this note"))
     cmds = ("cd nse\n"
             "python -m pytest -q tests                      # harness, indicators, calendar, hold-out, signals, PDF\n"
@@ -1797,16 +1958,18 @@ def build(out=DEFAULT_OUT, date=None, quick=False):
         ["run.py / compare.py", "one experiment / candidate against incumbent under the gates"],
         ["validate.py, lineage.py, holdout.py, diagnose.py", "the evidence in Parts 5–7"],
         ["signals.py", "next-open targets and orders (Appendix D)"],
-        ["results.tsv", f"the research log: {n_exp:,} experiments, {len(keeps)} keeps"],
+        ["results.tsv", f"the research log: {n_exp:,} rows; {n_keep_rows} keep rows (the baseline, "
+                        f"{len(lin) - 1} merges, {n_harness_keeps} harness re-measurement)"],
         ["make_pdf.py, raas_brand.py, brand/", "this document and the RAAS Capital identity it is set in"],
     ], [62 * mm, FW - 62 * mm], mono_cols=(0,)))
     story.append(h2("Glossary"))
     story.append(data_table(["Term", "Meaning"], [
         ["Cohort", "the basket bought on one formation day; it rides until sold name by name or the regime ends"],
         ["Fresh start / re-entry", "the regime switch has just turned on / the book returns after standing aside above RSI 80"],
-        ["Spell", "a run of sessions in which the book holds stocks, from switch-on to switch-off"],
+        ["Spell", "a maximal run of sessions in which the book holds stocks or NIFTYBEES"],
         ["Selection window", "2020–2023, the only data the research loop optimised on"],
-        ["Validation window", "2024 to October 2026, hidden from researchers, seen by the lead after round 1"],
+        ["Validation window", "2024 to October 2026: never used by the keep rule, hidden from researchers from "
+                              "round 2, seen by the lead after round 1"],
         ["Sealed hold-out", "April 2017 to December 2019, never evaluated during research, scored once"],
         ["Incumbent / keep", "the current best strategy / an experiment that replaced it"],
         ["Excess return", "return over the RBI repo rate earned by cash"],

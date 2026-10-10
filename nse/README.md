@@ -12,7 +12,7 @@ last). The final strategy is commit `c44574d` (docstring-only follow-up `dee8c0e
 | window | role | Sharpe (excess of repo) | CAGR | max DD | Nifty Sharpe |
 |---|---|---:|---:|---:|---:|
 | 2020-01 → 2023-12 | selection (the loop maximised this) | **5.09** | 44.2 % | −1.7 % | 0.58 |
-| 2024-01 → 2026-10 | validation, never used by the loop | **−1.06** | 0.6 % | −6.6 % | −0.28 |
+| 2024-01 → 2026-10 | validation, never used by the keep rule | **−1.06** | 0.6 % | −6.6 % | −0.28 |
 | 2017-04 → 2019-12 | sealed hold-out, scored once at the end | **−0.72** | 2.1 % | −9.7 % | 0.42 |
 | 2020-01 → 2026-10 | whole period | 2.83 | 24.5 % | −6.6 % | 0.31 |
 
@@ -21,7 +21,7 @@ removed 5.09, gross of costs 5.34; 13.75 turnover a year, 5.7 names on average, 
 
 **What this means.** The loop did what it was built to do: it found the rules that best explain
 2020-2023, and every in-sample robustness gate held. The gain did not carry over. On the two windows
-the loop never used, the final strategy earns less than cash: 2024-26 Sharpe −1.06 (baseline −0.49) and,
+the keep rule never used, the final strategy earns less than cash: 2024-26 Sharpe −1.06 (baseline −0.49) and,
 on the sealed 2017-19 hold-out, −0.72 (baseline −1.08) against +0.42 for buy-and-hold Nifty. Every one
 of the 16 incumbents from the baseline to the final strategy is negative on both windows
 (`reports/lineage.md`). Every incumbent after the baseline is worse than the baseline on 2024-26, and

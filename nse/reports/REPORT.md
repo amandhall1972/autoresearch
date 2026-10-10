@@ -1,6 +1,6 @@
 # RSI + EMA + VWAP on the Nifty 50 universe, 2020-2026: final report
 
-Branch `autoresearch/oct9-nse`. 3428 experiments logged, 17 kept (including 1 harness re-measurement of an incumbent). Objective: in-sample Sharpe (2020-01-01..2023-12-31, net of 15 bps one-way costs, next-open execution). The 2024-01-01..2026-10-09 window was never used by the loop (validation window, see below); the 2017-2019 pre-sample hold-out was sealed until the end and scored once for the pre-registered incumbent lineage.
+Branch `autoresearch/oct9-nse`. 3428 experiments logged, 17 kept (including 1 harness re-measurement of an incumbent). Objective: in-sample Sharpe (2020-01-01..2023-12-31, net of 15 bps one-way costs, next-open execution). The 2024-01-01..2026-10-09 window was never used by the keep rule (validation window, see below); the 2017-2019 pre-sample hold-out was sealed until the end and scored once for the pre-registered incumbent lineage.
 
 ## Headline
 
@@ -109,7 +109,7 @@ Each row is a strategy the loop kept (baseline, every merged round winner, final
 
 ## Diagnostics: why it fails after 2023
 
-An invested spell runs from a regime switch-on to the switch-off; excess is its return over cash. The selection edge compares the next-20-session return of the names a cohort bought with the average member on the same days (`python diagnose.py`; every spell is listed in `reports/diagnostics.md`).
+An invested spell is a maximal run of invested sessions (from a switch-on or re-entry to the switch-off or until the exits empty the book); excess is its return over cash. The selection edge compares the next-20-session return of the names a cohort bought with the average member on the same days (`python diagnose.py`; every spell is listed in `reports/diagnostics.md`).
 
 ### Invested spells by period
 
@@ -370,7 +370,7 @@ In-sample robustness (protocol v2 gates): Sharpe 2020-21 5.9789, 2022-23 4.0827,
 
 ## How to read this
 
-* `sharpe_is` is the number the loop optimised; it is subject to selection bias across all logged trials. The deflated Sharpe ratio above accounts for the number and dispersion of those trials.
+* `sharpe_is` is the number the loop optimised; it is subject to selection bias across all logged trials. The deflated Sharpe ratio above adjusts for the number and dispersion of those trials, but treats them as independent draws; a sequential search that builds on its own best results on the same years is not that, so the DSR is not evidence of an edge.
 * `sharpe_oos` (2024-2026) was never used by the loop to choose rules or parameters, and since protocol v2 researchers cannot see it. The lead researcher did inspect its yearly values after round 1, which is why it is called a validation window here and why a second, sealed hold-out (2017-2019) was created before round 2.
 * The sealed pre-sample hold-out (2017-2019) uses its own point-in-time Nifty 50 including 11 names that left the index before 2020; it was scored once at the end for the pre-registered lineage and could not change the final choice.
 * The walk-forward row re-selects parameters each year from a perturbation grid using only prior years; it tests the parameter choice, not the rule structure (which was chosen in-sample).
