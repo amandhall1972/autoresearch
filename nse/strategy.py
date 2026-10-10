@@ -84,14 +84,14 @@ from indicators import ema, rsi, rolling_vwap, realized_vol
 from prepare import ETF_TICKER
 
 PARAMS = dict(
-    rsi_n=14, rsi_smooth=3, rsi_hi=70.0, rsi_peak=80.0, rsi_peak_n=20, rsi_lag=12.0,
+    rsi_n=14, rsi_smooth=3, rsi_hi=70.0, rsi_peak=80.0, rsi_peak_n=20, rsi_lag=16.0, re_k=5,
     ema_fast=20, ema_slow=50, ema_spread=0.06,
     vwap_n=20, vwap_exit=0.985, shock_k=2.5, vspike_k=4.0, vwap_long_n=50, vwap_short_n=3,
     vol_n=20, vol_power=2.0, vol_long_n=120, vol_calm_q=2.0 / 3.0, corr_n=20,
     w_corr_n=15, beta_shrink=1.0 / 3.0, w_cap=0.4, rung_power=20.0,
     regime_rsi_n=14, regime_rsi_mid=55.0, regime_rsi_band=2.0, regime_rsi_max=80.0,
     size_index="BANKNIFTY", size_power=2.0, whipsaw_days=3, whipsaw_size=0.5, vol_cap=0.10, vol_cap_delay=2,
-    gross=1.0,
+    exhaust=0.4, gross=1.0,
 )
 
 
@@ -147,8 +147,8 @@ def compute_target_weights(md) -> pd.DataFrame:
     trend = (ef > es) & (ef < es * (1.0 + p["ema_spread"]))         # up, but not stretched
     vol = realized_vol(c, p["vol_n"])
     vol_rank = (vol / realized_vol(c, p["vol_long_n"])).where(stock).rank(axis=1, pct=True)   # NaN -> no entry
-    entry = (eligible & trend & (c > vw) & (r < p["rsi_hi"]) & (r_peak < p["rsi_peak"])
-             & (r.sub(r_idx, axis=0) > -p["rsi_lag"]) & (vol_rank < p["vol_calm_q"]))
+    entry = (eligible & trend & (c > vw) & (r < p["rsi_hi"]) & (r_peak < p["rsi_peak"]) & (vol_rank < p["vol_calm_q"]))
+    lead_v = r.sub(r_idx - p["rsi_lag"], axis=0).clip(lower=0.0).fillna(0.0).values   # RSI lead over (index RSI - lag)
     ret, idx_ret = c.pct_change(), md.index_close["NIFTY50"].pct_change()
     corr = ret.rolling(p["corr_n"], min_periods=p["corr_n"]).corr(idx_ret)
     ivol = vol * np.sqrt((1.0 - corr ** 2).clip(lower=0.0))          # residual (idiosyncratic) vol vs the NIFTY 50
@@ -161,7 +161,7 @@ def compute_target_weights(md) -> pd.DataFrame:
     vw_long = rolling_vwap(h, l, c, v, p["vwap_long_n"])
     ladder_break = (c < vw_short) & (vw_short < vw_long)            # NaN -> no break
     rung_v = ((c / vw_short) ** p["rung_power"]).fillna(0.0).values     # bottom-rung tilt (close/VWAP3)^k (NaN -> 0)
-    height_v = (vw / vw_long - 1.0).clip(lower=0.0).fillna(0.0).values * rung_v   # re-entry: (VWAP20/VWAP50 - 1)+ x rung
+    height_v = (vw / vw_long - 1.0).clip(lower=0.0).fillna(0.0).values * lead_v   # re-entry: ladder height x RSI lead
     hold = (stock & ~md.tradable) | (eligible & (c > vw * p["vwap_exit"]) & ~shock & ~spike
                                      & ~ladder_break)
     hold[ETF_TICKER] = True                                 # a parked index slot rides until the regime switches off
@@ -188,6 +188,7 @@ def compute_target_weights(md) -> pd.DataFrame:
     hs_v = height_v.copy(); hs_v[:, e] = np.inf                                # re-entry cohorts their ladder height
     score_v = mvs_v
     last_on, t_form = -10 ** 6, -10 ** 6                    # last day the regime was on; the cohort's formation day
+    w0 = np.zeros(N)                                        # the cohort's formation stock weights
     for t in range(len(dates)):
         if not regime_v[t]:                                 # regime off: fully in cash
             held[:] = False
@@ -201,9 +202,11 @@ def compute_target_weights(md) -> pd.DataFrame:
                 g *= size_v[t]                              # index variance-ratio sizing
                 if t - last_on - 1 <= p["whipsaw_days"]:
                     g *= p["whipsaw_size"]                  # re-cross after only a few days off: whipsaw
-            else:                                           # re-entry after the RSI>80 stand-aside: ladder-height weights
+            else:                                           # re-entry after the RSI>80 stand-aside: height x lead weights
                 w = np.where(held, height_v[t], 0.0)
-                held &= w > 0                               # a name whose VWAP20 is not above its VWAP50 is not bought
+                if (w > 0).sum() > p["re_k"]:
+                    w = np.where(w >= np.sort(w)[-p["re_k"]], w, 0.0)   # only the re_k strongest names
+                held &= w > 0                               # no ladder height or no RSI lead: not bought
                 score_v = hs_v
             if held.any():
                 w = w / w.sum()                             # cohort shares
@@ -212,8 +215,11 @@ def compute_target_weights(md) -> pd.DataFrame:
                 w[e] = g * excess.sum(); held[e] = w[e] > 0   # ... is parked in NIFTYBEES (index exposure)
             else:
                 w = np.zeros(N)
+            w0 = w.copy(); w0[e] = 0.0
         else:                                               # hold the cohort, weights ride, no top-ups
             held &= hold_v[t]
+            if w0.sum() > 0 and (w0 * held).sum() < p["exhaust"] * w0.sum():   # the exits sold most of the cohort:
+                held[w0 > 0] = False                        # it is spent, sell the stock remainder (NIFTYBEES rides on)
             wg = w * g_v[t]
             w = np.where(held, wg, 0.0) / (wg.sum() + 1.0 - w.sum())
             mv = np.sqrt((w @ b_v[t]) ** 2 * nv_v[t] ** 2 + w ** 2 @ s2_v[t])   # the riding book's model vol
