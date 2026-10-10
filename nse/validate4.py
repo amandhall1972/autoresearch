@@ -207,7 +207,10 @@ def main():
         L.append(f"| {name} | {d['pre']} | {d['is']} | {d['oos']} | {d['span']} | {d['full']} |")
     L += ["", f"Objective (worst window) {m['objective']}; span CAGR {m['cagr_span']}, max DD {m['maxdd_span']}, vol {m['vol_span']}, "
               f"turnover {m['turnover_yr_span']}x/yr, exposure {m['exposure_span']}, names {m['n_names_avg_span']}; span Sharpe without "
-              f"the 10 best days {m['sharpe_span_drop10']}; {m['years_positive']}/{m['years']} years positive.",
+              f"the 10 best days {m['sharpe_span_drop10']}; {m['years_positive']}/{m['years']} years with a positive sum of daily "
+              f"excess returns (the consistency gate's count; compounded, "
+              f"{sum(1 for r in rep['yearly'] if r['strat_ret'] - r['rf'] > 0.0025)} beat cash, "
+              f"{sum(1 for r in rep['yearly'] if abs(r['strat_ret'] - r['rf']) <= 0.0025)} were level with it).",
           "", "## Costs", "", "| bps | objective | 2017-19 | 2020-23 | 2024-26 | 2017-26 | 2020-26 | CAGR 2017-26 | max DD |", "|---|---|---|---|---|---|---|---|---|"]
     L += [f"| {r['cost_bps']} | {r['objective']} | {r['sharpe_pre']} | {r['sharpe_is']} | {r['sharpe_oos']} | {r['sharpe_span']} | {r['sharpe_full']} | {r['cagr_span']} | {r['maxdd_span']} |" for r in cs]
     L += ["", "## Calendar years", "", "| year | return | Sharpe | max DD | exposure | NIFTY ret | NIFTY Sharpe | NIFTYBEES ret | cash |", "|---|---|---|---|---|---|---|---|---|"]
@@ -215,7 +218,7 @@ def main():
     L += ["", "## Sampling error", ""]
     for lab, d in boot.items():
         extra = f"; deflated Sharpe over N={d['deflated']['n_trials']} trials (SR0 {d['deflated']['sr0_ann']}): DSR {d['deflated']['dsr']}" if "deflated" in d else ""
-        L.append(f"* {lab}: Sharpe {d['sharpe']} (t {d['tstat']}), 95 % block-bootstrap CI {d['ci95']}, P(Sharpe > 0) {d['p_sharpe_gt_0']}, PSR(0) {d['psr_vs_0']}{extra}")
+        L.append(f"* {lab}: Sharpe {d['sharpe']} (t {d['tstat']}), 95 % block-bootstrap CI {d['ci95']}, share of resamples with Sharpe > 0 {d['p_sharpe_gt_0']} (not the probability that the true Sharpe is positive), PSR(0) {d['psr_vs_0']}{extra}")
     s = rep["param_sensitivity_summary"]
     L += ["", "## Parameter sensitivity (one at a time, +-10 / 20 %)", "",
           f"* {s['n_perturbations']} perturbations: objective median {s['median_objective']} (base {base_obj}), min {s['min_objective']}, "
@@ -247,7 +250,7 @@ def main():
     L.append(f"* the 10 best days carry {evd['concentration']['top10_share_of_span_excess']:.0%} of the 2017-26 excess return")
     L.append("")
     with open(os.path.join(args.out, "validation.md"), "w") as f:
-        f.write("\n".join(L))
+        f.write(P.md_round("\n".join(L)))
     print("\n".join(L))
     print(f"\nwritten to {args.out} in {rep['runtime_s']} s")
 

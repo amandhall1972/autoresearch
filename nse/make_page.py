@@ -235,6 +235,7 @@ def main_v4(R4):
     cs = {r["cost_bps"]: r for r in v["cost_sensitivity"]}
     bs, jp, evd, wf = v["bootstrap"], v["joint_perturbation"], v["event_days"], v["walk_forward"]
     dsr = bs["span"]["deflated"]
+    n_rows = len(tsv)
     smp = deep.get("sampling")
     if smp is None:
         raise SystemExit("reports/v4/deep_holdout.json has no sampling error: run python deep4.py --rebuild-report")
@@ -263,7 +264,8 @@ def main_v4(R4):
     win_chart = bar_groups(groups, [("v1", "v1 strategy", "--c-v1"), ("r0", "EMA timer R0", "--c-r0"),
                                     ("nifty", "NIFTY 50", "--c-bees"), ("v2", "v2 strategy", "--c-v2")], cap=2.0)
     yearly = table(["Year", "Return", "Sharpe", "Max DD", "Exposure", "NIFTYBEES", "NIFTY Sharpe", "Cash"],
-                   [[r["year"], (fmt(r["strat_ret"], 1, pct=True), cls(r["strat_ret"] - r["rf"])), (fmt(r["strat_sharpe"]), cls(r["strat_sharpe"])),
+                   [[r["year"], (fmt(r["strat_ret"], 1, pct=True), "" if abs(r["strat_ret"] - r["rf"]) <= 0.0025 else cls(r["strat_ret"] - r["rf"])),
+                     fmt(r["strat_sharpe"]),
                      fmt(r["strat_maxdd"], 1, pct=True), fmt(r["exposure"], 0, pct=True), fmt(r["bees_ret"], 1, pct=True),
                      fmt(r["nifty_sharpe"]), fmt(r["rf"], 1, pct=True)] for r in v["yearly"]])
     costs = table(["One-way cost (bps)", "2017–19", "2020–23", "2024–26", "Worst window", "CAGR 2017–26"],
@@ -350,7 +352,8 @@ The v1 line ends higher only because of 2020–2023, the window it was fitted to
 <p style="margin-top:12px" class="note">Parameters: <code>{esc(json.dumps({k: x for k, x in p.items() if not k.startswith('use_')}))}</code>.
 The source is <code>nse/strategy.py</code>; the research note RCG-RN-REV-002 explains each rule and traces a trigger day to its exits.</p></section>
 <section><h2>Year by year</h2>
-<p>Green: the year beat cash (positive excess return); red: it did not. 2017 runs from April, 2026 to October.</p>{yearly}</section>
+<p>Return: green when the year's compounded return beat cash, red when it trailed it, plain when level within 0.25 points
+({", ".join(str(r["year"]) for r in v["yearly"] if abs(r["strat_ret"] - r["rf"]) <= 0.0025)}). 2017 runs from April, 2026 to October.</p>{yearly}</section>
 <section><h2>Robustness</h2>
 <p><b>Costs.</b> Turnover is {fmt(m['turnover_yr_span'], 1)}x a year, so costs matter: the worst window falls from {fmt(cs[15]['objective'])} at 15 bps to
 {fmt(cs[25]['objective'])} at 25 bps and {fmt(cs[40]['objective'])} at 40 bps.</p>{costs}
@@ -358,10 +361,11 @@ The source is <code>nse/strategy.py</code>; the research note RCG-RN-REV-002 exp
 positive Sharpe, which is not the probability that the true Sharpe is positive.</p>{boot}
 <p style="margin-top:16px"><b>Multiple testing.</b> The deflated Sharpe ratio for 2017–2026 is {fmt(dsr['dsr'])}. It is a probability, not a Sharpe: the
 chance that the true Sharpe exceeds {fmt(dsr['sr0_ann'])}, the Sharpe the best of {dsr['n_trials']:,} logged tries would reach by luck alone. It is below the
-conventional 0.95, so once the search is charged for, the 2017–2026 Sharpe of {fmt(bs['span']['sharpe'])} is not statistically distinguishable from the best of
-that many tries.</p>
+conventional 0.95, so once the search is charged for, the 2017–2026 Sharpe of {fmt(bs['span']['sharpe'])} is not statistically distinguishable from the
+{fmt(dsr['sr0_ann'])} that luck alone would produce. The tries are the {dsr['n_trials']:,} rows of the log with a 2017–2026 Sharpe (of {n_rows:,}); many
+re-evaluate existing candidates, which narrows their spread and lowers the hurdle, so the figure is if anything generous.</p>
 <p style="margin-top:16px"><b>Parameters.</b> Moving every parameter at once by a random factor between 0.8 and 1.2 ({jp['draws']} draws) gives a mean
-worst-window Sharpe of {fmt(jp['mean'])} (10th percentile {fmt(jp['p10'])}), a better guide than the optimised {fmt(m['objective'])}. Re-selecting the
+worst-window Sharpe of {fmt(jp['mean'])} (10th percentile {fmt(jp['p10'])}); {fmt(m['objective'])} is the top of that in-sample range. Re-selecting the
 parameters each year from 2019 on the years before gives {fmt(wf['sharpe_concat'])} over 2019–2026 and {fmt(wf['sharpe_concat_2024_26'])} on 2024–2026.
 Both checks run on the years the rules were chosen on, so they show how fragile the fit is, not how it will do on new data.</p>
 <p><b>Event days.</b> A dip buyer is paid on rebound days: {fmt(evd['concentration']['top10_share_of_span_excess'], 0, pct=True)} of the
@@ -372,8 +376,10 @@ Both checks run on the years the rules were chosen on, so they show how fragile 
 Sharpe {fmt(dfin['bench_sharpe_deep'])}, CAGR {fmt(dfin['bench_cagr_deep'], 1, pct=True)}. Strategy CAGRs include the repo rate earned on idle capital.</p>{deep_tab}
 <p style="margin-top:12px">Five years is a short sample. The v2 strategy's 95% bootstrap interval runs from {fmt(fs['ci95'][0])} to {fmt(fs['ci95'][1])}
 (stationary bootstrap, mean block 20 sessions), and its lead over R0 from {fmt(dr0['ci95'][0])} to {fmt(dr0['ci95'][1])}; its lead over the NIFTY 50
-({fmt(dnx['ci95'][0])} to {fmt(dnx['ci95'][1])}) is not established on this window alone. The daily t-statistic ({fmt(fs['tstat_daily'], 1)}) is lower
-because a dip buyer's days are negatively autocorrelated; on monthly sums it is {fmt(fs['tstat_monthly'], 1)}.</p></section>
+({fmt(dnx['ci95'][0])} to {fmt(dnx['ci95'][1])}) is not established on this window alone. With 5-session blocks the lower bound is
+{fmt(fs['ci95_block5'][0])}. The daily t-statistic ({fmt(fs['tstat_daily'], 1)}) treats days as independent; a dip buyer's days are negatively
+autocorrelated (the variance of its 20-day sums is {fmt(fs['variance_ratio_20d'], 0, pct=True)} of what independent days would give), so on monthly
+sums the t-statistic is {fmt(fs['tstat_monthly'], 1)}.</p></section>
 <section><h2>How the research ran</h2>
 <ul>
 <li>One objective for every regime: the lowest of the three window Sharpe ratios, so a rule that buys one regime at the cost of another does not raise it.</li>
@@ -387,8 +393,8 @@ target weights on at least 5% of sessions.</li>
 <section class="callout"><h2>Bottom line</h2>
 <p>2024–2026 is now positive ({fmt(m['sharpe_oos'])}) and 2020–2026 strong ({fmt(m['sharpe_full'])}), but both windows were used to choose the rules.
 The only evidence that was not is the deep hold-out ({fmt(dfin['sharpe_deep'])}, 95% interval {fmt(fs['ci95'][0])} to {fmt(fs['ci95'][1])}), where the
-pullback strategies are the only positive ones. After charging for every logged try, the 2017–2026 Sharpe is not statistically significant
-(deflated Sharpe ratio {fmt(dsr['dsr'])}).
+pullback strategies are the only positive ones. After charging for the {dsr['n_trials']:,} logged tries with a 2017–2026 Sharpe, the 2017–2026
+Sharpe is not statistically significant (deflated Sharpe ratio {fmt(dsr['dsr'])}).
 The strategy is a low-exposure liquidity-provision sleeve, sensitive to costs and to a few rebound days. Paper-trade it with the kill rules
 of RCG-RN-REV-002 fixed before the first trade.</p></section>
 <section><h2>Reproduce</h2>
@@ -398,6 +404,7 @@ python run4.py --strategy strategy.py          # the three windows + look-ahead 
 python validate4.py --strategy strategy.py     # costs, bootstrap, DSR, plateau, walk-forward
 python lineage4.py                             # every v4 strategy on every window
 python deep4.py --final strategy.py            # the one deep look (refuses a second)
+python deep4.py --rebuild-report               # deep report + sampling error (no look)
 python make_pdf_v4.py                          # research note RCG-RN-REV-002</pre></section>
 <footer>Data: Financial Modeling Prep daily bars; Nifty 50 membership from NSE index data via the Historical Nifty 50 Constituent Weights dataset;
 repo rate from the Reserve Bank of India. Price returns (no dividends). Hypothetical backtest results, not investment advice. Branch <code>autoresearch/oct9-nse</code>.</footer>

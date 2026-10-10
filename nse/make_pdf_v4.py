@@ -533,6 +533,11 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
     try:
         commit = subprocess.run(["git", "-C", HERE, "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                                 check=True).stdout.strip()
+        dirty = subprocess.run(["git", "-C", HERE, "status", "--porcelain", "--", "strategy.py", "make_pdf_v4.py",
+                                "make_pdf.py", "prepare.py", "reports/v4", "results_v4.tsv", "v4"],
+                               capture_output=True, text=True, check=True).stdout.strip()
+        if dirty:
+            commit += " + local changes"
     except Exception:
         commit = "working tree"
     meta = dict(date_long=date.strftime("%d %B %Y").lstrip("0"), commit=commit, data_end=data_end,
@@ -608,8 +613,19 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
     import plateau4
     pl_floor = pl["incumbent_objective"] + plateau4.KEEP * (pl["objective"] - pl["incumbent_objective"])
     bc0 = p["breadth_cut"]
-    bc_in = {round(bc0 - 0.05, 2): objective_with(S, md, breadth_cut=round(bc0 - 0.05, 2)),
-             round(bc0 + 0.05, 2): objective_with(S, md, breadth_cut=round(bc0 + 0.05, 2))}
+    bc_grid = {round(c_, 2): objective_with(S, md, breadth_cut=round(c_, 2))
+               for c_ in np.arange(bc0 - 0.10, bc0 + 0.10 + 1e-9, 0.01)}
+    bc_below = sorted(c_ for c_, o_ in bc_grid.items() if o_ < pl_floor)
+    r2c, r2w = lin["v4/r2_confirm.py"], lin["v4/r2_whipsaw.py"]
+    r3c_mod = load_strategy(os.path.join(HERE, "v4", "r3_clean.py"))
+    r3c_40 = Pp.evaluate_v4(r3c_mod.compute_target_weights(md), md, cost_bps=40)["objective"]
+    import validate as V
+    search_sr = pd.to_numeric(trial_rows.loc[~trial_rows["status"].isin(REEVAL), "sharpe_span"]).tolist()
+    dsr_search = V.deflated_sharpe((span_r - span_rf).values, search_sr)
+    eq_r = eq[["niftybees", "nifty50"]].pct_change().dropna()
+    bees_gap = Pp.cagr(eq_r["niftybees"]) - Pp.cagr(eq_r["nifty50"])         # the ETF price carries its dividends
+    edge_rows = json.load(open(os.path.join(HERE, "reports", "diagnostics.json")))["selection_edge_by_year"]
+    edge_pos = [r["year"] for r in edge_rows if r["edge"] > 0]
     # deep hold-out sampling error, from deep4.py --rebuild-report (saved daily returns, paired bootstrap paths)
     if "sampling" not in deep:
         raise RuntimeError("deep_holdout.json has no sampling error: run python deep4.py --rebuild-report")
@@ -619,7 +635,8 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
                    ("r3c", "v4/r3_clean.py"), ("v1", "v4/v1_final.py"), ("nifty", "NIFTY50")]:
         st = smp["strategies"][f]
         dstat[key] = dict(sharpe=st["sharpe"], t=st["tstat_daily"], t_month=st["tstat_monthly"],
-                          vr20=st["variance_ratio_20d"], lo=st["ci95"][0], hi=st["ci95"][1])
+                          vr20=st["variance_ratio_20d"], lo=st["ci95"][0], hi=st["ci95"][1],
+                          lo5=(st.get("ci95_block5") or [np.nan])[0])
     dd_r0 = smp["differences"][f"{dfin['file']} - v4/r0_ema_timer.py"]
     dd_nx = smp["differences"][f"{dfin['file']} - NIFTY50"]
     d_vs_r0 = (dd_r0["value"], *dd_r0["ci95"])
@@ -635,7 +652,6 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
     mr = {k: float(tw[k].ret.dropna().mean()) for k in ("pre", "is", "oos")}
     narrow_share = float(((per.win >= min(wr.values())) & (per.win <= max(wr.values())) &
                           (per["mean"] >= min(mr.values())) & (per["mean"] <= max(mr.values()))).mean())
-    neg_excess_share = float((per.excess < 0).mean())
     trail_res = trailing_excess(span_r, span_rf)
     trail_deep = trailing_excess(deep_ret["final"].loc[Pp.DEEP_START:Pp.DEEP_END], dc)
     worst_dd = min(m["maxdd_span"], dfin["maxdd_deep"])
@@ -645,7 +661,9 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
     kill_dd = float(np.ceil(1.5 * abs(worst_dd) * 100) / 100)
     kill_12m = float(np.floor(1.5 * worst_12m * 100) / 100)
     kill_win = float(np.floor((worst_win60 - 0.10) * 20) / 20)
-    trades_yr = len(tl) / (len(span_r) / 252.0)
+    trades_yr = len(tl) / ((span_r.index[-1] - span_r.index[0]).days / 365.25)
+    pass_lag = int(((per.win >= pass_win) & (per["mean"] >= pass_mean) & (per.excess < 0)).sum())
+    n_pass = int(((per.win >= pass_win) & (per["mean"] >= pass_mean)).sum())
     assert m["maxdd_span"] > -kill_dd and dfin["maxdd_deep"] > -kill_dd, "the backtest breaches the drawdown kill rule"
     assert worst_12m > kill_12m and worst_win60 > kill_win, "the backtest breaches a kill rule"
 
@@ -767,8 +785,8 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
     story.append(P(
         f"The v1 diagnosis found two causes. Its invested spells beat cash {v1_diag['2020-23']['hit_rate'] * 100:.0f} % "
         f"of the time in 2020–2023 and {v1_diag['2024-26']['hit_rate'] * 100:.0f} % in "
-        "2024–2026, and the names it bought stopped beating the average member over the next 20 sessions (the "
-        f"selection edge was negative in {and_join(edge_neg)}). The edge was a "
+        f"2024–2026, and the names it bought beat the average member over the next 20 sessions in {and_join(edge_pos)} "
+        f"but not in {and_join(edge_neg)}: after 2023 the selection edge was gone. It was a "
         "property of one regime, not of the rules. The in-sample robustness gates of v1 (both halves, best days "
         "removed, plateaus, one spell left out) could not see this, because they all tested stability inside the "
         "same four years."))
@@ -787,16 +805,17 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
     ], note="Each Sharpe is of daily returns in excess of the RBI repo rate, net of 15 bps one-way costs, on the "
             "point-in-time Nifty 50 of 2016–2026. A rule that buys one regime at the cost of another does not raise it."))
     story.append(P(
-        "Maximising the worst of three windows has its own failure mode, and the round-1 audits found it: rules that "
-        "move Sharpe out of the strong window into the weak ones raise the minimum without adding edge. That is why "
-        "the keep gates compare every window with the incumbent, not just the minimum."))
+        "Maximising the worst of three windows has its own failure mode: rules that move Sharpe out of the strong "
+        "window into the weak ones raise the minimum without adding edge. The windows gate, part of the protocol before "
+        "round 1, guards against it by comparing every window with the incumbent, not just the minimum; the round-1 "
+        "audits found exactly this pattern in the round-1 candidates."))
     story.append(h2("Keep gates"))
     story.append(data_table(["Gate", "A candidate is kept only if"], [
         ["improves", "its objective is above the incumbent's"],
         ["windows", "no window Sharpe is more than 0.10 below the incumbent's (no trading one regime for another)"],
         ["drop10", "the 2017–26 Sharpe without its 10 best days is above the incumbent's"],
         ["years", "with any single calendar year removed, its objective is still above the incumbent's"],
-        ["consistency", "it has at least as many calendar years with a positive excess return"],
+        ["consistency", "it has at least as many calendar years whose summed daily excess return is positive"],
         ["parsimony", "each added parameter buys at least 0.05 of objective"],
         ["plateau", "every parameter's ±20 % neighbours also beat the incumbent and keep 60 % of the margin"],
         ["compliance", "switching off RSI, EMA or VWAP changes the target weights on at least 5 % of sessions "
@@ -884,8 +903,12 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
         "made the deletion the keep. Measured against the with-core version instead, the deletion moved Sharpe out of the "
         f"strong windows into the weak one (2017–19 {pnum(inc1['sharpe_pre'] - r3c['sharpe_pre'], sign=True)}, 2020–23 "
         f"{pnum(inc1['sharpe_is'] - r3c['sharpe_is'], sign=True)}, 2024–26 {pnum(inc1['sharpe_oos'] - r3c['sharpe_oos'], sign=True)}): the "
-        "pattern described in Part 2. For that reason the with-core version was registered for the deep hold-out, "
-        f"where it scored {pnum(drows['v4/r3_clean.py']['sharpe_deep'])} against {pnum(dfin['sharpe_deep'])} (Part 7).",
+        f"pattern described in Part 2. It also lowered the 2017–26 Sharpe ({pnum(r3c['sharpe_span'])} to "
+        f"{pnum(inc1['sharpe_span'])}), the Sharpe without the 10 best days ({pnum(r3c['sharpe_span_drop10'])} to "
+        f"{pnum(inc1['sharpe_span_drop10'])}) and the worst window at 40 bps ({pnum(r3c_40)} to "
+        f"{pnum(cost_tab[40]['objective'])}). Because the choice between the two hinged on the simplification rule, the "
+        "with-core version was registered for the deep hold-out before any look, where it scored "
+        f"{pnum(drows['v4/r3_clean.py']['sharpe_deep'])} against {pnum(dfin['sharpe_deep'])} (Part 7).",
     ])
     story.append(P("Every amendment was written into program.md before the next round and before any look at the "
                    "deep hold-out.", "note"))
@@ -1011,10 +1034,12 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
                       snum(m[f"maxdd_{k}"], 1, pct=True), B.num(m[f"vol_{k}"], 1, pct=True),
                       B.num(m[f"exposure_{k}"], 0, pct=True), snum(nifty[k])])
     story.append(data_table(hdr, rrows, [26 * mm] + [(FW - 26 * mm) / 6] * 6, num_cols=(1, 2, 3, 4, 5, 6), mono_cols=(0,)))
-    story.append(P("CAGR includes the repo rate earned on idle capital. Stock prices exclude dividends: that "
-                   "understates the NIFTY and NIFTYBEES figures by about 1–1.5 % a year and the v2 strategy's, "
-                   f"{m['exposure_span'] * 100:.0f} % invested on average, by about "
-                   f"{m['exposure_span'] * 1.25:.1f} %, which tilts the comparison slightly in the strategy's favour. "
+    story.append(P("CAGR includes the repo rate earned on idle capital. Stock and index prices exclude dividends: "
+                   "that understates the NIFTY 50 price index by about 1–1.5 % a year and the v2 strategy, "
+                   f"{m['exposure_span'] * 100:.0f} % invested on average, by about {m['exposure_span'] * 1.25:.1f} %. "
+                   "NIFTYBEES, and R0 which holds it, already carry dividends in the ETF price (it beat the price index "
+                   f"by {bees_gap * 100:.1f} % a year over 2017–2026). Comparisons with the NIFTY 50 therefore slightly "
+                   "favour the strategy; comparisons with NIFTYBEES and R0 slightly disfavour it. "
                    f"Look-ahead detector: {la['n_checks']} truncation and corruption checks ({la['n_checks_with_holdings']} "
                    f"with positions open), largest weight difference {la['max_abs_diff']:g}.", "note_source"))
     story.append(figure(chart_yearly(yearly), "Figure 6. Calendar-year returns: the v2 strategy (green up, red down), "
@@ -1026,8 +1051,9 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
                             [18 * mm] + [(FW - 18 * mm) / 7] * 7, num_cols=tuple(range(1, 8)), mono_cols=(0,)))
 
     # ------------------------------------------------------------ part 6: robustness
-    story += part("Part 6", "Robustness", "What survives costs, sampling error, parameter moves and walk-forward "
-                                    "re-selection, and what does not: the removal of its best days.")
+    story += part("Part 6", "Robustness", "What survives costs, parameter moves and walk-forward re-selection; what "
+                                    "sampling error and the size of the search leave open; and what does not survive: "
+                                    "the removal of its best days.")
     story.append(h2("Costs"))
     story.append(figure(chart_costs(cs), "Figure 7. Window Sharpe ratios against the one-way cost; dashed: the 15 bps "
                         "used throughout.", source=None))
@@ -1057,10 +1083,13 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
         f"not a Sharpe: the probability that the true Sharpe exceeds {pnum(dsr['sr0_ann'])}, the Sharpe the best of "
         f"{n_trials:,} tries would reach by luck alone given how widely the tries' Sharpes spread. It is below the "
         f"conventional 0.95, so once the search is charged for, the 2017–2026 Sharpe of {pnum(bs['span']['sharpe'])} is not "
-        f"statistically distinguishable from the best of that many tries. The tries are the {n_trials:,} rows of the "
-        f"protocol-v4 log with a 2017–2026 Sharpe; {n_reeval:,} of them re-evaluate existing candidates (joint draws, "
-        "plateau neighbours, perturbations) and cluster near them. Counting such correlated rows as independent raises "
-        f"the hurdle; on the other side, the {n_v1_trials:,} v1 trials on overlapping years are not charged at all."))
+        f"statistically distinguishable from the {pnum(dsr['sr0_ann'])} that luck alone would produce over that many "
+        f"tries. The tries are the {n_trials:,} rows of the protocol-v4 log with a 2017–2026 Sharpe; {n_reeval:,} of them "
+        "re-evaluate existing candidates (joint draws, plateau neighbours, perturbations) and cluster near them, which "
+        "narrows the spread of the tries' Sharpes and so lowers the hurdle: on the "
+        f"{n_trials - n_reeval:,} search rows alone the hurdle is {pnum(dsr_search['sr0_ann'])} and the deflated Sharpe "
+        f"ratio {pnum(dsr_search['dsr'])}. The {n_v1_trials:,} v1 trials on overlapping years are not charged at all "
+        f"either, so {pnum(dsr['dsr'])} is if anything generous."))
     story.append(h2("Parameters: plateau, joint moves, walk-forward"))
     floor = pl_floor
     plrows = [[code(r["param"]), code(M.fmt_param(r["value"])), snum(r["objective"]), esc(r["rule"]),
@@ -1073,9 +1102,13 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
                    f"moved parameter): beat {inc_name} ({B.num(pl['incumbent_objective'])}) and keep "
                    f"{plateau4.KEEP * 100:.0f} % of the margin, i.e. reach {B.num(floor)}. Relative rule (a parameter "
                    "inherited unchanged): beat the incumbent run at the same neighbour. The gate checks the two end "
-                   "points only: inside the band the breadth cut is a sharp peak (a cut of "
-                   + "; ".join(f"{k:g} scores {B.num(v_)}" for k, v_ in sorted(bc_in.items()))
-                   + f", against {B.num(m['objective'])} at {bc0:g} and a floor of {B.num(floor)}).", "note_source"))
+                   f"points only. Inside the band the breadth cut is not a plateau: of the cuts from {bc0 - 0.10:.2f} to "
+                   f"{bc0 + 0.10:.2f} in steps of 0.01, {len(bc_below)} score below the {B.num(floor, 3)} floor (the lowest "
+                   f"{B.num(min(bc_grid.values()), 3)} at {min(bc_grid, key=bc_grid.get):.2f}; "
+                   + ", ".join(f"{c_:.2f} gives {B.num(bc_grid[c_], 3)}" for c_ in (round(bc0 - 0.05, 2), round(bc0 + 0.05, 2)))
+                   + f"), against {B.num(m['objective'], 3)} at {bc0:.2f}: the trigger cut is the strategy's most fragile "
+                   "parameter. vwap_n passes because one length serves the trigger, the ranking and the exit; moved alone, "
+                   "the trigger's length falls below the floor (Appendix A).", "note_source"))
     story.append(figure(chart_joint(jp, m["objective"], min(r0["sharpe_pre"], r0["sharpe_is"], r0["sharpe_oos"])),
                         f"Figure 8. Worst-window Sharpe in {jp['draws']} draws that move every parameter at once by a "
                         "random factor between 0.8 and 1.2.", source=None))
@@ -1083,8 +1116,8 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
         f"Moving all parameters together costs about {pnum(m['objective'] - jp['mean'])} of objective on average "
         f"(mean {pnum(jp['mean'])}, 10th percentile {pnum(jp['p10'])}); {jp['share_above_r0'] * 100:.0f} % of the draws "
         f"still beat the EMA timer. The draws run on the years the rules were chosen on and are centred on the chosen "
-        "parameters, so they measure how fragile the fit is, not what to expect on new data; even so, "
-        f"{pnum(jp['mean'])} is a better guide than the optimised {pnum(m['objective'])}. Walk-forward re-selection (each "
+        "parameters, so they measure how fragile the fit is, not what to expect on new data: read "
+        f"{pnum(m['objective'])} as the top of that in-sample range, not as an estimate. Walk-forward re-selection (each "
         "year from 2019, the perturbation-grid point with the best Sharpe on the years before) gives "
         f"{pnum(wf['sharpe_concat'])} over 2019–2026 and {pnum(wf['sharpe_concat_2024_26'])} on 2024–2026. It only "
         "re-selects among neighbours of parameters chosen on all of 2017–2026, so it is not out of sample either."))
@@ -1133,7 +1166,7 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
     story.append(P(f"NIFTY 50 over the same window: Sharpe {pnum(dfin['bench_sharpe_deep'])}, CAGR "
                    f"{pnum(dfin['bench_cagr_deep'] * 100, 1)} %. Strategy CAGRs include the repo rate earned on idle "
                    f"capital ({pnum(cash_deep * 100, 1)} % a year over the window).", "note_source"))
-    story.append(P(DEEP_VERDICT(dfin, d_r0, d_v1, d_info, m, dstat, d_vs_r0, d_vs_nifty)))
+    story.append(P(DEEP_VERDICT(dfin, d_r0, d_v1, d_info, m, dstat, d_vs_r0, d_vs_nifty, bs)))
     srows = []
     for key, lab in [("final", "v2 strategy"), ("r3c", "with the R0 core (r3_clean)"), ("r1p", "round-1 pullback"),
                      ("r0", "EMA timer R0"), ("v1", "v1 strategy"), ("nifty", "NIFTY 50 index")]:
@@ -1170,7 +1203,7 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
         [esc("Deep hold-out Sharpe"), snum(d_v1["sharpe_deep"]), snum(dfin["sharpe_deep"])],
     ], [34 * mm, (FW - 34 * mm) / 2, (FW - 34 * mm) / 2]))
     story.append(h2("Conclusions"))
-    story += numbered(CONCLUSIONS(m, v1, r0, dfin, d_r0, jp, cost_tab, evd, conc, dsr, n_trials, dstat, bs))
+    story += numbered(CONCLUSIONS(m, v1, r0, dfin, d_r0, jp, cost_tab, evd, conc, dsr, n_trials, dstat, bs, r2c, r2w))
     story.append(h2("Operating rules for a paper trial"))
     story += numbered([
         f"Every session after the close: update the data ({code('python fetch_fmp.py --update')}), run "
@@ -1179,11 +1212,13 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
         "reason; compare each with the backtest's own trade statistics (Part 4).",
         f"Review after 12 months or 40 trades, whichever comes later (the backtest made about {trades_yr:.0f} trades a "
         "year). Measure each trade open to open before costs, as in Part 4. The trial passes if the trade win rate is "
-        f"at least {pass_win * 100:.0f} % and the mean trade at least {pass_mean * 100:.1f} %. Those floors are wide "
-        "because a year of trades is a small sample: applied to the backtest's own 12-month periods (one starting each "
-        f"month), they pass {pass_share * 100:.0f} % of them, whereas requiring the per-window ranges of Part 4 would "
-        f"pass {narrow_share * 100:.0f} %. The book's 12-month excess return is reviewed but not a pass condition: it was "
-        f"negative in {neg_excess_share * 100:.0f} % of the backtest's 12-month periods.",
+        f"at least {pass_win * 100:.0f} % and the mean trade at least {pass_mean * 100:.1f} %. The floors are the 10th "
+        "percentiles of the backtest's own 12-month periods (one starting each month), so they pass "
+        f"{pass_share * 100:.0f} % of them; requiring the per-window ranges of Part 4 instead would pass "
+        f"{narrow_share * 100:.0f} %. A mean trade of {pass_mean * 100:.1f} % before costs is about break-even after the "
+        f"{2 * 15 / 100:.1f} % round trip, so passing shows that the trades still behave like the backtest's, not that the "
+        f"trial made money: in {pass_lag} of the {n_pass} backtest periods that pass, the book lagged cash. Whether the "
+        "book earns its keep is judged by the 12-month kill rule below.",
     ])
     story.append(keep(h2("Kill rules (fixed before the first trade)"), data_table(["Trigger", "Worst in the backtest", "Action"], [
         [esc(f"drawdown deeper than {kill_dd * 100:.0f} %"), esc(f"{pnum(worst_dd * 100, 1)} %"),
@@ -1231,6 +1266,7 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
             "python lineage4.py                       # every v4 strategy on every window\n"
             "python deep_holdout.py --data-report     # deep data checks (runs no strategy)\n"
             "python deep4.py --final strategy.py      # the one deep look (refuses a second)\n"
+            "python deep4.py --rebuild-report         # deep report + sampling error (no look)\n"
             "python make_pdf_v4.py                    # this document\n")
     story.append(CodeBlock.from_source(cmds, FW))
     story.append(Spacer(1, 8))
@@ -1274,11 +1310,12 @@ def build(out=DEFAULT_OUT, date=None, strategy_path=None, reports=R4):
 
 # text blocks that depend on the results (kept as functions so the build fails loudly if a number is missing)
 ROUND5_TEXT = ("dry: the only deletion near the objective was a moved time stop; a market-conditional early exit (0.93) "
-               "failed the year-by-year and plateau gates; of about thirty trigger definitions one beat the incumbent, "
-               "and it failed three gates. The stopping rule ended the research")
+               "failed the year-by-year and plateau gates; of about thirty trigger definitions several beat the "
+               "incumbent's objective (up to 0.85) but none was also flatter, and the best failed three gates. The "
+               "stopping rule ended the research")
 
 
-def DEEP_VERDICT(dfin, d_r0, d_v1, d_info, m, dstat, d_vs_r0, d_vs_nifty):
+def DEEP_VERDICT(dfin, d_r0, d_v1, d_info, m, dstat, d_vs_r0, d_vs_nifty, bs):
     s, b = dfin["sharpe_deep"], dfin["bench_sharpe_deep"]
     if s > 0 and s > b:
         head = (f"<b>The v2 strategy held up on data it had never seen:</b> a Sharpe of {pnum(s)} against "
@@ -1298,22 +1335,28 @@ def DEEP_VERDICT(dfin, d_r0, d_v1, d_info, m, dstat, d_vs_r0, d_vs_nifty):
                f"versions ({listed}), while the other {len(neg)}, R0 and both v1 versions included, are all negative. "
                "That split is consistent with the structural choice, but five years is a short sample. The v2 "
                f"strategy's 95 % bootstrap interval runs from {pnum(dstat['final']['lo'])} to {pnum(dstat['final']['hi'])} "
-               f"and its lead over R0 from {pnum(d_vs_r0[1])} to {pnum(d_vs_r0[2])} (table below). The daily t-statistic "
-               f"is lower ({B.num(dstat['final']['t'], 1)}) because it treats days as independent, and a dip buyer's are "
-               "not: its rebounds follow its drops, so its 20-day sums vary only "
-               f"{dstat['final']['vr20'] * 100:.0f} % as much as independent days would. The block bootstrap keeps that "
+               f"and its lead over R0 from {pnum(d_vs_r0[1])} to {pnum(d_vs_r0[2])} (table below); with 5-session instead "
+               f"of 20-session blocks the lower bound is {pnum(dstat['final']['lo5'])}. The daily t-statistic "
+               f"({B.num(dstat['final']['t'], 2)}, against {B.num(bs['pre']['tstat'], 2)} for 2017–19 and "
+               f"{B.num(bs['oos']['tstat'], 2)} for 2024–26) treats days as independent, and a "
+               "dip buyer's are not: its rebounds follow its drops, so the variance of its 20-day sums is only "
+               f"{dstat['final']['vr20'] * 100:.0f} % of what independent days would give. The block bootstrap keeps that "
                f"structure; on monthly sums the t-statistic is {B.num(dstat['final']['t_month'], 1)}.")
-    rest = (f" On the research windows the worst-window Sharpe was {pnum(m['objective'])}; the deep figure comes from "
-            f"a different market and is the only one free of selection. The v1 strategy scores "
+    rest = (f" Over 2017–2026 as one period the Sharpe was {pnum(m['sharpe_span'])} (worst window "
+            f"{pnum(m['objective'])}); the deep figure is about {(1 - s / m['sharpe_span']) * 100:.0f} % lower, comes from "
+            "a different market and is the only one free of selection. The v1 strategy scores "
             f"{pnum(d_v1['sharpe_deep'])} on the same window.")
     return head + fam + rest
 
 
-def CONCLUSIONS(m, v1, r0, dfin, d_r0, jp, cost_tab, evd, conc, dsr, n_trials, dstat, bs):
+def CONCLUSIONS(m, v1, r0, dfin, d_r0, jp, cost_tab, evd, conc, dsr, n_trials, dstat, bs, r2c, r2w):
     return [
-        f"<b>The change that matters is the trade, not a filter.</b> No index-level RSI or VWAP rule lifted the EMA "
-        f"timer's weak 2024–2026 window ({pnum(r0['sharpe_oos'])}) without giving up more than 0.10 in another, and no "
-        f"repair of the v1 architecture came close; buying broad pullbacks in uptrending names did: "
+        f"<b>The change that matters is the trade, not a filter.</b> Index-level RSI and VWAP rules on the EMA timer "
+        f"lifted its weak 2024–2026 window only from {pnum(r0['sharpe_oos'])} to "
+        f"{pnum(min(r2c['sharpe_oos'], r2w['sharpe_oos']))}–{pnum(max(r2c['sharpe_oos'], r2w['sharpe_oos']))} (round 2), and "
+        "each was rejected in audit; no repair of the v1 architecture came close. Buying broad pullbacks in uptrending "
+        "names lifted it to "
+        f"{pnum(m['sharpe_oos'])} and survived the audits: "
         f"{pnum(m['sharpe_pre'])} / {pnum(m['sharpe_is'])} / {pnum(m['sharpe_oos'])} against v1's "
         f"{pnum(v1['sharpe_pre'])} / {pnum(v1['sharpe_is'])} / {pnum(v1['sharpe_oos'])}. On 2011–2016, which no rule "
         "was chosen on, the pullback family is the only one with a positive Sharpe.",
@@ -1327,7 +1370,7 @@ def CONCLUSIONS(m, v1, r0, dfin, d_r0, jp, cost_tab, evd, conc, dsr, n_trials, d
         f"too: after charging for {n_trials:,} tries, the deflated Sharpe ratio, the probability that the true 2017–2026 "
         f"Sharpe exceeds the {pnum(dsr['sr0_ann'])} that luck alone would reach, is {pnum(dsr['dsr'])}, below the "
         f"conventional 0.95; the 2017–2026 Sharpe of {pnum(bs['span']['sharpe'])} is not statistically distinguishable "
-        "from the best of that many tries.",
+        f"from the {pnum(dsr['sr0_ann'])} that luck alone would produce over that many tries.",
         f"<b>Its weakness is event days and low exposure.</b> {conc['top10_share_of_span_excess'] * 100:.0f} % of the "
         f"2017–2026 excess return came on its 10 best days, and the book averages {m['exposure_span'] * 100:.0f} % "
         "invested: it is a liquidity-provision sleeve, not a replacement for index exposure.",

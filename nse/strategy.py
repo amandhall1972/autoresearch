@@ -37,11 +37,11 @@ PROVENANCE (results_v4.tsv, program.md protocol v4.2)
 Round 1 (pullback lens) found the dip-buying effect with an index RSI(3) trigger (objective 0.69, fragile). Round 2
 moved the oversold test to the stocks and the trigger to leader breadth, inside a 20 % EMA-timer core (0.75).
 Round 3 removed a dead entry rule, a token equal-weight sliver and the breadth size ramp (0.745). The round-3 audits
-then showed that the 20 % EMA-timer core LOWERS the objective (removing it: 0.79) while every gate still passes, so
+then showed that the 20 % EMA-timer core LOWERS the objective (removing it: 0.79) while every gate against R0 still passes, so
 under the simplification rule the lead deleted it (and one dead sell rule duplicated by the harness) for this
 incumbent.
 
-DISCLOSED WEAK POINTS (round-3 audits)
+DISCLOSED WEAK POINTS (round-3 audits; figures re-measured on this book after the deep look, program.md)
 * Low exposure: 16 % of the book on average over 2017-26, stocks held on about a third of sessions. The CAGR
   includes the repo rate earned on idle capital; the Sharpe, measured over the repo rate, does not.
 * Event days: a dip buyer earns much of its return on a few market-wide rebound days. With each window's own 5 best

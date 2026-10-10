@@ -55,7 +55,7 @@ def main():
         L.append(f"| `{r['file']}` | {r['objective']} | {r['sharpe_pre']} | {r['sharpe_is']} | {r['sharpe_oos']} | {r['sharpe_span']} | "
                  f"{r['sharpe_full']} | {r['sharpe_span_drop10']} | {r['years_positive']} | {r['turnover_yr_span']} | {r['exposure_span']} | {r['objective_25bps']} |")
     with open(os.path.join(args.out, "lineage.md"), "w") as f:
-        f.write("\n".join(L) + "\n")
+        f.write(P.md_round("\n".join(L)) + "\n")
 
 
 if __name__ == "__main__":

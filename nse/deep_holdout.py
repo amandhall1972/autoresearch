@@ -26,6 +26,9 @@ sys.path.insert(0, HERE)
 import prepare as P
 
 LOG = os.path.join(HERE, "reports", "deep_holdout_log.tsv")
+# code fingerprint of every look (content hash -> code hash), so a docstring edit to the only copy of a scored
+# file cannot buy a second look; backfilled for the looks taken before it existed (deep4.py --backfill-fingerprints)
+FINGERPRINTS = os.path.join(HERE, "reports", "deep_holdout_fingerprints.tsv")
 YEARS = (2011, 2012, 2013, 2014, 2015, 2016)
 COLS = (["utc", "git_commit", "strategy_sha256", "label", "cost_bps", "sharpe_deep", "cagr_deep", "maxdd_deep",
          "vol_deep", "turnover_yr_deep", "exposure_deep", "n_names_avg_deep", "pct_days_invested_deep",
@@ -62,8 +65,12 @@ def strategy_sha(path) -> str:
 
 def code_fingerprint(path) -> str:
     """sha256 of the file's syntax tree without docstrings: equal for files whose code is the same."""
+    return source_fingerprint(open(path).read())
+
+
+def source_fingerprint(src: str) -> str:
     import ast
-    tree = ast.parse(open(path).read())
+    tree = ast.parse(src)
     for n in ast.walk(tree):
         if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.body \
                 and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant) \
@@ -80,6 +87,10 @@ def looked_at(path) -> bool:
     shas = set(pd.read_csv(LOG, sep="\t")["strategy_sha256"].astype(str))
     if strategy_sha(path) in shas:
         return True
+    if os.path.exists(FINGERPRINTS):
+        fp = pd.read_csv(FINGERPRINTS, sep="\t", dtype=str)
+        if code_fingerprint(path) in set(fp["code_fingerprint"]):
+            return True
     import glob
     looked = {code_fingerprint(f) for f in [os.path.join(HERE, "strategy.py")] + glob.glob(os.path.join(HERE, "v4", "*.py"))
               if strategy_sha(f) in shas}
@@ -105,12 +116,21 @@ def evaluate_and_log(path, label, md=None, cost_bps=P.COST_BPS_PER_SIDE, commit=
     row = {"utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "git_commit": commit,
            "strategy_sha256": strategy_sha(path), "label": label, "cost_bps": cost_bps, **ev}
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
+    record_fingerprint(row["strategy_sha256"], code_fingerprint(path), os.path.relpath(path, HERE), commit)
     new = not os.path.exists(LOG)
     with open(LOG, "a") as f:
         if new:
             f.write("\t".join(COLS) + "\n")
         f.write("\t".join(str(row.get(c, "")) for c in COLS) + "\n")
     return row
+
+
+def record_fingerprint(sha, fingerprint, file, commit):
+    new = not os.path.exists(FINGERPRINTS)
+    with open(FINGERPRINTS, "a") as f:
+        if new:
+            f.write("strategy_sha256\tcode_fingerprint\tfile\tgit_commit\n")
+        f.write(f"{sha}\t{fingerprint}\t{file}\t{commit}\n")
 
 
 def data_report(md=None) -> dict:

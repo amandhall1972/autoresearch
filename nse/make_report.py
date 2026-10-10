@@ -45,9 +45,10 @@ def v4_section():
          "The question: which changes make 2024-2026 positive as well, and the strategy effective over the whole of "
          "2020-2026? Protocol v4 researched on every window seen so far at once (2017-04..2019-12, 2020-2023, "
          "2024-01..2026-10) and maximised the worst of the three window Sharpes, with keep gates against regime "
-         "trading, best-day dependence, single years, parameter peaks and brief non-compliance. A new hold-out, "
+         "trading, best-day dependence, single years and parameter peaks, and a brief-compliance requirement for the "
+         "final strategy. A new hold-out, "
          f"{deep['window'][0] if deep else '2011-04-01'}..{deep['window'][1] if deep else '2016-05-31'}, was built before "
-         f"round 1 and scored once at the end. {len(tsv4):,} variants are logged in `results_v4.tsv`; the protocol, every "
+         f"round 1 and scored once at the end. {len(tsv4):,} rows are logged in `results_v4.tsv`; the protocol, every "
          "amendment and every merge are in `program.md`; the research note is RCG-RN-REV-002 (`make_pdf_v4.py`).", "",
          "## Headline", "",
          "Sharpe ratio of daily returns over the RBI repo rate, net of 15 bps one-way costs, next-open execution.", "",
@@ -91,12 +92,16 @@ def v4_section():
           "worst-window objective is a selection statistic. The deflated Sharpe ratio is a probability, not a Sharpe: the "
           "chance that the true 2017-26 Sharpe beats what the best of all logged tries (every row of results_v4.tsv with a "
           "2017-26 Sharpe) would reach by luck. Below 0.95 it means the 2017-26 Sharpe is not significant once the search "
-          "is charged for.",
+          "is charged for. Many of those rows re-evaluate existing candidates, which narrows their spread and lowers the "
+          "hurdle, and the v1 trials on the same years are not charged, so the figure is if anything generous.",
           "* The deep hold-out (2011-2016) is the only test no rule was chosen on; it was scored once, after the final "
           "was fixed, on a set of strategies registered in `program.md` before the look.",
           "* The joint perturbation (every parameter moved at random by up to 20 % at once) and the walk-forward "
           "re-selection run on the same years the rules were chosen on: they measure how fragile the fit is, not how it "
-          "will do on new data. The joint mean is still a better guide than the optimised worst-window Sharpe.",
+          "will do on new data; the optimised worst-window Sharpe is the top of that in-sample range.",
+          "* The Monte Carlo resamples the strategy's own realised 2017-26 returns, which were used to select it, with "
+          "about 84 % of capital at the repo rate: its probability of loss holds almost by construction and describes "
+          "the backtest, not the risk of trading it.",
           "* Stock returns are price returns (no dividends); cash earns the RBI repo rate.", "", "---", ""]
     return L
 

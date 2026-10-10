@@ -11,6 +11,7 @@ Writes reports/v4/deep_holdout.json and deep_holdout.md (and per-strategy daily 
 
 Usage: python deep4.py --final FILE [--incumbents v4/inc1_pullback.py ...]
        python deep4.py --rebuild-report     # rewrite deep_holdout.json/.md from the saved daily returns (no look)
+       python deep4.py --backfill-fingerprints   # code fingerprints of looks taken before they were logged
 """
 import argparse, json, os, sys
 
@@ -43,7 +44,7 @@ def metrics_from_saved(path):
     return out
 
 
-SAMPLING_SEED, SAMPLING_PATHS, SAMPLING_BLOCK = 20261011, 2000, 20
+SAMPLING_SEED, SAMPLING_PATHS, SAMPLING_BLOCK = 20261011, 20000, 20   # 20,000 paths: the 2.5 % bound is stable to 0.01
 
 
 def sampling_error(out_dir, rows):
@@ -71,6 +72,10 @@ def sampling_error(out_dir, rows):
                                 "variance_ratio_20d": round(float(agg.var(ddof=1) / (20 * x.var(ddof=1))), 4),
                                 "ci95": [round(float(np.percentile(boots[k], 2.5)), 6), round(float(np.percentile(boots[k], 97.5)), 6)]}
     final = next(r["file"] for r in rows if "final" in r["roles"])
+    # the final's interval with short blocks (5 sessions): how much the bound depends on the block length
+    idx5 = V.block_bootstrap(np.arange(T, dtype=float), SAMPLING_PATHS, 5, np.random.default_rng(SAMPLING_SEED)).astype(int)
+    b5 = np.array([sr(ex[final].values[i]) for i in idx5])
+    out["strategies"][final]["ci95_block5"] = [round(float(np.percentile(b5, 2.5)), 6), round(float(np.percentile(b5, 97.5)), 6)]
     for other in ("v4/r0_ema_timer.py", "NIFTY50"):
         dlt = boots[final] - boots[other]
         out["differences"][f"{final} - {other}"] = {
@@ -119,11 +124,32 @@ def write_md(rep, out_dir):
         L.append(f"| `{r['file']}` | {'/'.join(r['roles'])} | {r4(r['sharpe_deep'])} | {r4(r['cagr_deep'])} | {r4(r['maxdd_deep'])} | "
                  f"{r4(r['exposure_deep'])} | {r4(r['bench_sharpe_deep'])} | " + " | ".join(str(r4(r[f'sharpe_{y}'])) for y in D.YEARS) + " |")
     with open(os.path.join(out_dir, "deep_holdout.md"), "w") as f:
-        f.write("\n".join(L) + "\n")
+        f.write(P.md_round("\n".join(L)) + "\n")
+
+
+def backfill_fingerprints():
+    """Record the code fingerprint of every look taken before fingerprints were logged, from the file as it was at
+    the look's commit (git show); each file's content hash must match the hash logged at the look."""
+    import subprocess
+    log = pd.read_csv(D.LOG, sep="\t", dtype=str)
+    have = set(pd.read_csv(D.FINGERPRINTS, sep="\t", dtype=str)["strategy_sha256"]) if os.path.exists(D.FINGERPRINTS) else set()
+    for _, r in log.iterrows():
+        if r["strategy_sha256"] in have:
+            continue
+        rel = "v4/" + r["label"].split(":")[-1]
+        src = subprocess.run(["git", "-C", HERE, "show", f"{r['git_commit']}:nse/{rel}"], capture_output=True, check=True).stdout
+        import hashlib
+        if hashlib.sha256(src).hexdigest()[:16] != r["strategy_sha256"]:
+            raise SystemExit(f"{rel} at {r['git_commit']} does not have the logged content hash")
+        D.record_fingerprint(r["strategy_sha256"], D.source_fingerprint(src.decode()), rel, r["git_commit"])
+        print(f"{rel:<28}{r['strategy_sha256']}  code {D.source_fingerprint(src.decode())}")
 
 
 def main():
     ap = argparse.ArgumentParser()
+    if "--backfill-fingerprints" in sys.argv:
+        backfill_fingerprints()
+        return
     if "--rebuild-report" in sys.argv:
         ap.add_argument("--rebuild-report", action="store_true")
         ap.add_argument("--out", default=os.path.join(HERE, "reports", "v4"))

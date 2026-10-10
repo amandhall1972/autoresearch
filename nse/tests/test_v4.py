@@ -283,3 +283,18 @@ def test_deep_report_matches_the_logged_looks():
     st = rep["sampling"]["strategies"][final["file"]]
     assert st["sharpe"] == pytest.approx(final["sharpe_deep"], abs=1e-6)
     assert st["ci95"][0] < st["sharpe"] < st["ci95"][1]
+
+
+def test_every_deep_look_has_a_code_fingerprint(tmp_path):
+    """The fingerprint log covers every look, so editing the only copy of a scored file cannot buy a second look."""
+    import deep_holdout as D
+    if not os.path.exists(D.LOG):
+        pytest.skip("deep hold-out not scored in this checkout")
+    log = pd.read_csv(D.LOG, sep="\t", dtype=str)
+    fp = pd.read_csv(D.FINGERPRINTS, sep="\t", dtype=str)
+    assert set(log["strategy_sha256"]) <= set(fp["strategy_sha256"])
+    src = open(os.path.join(NSE, "v4", "r1_pullback.py")).read().replace('"""', '"""An edited docstring. ', 1)
+    edited = tmp_path / "r1_pullback.py"
+    edited.write_text(src)
+    assert D.looked_at(str(edited))                               # same code, new content hash: still refused
+    assert not D.looked_at(os.path.join(NSE, "v4", "r4_exits.py"))  # never scored

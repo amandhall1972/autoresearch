@@ -458,6 +458,12 @@ def cagr(ret: pd.Series) -> float:
     return float((1.0 + ret).prod() ** (TRADING_DAYS / n) - 1.0)
 
 
+def md_round(text: str, dp: int = 4) -> str:
+    """Show the numbers of a generated markdown report to dp decimals (the JSON reports keep full precision)."""
+    import re
+    return re.sub(r"(?<![\w.])(-?\d+\.\d{%d,})(?![\w.])" % (dp + 1), lambda mt: f"{float(mt.group(1)):.{dp}f}", text)
+
+
 def summarize(res: dict, md: MarketData, start, end, label="") -> dict:
     # ratios and returns are stored to 6 dp (shares to 4 dp) so a report never rounds an already-rounded number
     r = res["ret"].loc[start:end]

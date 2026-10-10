@@ -381,8 +381,10 @@ changes a rule, a parameter, a gate or a scored result.
   were rebuilt. `deep4.py --rebuild-report` rewrote `deep_holdout.json` at full precision from the saved daily
   returns of the looks already taken: it runs no strategy and loads no deep market data, and it refuses to write
   unless every recomputed value rounds to the value logged at the look. It also stores the deep window's sampling
-  error (paired stationary bootstrap, 2,000 paths, mean block 20 sessions): the final's 0.68 has a 95 % interval
-  of 0.13 to 1.28; its lead over R0 0.15 to 1.79; its lead over the NIFTY 50 -0.17 to 1.50 (not established).
+  error (paired stationary bootstrap, 20,000 paths, mean block 20 sessions): the final's 0.68 has a 95 % interval
+  of 0.10 to 1.27 (with 5-session blocks the lower bound is 0.00); its lead over R0 0.13 to 1.82; its lead over the
+  NIFTY 50 -0.17 to 1.53 (not established). A first run with 2,000 paths gave 0.13 as the lower bound, at the
+  favourable end of the Monte Carlo noise; the verification pass caught it.
 * **`strategy.py` docstring corrected** (code unchanged; `v4/inc1_pullback.py` stays byte-identical to the scored
   file and the note's build checks that the two have the same code). Three statements were wrong for the final
   book: switching the RSI filter off raises 2024-26 to 1.06 but lowers 2017-19 to 0.65 and 2020-23 to 0.71 (the
@@ -391,7 +393,9 @@ changes a rule, a parameter, a gate or a scored result.
   that held names are traded back to 1/12 at every open.
 * **One look per code, not per file.** Because the docstring edit changed the file hash, `deep_holdout.py` and
   `deep4.py` now also fingerprint the code (syntax tree without docstrings) and refuse any file whose code matches
-  one already scored.
+  one already scored. The fingerprints of the 11 looks are kept in `reports/deep_holdout_fingerprints.tsv`
+  (backfilled from each file as it was at the look's commit, its content hash checked against the log), so the guard
+  holds even if the only copy of a scored file is later edited; every future look appends its fingerprint.
 * **Paper-trial and kill rules recalibrated.** As first written, two of them fired on the backtest itself (a
   trailing 12-month excess return below zero on 12.5 % of sessions; a 30-trade win rate down to 33 %), and the pass
   bands were narrower than a year's sampling error. They are now computed at build time from the backtest
@@ -405,3 +409,11 @@ changes a rule, a parameter, a gate or a scored result.
   (against R0 every gate passed; against the with-core version the windows gate would not have, and the with-core
   version was registered for the deep look because the choice hinged on the simplification rule); the traced trigger day had 17 eligible names for 12 slots; and the compliance
   gate counts sessions on which the weights change.
+
+A second, verification pass (one agent per original lens plus one on regressions) found 39 findings fixed, 24 partly
+fixed and 29 new problems, all small; they were applied in the next commit: the deflated Sharpe's correlated rows
+lower the hurdle (on the 2,218 search rows alone the hurdle is 0.78 and the DSR 0.71), so 0.77 is if anything
+generous; round 2's index-level RSI/VWAP rules did lift R0's 2024-26 window (to 0.35-0.45) but were rejected in
+audit; the breadth cut is not a plateau inside its +-20 % band (5 of the 21 cuts from 0.50 to 0.70 score below the
+0.553 plateau floor, the lowest 0.457 at 0.50); the paper-trial floors are about break-even after costs and say so; NIFTYBEES carries its dividends;
+the cover names a commit that matches the printed source (a dirty tree is marked); markdown tables show 4 dp.
