@@ -1,0 +1,7 @@
+effective_date,ticker,action,source
+2025-09-30,HEROMOTOCO,remove,NSE Indices press release ind_prs22082025 (changes effective from Sept 30 2025)
+2025-09-30,INDUSINDBK,remove,NSE Indices press release ind_prs22082025 (changes effective from Sept 30 2025)
+2025-09-30,INDIGO,add,NSE Indices press release ind_prs22082025 (changes effective from Sept 30 2025)
+2025-09-30,MAXHEALTH,add,NSE Indices press release ind_prs22082025 (changes effective from Sept 30 2025)
+2026-09-30,WIPRO,remove,NSE Indices September 2026 review (effective after close of Sept 29 2026)
+2026-09-30,BSE,add,NSE Indices September 2026 review (effective after close of Sept 29 2026)

@@ -1,0 +1,262 @@
+# NSE RSI + EMA + VWAP — autoresearch strategy lab
+
+An autonomous research loop (the repo's `autoresearch` idea applied to trading): one editable file
+(`strategy.py`), a fixed evaluation harness (`prepare.py`), one metric (`sharpe_is`), keep/discard.
+
+## Results: the v2 strategy (protocol v4, 2026-10-10)
+
+The question after v1: which changes make 2024-2026 positive as well, and the strategy effective over the whole of
+2020-2026? Protocol v4 (`program.md`) researched on every window seen so far at once and maximised the **worst** of
+the three window Sharpes, gated against regime trading, best-day dependence, single calendar years, parameter peaks
+and non-use of RSI/EMA/VWAP. Five rounds, 3,559 logged rows and 20 independent audits later, the final strategy
+(`strategy.py`, the same code as `v4/inc1_pullback.py`) buys broad pullbacks inside uptrends:
+
+1. **Trigger** (EMA, VWAP): the NIFTY 50 closes above its EMA(100) and more than 60 % of the members in their own
+   uptrend (close above their EMA(100)) close below their 10-day VWAP.
+2. **Name filter** (EMA, RSI): on such a day, a member in its own uptrend with Wilder RSI(3) below 20.
+3. **Selection** (VWAP): 12 slots of 1/12, filled with the eligible names deepest below their 10-day VWAP.
+4. **Exit** (VWAP): sell when the name closes back above its 10-day VWAP, or after 20 sessions.
+
+| window | role | Sharpe (excess of repo) | CAGR | max DD | Nifty Sharpe | v1 Sharpe |
+|---|---|---:|---:|---:|---:|---:|
+| 2017-04 → 2019-12 | chosen on (worst-window objective) | **0.79** | 10.3 % | −4.2 % | 0.42 | −0.72 |
+| 2020-01 → 2023-12 | chosen on | **1.12** | 14.3 % | −6.6 % | 0.58 | 4.97 |
+| 2024-01 → 2026-10 | chosen on | **0.85** | 11.2 % | −5.7 % | −0.28 | −1.06 |
+| 2020-01 → 2026-10 | whole period asked about | **1.02** | 13.1 % | −6.6 % | 0.31 | 2.78 |
+| 2011-04 → 2016-05 | **deep hold-out, sealed, scored once at the end** | **0.68** | 13.5 % | −5.0 % | 0.01 | −0.09 |
+
+CAGR includes the repo rate earned on idle capital: the book averages 16 % invested (stocks held on 35 % of
+sessions, 5.7 names when invested), turnover 13x a year; it beat cash in 8 of 10 calendar years, was level with it in
+2018 and trailed it in 2026 (to October).
+
+**What this means.** 2024-2026 is positive and 2020-2026 strong, but all three research windows were used to
+choose the rules, so those numbers are selection statistics. The only evidence that is not: on the deep hold-out
+(2011-2016, built for this study and scored once for a registered set) the final scores 0.68 (95 % bootstrap
+interval 0.10 to 1.27) while the NIFTY was flat over cash (0.01); only the three pullback strategies are positive
+there and every trend-timing strategy, v1 and the EMA timer included, is negative. Expect less than 0.79: moving
+every parameter by up to ±20 % at once gives a mean worst-window Sharpe of 0.60 (a measure of how fragile the fit
+is, on the same years), costs bite (worst window 0.56 at 25 bps, 0.21 at 40 bps), and the deflated Sharpe ratio, the
+probability that the true 2017-2026 Sharpe beats what the best of the 3,490 logged tries with a 2017-2026 Sharpe (of 3,559
+rows) would reach by luck, is 0.77,
+below the conventional 0.95. It earns much of its return on a few rebound days (48 % of the 2017-2026 excess in its
+10 best days). Paper-trade it with `signals.py` under the kill rules of RCG-RN-REV-002 before any allocation.
+
+## The v1 record (protocol v1-v3, RCG-RN-REV-001)
+
+The loop ran 8 rounds (3,428 logged experiments) and stopped on its pre-declared rule (round 8 is the
+last). The v1 final is commit `c44574d` (docstring-only follow-up `dee8c0e`), preserved as `v4/v1_final.py`; its rules
+are in that file's docstring and in RCG-RN-REV-001.
+
+| window | role | Sharpe (excess of repo) | CAGR | max DD | Nifty Sharpe |
+|---|---|---:|---:|---:|---:|
+| 2020-01 → 2023-12 | selection (the loop maximised this) | **5.09** | 44.2 % | −1.7 % | 0.58 |
+| 2024-01 → 2026-10 | validation, never used by the keep rule | **−1.06** | 0.6 % | −6.6 % | −0.28 |
+| 2017-04 → 2019-12 | sealed hold-out, scored once at the end | **−0.72** | 2.1 % | −9.7 % | 0.42 |
+| 2020-01 → 2026-10 | whole period | 2.83 | 24.5 % | −6.6 % | 0.31 |
+
+In-sample robustness of the final strategy: 2020-21 half 5.98, 2022-23 half 4.08, five best days
+removed 5.09, gross of costs 5.34; 13.75 turnover a year, 5.7 names on average, invested on 41 % of days.
+
+**What this means.** The loop did what it was built to do: it found the rules that best explain
+2020-2023, and every in-sample robustness gate held. The gain did not carry over. On the two windows
+the keep rule never used, the final strategy earns less than cash: 2024-26 Sharpe −1.06 (baseline −0.49) and,
+on the sealed 2017-19 hold-out, −0.72 (baseline −1.08) against +0.42 for buy-and-hold Nifty. Every one
+of the 16 incumbents from the baseline to the final strategy is negative on both windows
+(`reports/lineage.md`). Every incumbent after the baseline is worse than the baseline on 2024-26, and
+on the hold-out the best score was keep 8 (`34b6420`, −0.27), with all seven incumbents after it lower.
+`diagnose.py` locates the break: in 2020-23, 84 % of invested spells beat cash (mean +3.9 % a spell);
+in 2024-26 only 39 % did (mean −0.3 %), and the names the cohort buys lagged the average member over the
+next 20 sessions in every year from 2024, as they already had in 2022 (`reports/diagnostics.md`). **Treat 5.09 as a measure of
+fit, not of expected return.** Do not trade this strategy on the strength of the backtest; if you want to test it,
+paper-trade it with `signals.py` and judge it only on data from 2026-10-10 onward.
+
+Reports (all regenerated by the commands below):
+
+| file | content |
+|---|---|
+| `reports/RCG-RN-REV-002_RSI-EMA-VWAP_Nifty50_v2.pdf` | the RAAS Capital research note on the v2 strategy (32 pages, A4): why v1 failed, protocol v4, the five rounds, every rule and parameter, a trigger day traced to its exits with the full trade log checked against the rules, results, robustness, the deep hold-out, operating and kill rules, and the full source; built by `make_pdf_v4.py` (not committed, see below) |
+| `reports/v4/validation.md` / `.json`, `equity_curves.csv` | the v2 strategy's validation: windows, costs, years, bootstrap and deflated Sharpe, parameter sensitivity, walk-forward, Monte Carlo, regimes, plateau, joint perturbation, event days |
+| `reports/v4/lineage.md` / `.json` | every protocol-v4 strategy (R0, each round's candidates, the incumbent, v1) on every seen window |
+| `reports/v4/deep_holdout.md` / `.json`, `reports/v4/deep/*.csv` | the one deep hold-out look: the registered set's scores and daily returns |
+| `reports/deep_holdout_log.tsv` | append-only log of every deep hold-out look (11 rows, all at the end; one per file content) |
+| `reports/RCG-RN-REV-001_RSI-EMA-VWAP_Nifty50.pdf` | the RAAS Capital research note (40 pages, A4): the strategy rule by rule with every formula and parameter, a cohort traced through the backtest, results, robustness, out-of-sample diagnosis, paper-trial kill rules and the full Python source; built by `make_pdf.py` (not committed, see below) |
+| `reports/index.html` | self-contained results page: the v2 strategy (`python make_page.py --v1` rebuilds the v1 page) |
+| `reports/REPORT.md` | full report: the v2 strategy and its validation first, then the v1 record |
+| `reports/lineage.md` / `.json` / `.png` | every kept strategy re-scored on all windows, incl. the sealed hold-out |
+| `reports/holdout_log.tsv` | append-only log of every look at the 2017-19 hold-out (16 rows, all at the end) |
+| `reports/diagnostics.md` / `.json` | spell P&L by window and stock-selection edge by year |
+| `reports/validation.md` / `.json`, `equity_curves.csv`, `holdout_final_returns.csv`, `*.png` | raw validation outputs |
+
+Reproduce:
+
+```
+cd nse
+# the v2 strategy (protocol v4)
+python run4.py --strategy strategy.py          # the three windows + lookahead check (~15 s)
+python validate4.py --strategy strategy.py     # costs, bootstrap, DSR, sensitivity, walk-forward, plateau, joint, events (~45 s)
+python lineage4.py                             # every protocol-v4 strategy on every seen window
+python compare4.py CANDIDATE --incumbent strategy.py --years   # the keep gates for a new candidate
+python deep_holdout.py --data-report           # deep hold-out data checks (runs no strategy)
+python deep4.py --final strategy.py            # the one deep look (refuses a second look at any code already scored, by file or code fingerprint)
+python deep4.py --rebuild-report               # deep report + sampling error from the saved returns (no look)
+python make_report.py && python make_page.py   # reports/REPORT.md and reports/index.html
+python make_pdf_v4.py                          # reports/RCG-RN-REV-002_RSI-EMA-VWAP_Nifty50_v2.pdf (needs brand/)
+python signals.py --capital 1000000 --holdings my_holdings.csv   # next-open orders for paper trading
+python -m pytest -q tests                      # 88 tests (brand, deep-data and report tests skip when absent)
+
+# the v1 record (protocol v1-v3)
+python run.py --strategy v4/v1_final.py        # in-sample metrics + lookahead check (~10 s)
+python run.py --report --strategy v4/v1_final.py   # adds 2024-26 and full-period metrics
+python validate.py --boot 2000 --out reports   # costs, bootstrap, deflated Sharpe, perturbations, walk-forward (~2.5 min)
+python lineage.py --holdout        # every kept strategy on all windows; appends hold-out looks to the log
+python diagnose.py                 # spell P&L and selection edge
+python make_pdf.py                 # reports/RCG-RN-REV-001_RSI-EMA-VWAP_Nifty50.pdf (needs brand/, ~10 s)
+```
+
+## Layout
+
+| file | role |
+|---|---|
+| `prepare.py` | **fixed** — constants, data loading/cleaning, point-in-time Nifty 50 universe, RBI repo-rate cash yield, next-open execution engine with costs, metrics, lookahead detector |
+| `indicators.py` | **fixed** — causal RSI (Wilder), EMA, rolling & anchored VWAP, ATR, realized vol, cross-sectional rank |
+| `strategy.py` | **the agent edits this** — the v2 strategy (protocol-v4 final); the v1 final is `v4/v1_final.py` |
+| `run.py` | runs one experiment, prints the in-sample summary block, writes `runs/latest/` (`--report` adds the 2024-2026 and full-period metrics; lead/report use only) |
+| `holdout.py` | scores a strategy on the **sealed 2017-2019 pre-sample hold-out**; every look is appended to `reports/holdout_log.tsv` |
+| `lineage.py` | scores every incumbent of the loop (baseline → each merged winner → final) on all windows; `--holdout` adds the sealed hold-out |
+| `validate.py` / `make_report.py` | final validation of `strategy.py` and the generated `reports/REPORT.md` |
+| `compare.py` | candidate vs incumbent on in-sample data only: sanity gates, both halves, drop-5, leave-one-spell-out (gates 1, 2, 5) |
+| `diagnose.py` | why the strategy fails after 2023: spell P&L per window and stock-selection edge per year |
+| `make_page.py` | builds `reports/index.html`, a self-contained results page |
+| `make_pdf.py` | builds the RAAS Capital research note PDF (reportlab + matplotlib; every number read from `reports/` or recomputed at build time; checks the parameter register against `PARAMS` and fails if the traced cohort has an unexplained sale) |
+| `raas_brand.py` | RAAS Capital brand layer: palette tokens, Outfit / IBM Plex type, logo colourways derived from the kit's master SVG, true-minus and Indian-grouping number formats, matplotlib style |
+| `brand/` | `fonts/` (Outfit, IBM Plex Sans, IBM Plex Mono static TTFs, SIL OFL 1.1 in `fonts/OFL.txt`) and `logo/` (the kit's primary neela-ink SVG; git-ignored, copy it from the "RAAS Capital - Brand Identity Kit" Drive folder) |
+| `run4.py` / `compare4.py` / `plateau4.py` | protocol v4: one experiment on every window / the keep gates (sanity, improves, windows, drop10, years, consistency, parsimony) and the brief-compliance check required of the final strategy / the ±20 % plateau gate |
+| `v4lab.py` | fast in-process scorer used by the v4 research agents (cached data, parameter overrides) |
+| `validate4.py` / `lineage4.py` | the final validation of `strategy.py` and the lineage of every v4 strategy (`reports/v4/`) |
+| `build_deep_holdout.py` / `deep_holdout.py` / `deep4.py` | the deep hold-out: data build, scorer (and `--data-report`), the one-time look at the registered set |
+| `make_pdf_v4.py` | builds RCG-RN-REV-002 (reads `reports/v4`, rebuilds the trade log and checks every entry and exit against the rules) |
+| `v4/` | R0 (the EMA timer), every round's candidates (`r1_*` … `r5_*`), the incumbent `inc1_pullback.py`, the frozen v1 files |
+| `results_v4.tsv` | the protocol-v4 log (round, lens, objective, window Sharpes, status, description) |
+| `signals.py` | next-session target weights and orders for paper trading (`--capital`, `--holdings`, `--end`) |
+| `program.md` | the research-loop instructions for the agent |
+| `results.tsv` | experiment log (commit, metrics, keep/discard, description) |
+| `tests/` | pytest suite for the harness and indicators |
+| `data/raw/*.csv` | daily OHLCV, 69 series, 2016-06-01 → 2026-10-09 (3.5 years of indicator warm-up before the backtest) |
+| `data/raw_presample/*.csv` | daily OHLCV 2016-06 → 2020-03 for the 11 names that left the Nifty 50 before 2020 (hold-out only) |
+| `data/universe/` | monthly/rebalance Nifty 50 membership matrix 2019-12 → 2025-08 + later index changes; 2016-01 → 2019-12 rows for the hold-out |
+| `data/raw_deep/*.csv`, `data/universe/nifty50_weights_2008_2016.csv` | the deep hold-out: 70 series 2007-09 → 2016-05 and the point-in-time Nifty 50 of 2008-2016 (read only with `load_data(deep=True)`) |
+| `data/rf_repo_rate.csv` | RBI repo-rate schedule used as the cash yield (2006-10 onward) |
+| `fetch_fmp.py` | reproduction fetcher (needs an FMP API key) |
+| `ingest_tool_results.py` | dev helper that converted the MCP tool dumps into `data/raw` (`--out data/raw_presample` for the hold-out names) |
+
+Run: `python run4.py --strategy strategy.py` (≈15 s, most of it the dense lookahead check). Tests: `python -m pytest -q tests` (88 tests).
+
+## Data
+
+* **Prices**: Financial Modeling Prep EOD for every stock that was a Nifty 50 member at any time in
+  2020-2026 (66 names), plus `NIFTY50` and `BANKNIFTY` (signal only) and the `NIFTYBEES` ETF
+  (tradable index proxy). Prices are split/bonus-adjusted by the vendor and the vendor also adjusts
+  the four demergers in the window (RIL→Jio Financial 2023-07-20, ITC→ITC Hotels 2025-01-06,
+  Tata Motors→TMCV 2025-10-14, HUL→Kwality Wall's 2025-12-05). Three vendor factors differ slightly
+  from the NSE special-session ex-prices (RIL by 1.6 %, ITC and Tata Motors by 0.2-0.3 %); `prepare.py`
+  rescales the pre-ex-date history so the ex-date open/previous-close gap is the true market gap
+  (`CORPORATE_ACTION_FIXES`). Tata Motors continues under its post-demerger ticker (TMPV). Bharti
+  Infratel continues as Indus Towers; Zomato's history is under its new name Eternal.
+* **ETF opens**: the vendor's NIFTYBEES opens are first prints (open equals the day's high or low on
+  half the bars). The harness replaces the ETF's open/high/low with the NIFTY 50 open/high/low gaps
+  applied to the ETF's previous close, so ETF fills happen at a realistic open.
+* **Cleaning**: zero-volume flat bars (vendor gaps: 8 stock-days, all in 2025) are treated as
+  missing: the previous close is carried into O/H/L/C with zero volume, the day is marked
+  non-tradable and the engine keeps the position unchanged.
+* **Calendar**: every day on which at least 30 stocks have a fresh bar, minus the one-hour Muhurat
+  sessions and the two short 2024 disaster-recovery live sessions (2024-03-02, 2024-05-18; ~1h45 with
+  5 % bands). The vendor's NIFTY 50 series lacks 7 regular sessions (2016-08-12, 2018-01-01,
+  2019-01-01, 2019-02-13, 2019-03-29, the 2020-02-01 Budget Saturday and the 2024-01-20 Saturday
+  session). Those bars are rebuilt from the constituents (free-float weights of the latest membership
+  row, drifted by price; validated against the real index on 1,398 days at 4.7 bps RMS daily error)
+  and pinned to the published NSE closes (`INDEX_CLOSE_PATCHES`); open/high/low of those 7 bars are
+  approximations. BANKNIFTY (signal-only) is carried flat on those days. Before this repair the 7
+  sessions were dropped, which moved the incumbent's in-sample Sharpe by 0.001 and the baseline's by 0.025.
+* **Universe**: the membership matrix is the "Historical Nifty 50 Constituent Weights (20Y)"
+  dataset (Bera, 2025, CC BY-NC-SA 4.0; sourced from NSE Indices), rows at month-ends and on every
+  rebalance date, extended with the official Sept-2025 (IndiGo, Max Healthcare in; Hero MotoCorp,
+  IndusInd out) and Sept-2026 (BSE in; Wipro out) changes. Three rows of the source matrix were
+  re-dated to the NSE effective dates (HDFC→LTIM 2023-07-13, Sept-2024 reshuffle 2024-09-30,
+  Mar-2025 reshuffle 2025-03-28). For the 2016-2019 hold-out rows, seven change rows were re-dated to
+  the NSE effective dates (2017-03-31, 2017-05-26, 2017-09-29, 2018-04-02, 2018-09-28, 2019-03-29,
+  2019-09-27; e.g. the dataset dates Nestle-for-Indiabulls-Housing to 2019-08-27, NSE made it effective
+  2019-09-27). A stock can only be held while it is a
+  member (point-in-time, no survivorship bias). Spin-offs that sat in the index at a constant price
+  for a few days (Jio Financial 2023, ITC Hotels 2025, TMCV 2025) are not tradable instruments and
+  are excluded.
+* **Cash yield**: RBI repo rate (ACT/365). This approximates a liquid-fund / T-bill yield; it
+  over-states it slightly in 2020-22 and under-states it slightly in 2023-24.
+
+## Execution and cost model
+
+Signals are computed on the close of day *t*; the target weights are executed at the **open of t+1**.
+The engine keeps exact portfolio state: the overnight gap is earned on the weights as they drifted
+to the previous close, the rebalance trades from those drifted weights to the new target (cost on the
+actual traded fraction), the intraday leg is earned on the new weights, and the drifted end-of-day
+state carries into the next day. A name with no fresh bar keeps its position (it cannot be traded);
+a name that leaves the index is sold at the next open; a name that stops trading is liquidated at
+its last close. Long-only, no leverage,
+Indian cash equities cannot be shorted overnight. One-way cost **15 bps** of traded value: STT on
+delivery 10 bps + exchange/SEBI/stamp duty/GST ≈ 1 bp + slippage/impact ≈ 4 bps (large caps, modest
+size). Uninvested cash earns the repo rate. Sharpe = annualized mean/std of daily net returns in excess
+of the repo rate.
+
+## Evaluation protocol v1-v3 (the v1 strategy)
+
+* **In-sample / development**: 2020-01-01 → 2023-12-31. `sharpe_is` is the only keep/discard metric.
+  From round 2 on (protocol v2, `program.md`) a keep must also pass in-sample robustness gates: both
+  in-sample halves (`sharpe_is_h1` 2020-21, `sharpe_is_h2` 2022-23) within 0.10 of the incumbent,
+  `sharpe_is_drop5` (5 best days removed) above the incumbent's, and every new parameter on a plateau
+  (both neighbours also beat the incumbent). A deletion that costs less than 0.02 counts as a keep
+  (simpler wins). From round 5 (protocol v3) the gain must also survive leaving out any single invested
+  spell (`compare.py --spells`). The loop stops after 8 rounds or 2 consecutive rounds gaining < 0.10.
+* **2024-2026 window**: 2024-01-01 → 2026-10-09. Never used by the loop; since protocol v2 `run.py` hides
+  it from researchers entirely. The lead researcher did look at its yearly numbers after round 1 (that
+  is what triggered protocol v2), so it is reported as a *validation* window, not a pristine hold-out.
+* **Sealed pre-sample hold-out**: 2017-04-01 → 2019-12-31 with its own point-in-time Nifty 50 (incl. the
+  11 names that left the index before 2020). Never evaluated during research; scored once at the end
+  for the pre-registered incumbent lineage only; it cannot change which strategy is final.
+* **Lookahead detector**: every run re-computes the weights on data truncated at ~60 dates spread
+  over the backtest, and on ~30 further dates where every later bar is replaced by a random
+  permutation of later bars (prices, volumes, membership, index, rate). Weights up to each date
+  must be identical to the full-sample run; any dependence on future bars, including "neutral when
+  the future is missing" constructions, fails the run. The run also reports how many check dates
+  had open positions so an inert check set is visible.
+* Final validation (`validate.py`) adds cost sensitivity, parameter sensitivity, yearly breakdown,
+  bootstrap confidence intervals and the deflated Sharpe ratio over the number of trials in `results.tsv`.
+
+## Evaluation protocol v4 (the v2 strategy)
+
+* **Objective**: the lowest of three window Sharpes, 2017-04 → 2019-12, 2020-01 → 2023-12 and 2024-01 → 2026-10, on
+  the 2016-2026 point-in-time universe (`prepare.evaluate_v4`). Every window is used for selection; none is out of sample.
+* **Keep gates** (`compare4.py`, `plateau4.py`): improves the objective; no window more than 0.10 below the incumbent;
+  2017-26 Sharpe without its 10 best days above the incumbent's; still better with any one calendar year left out;
+  at least as many positive years; 0.05 of objective per added parameter; ±20 % neighbours of every parameter beat
+  the incumbent and keep 60 % of the margin;
+  sanity floors (invested ≥ 30 % of days, diversified, turnover ≤ 40x, drawdown above −30 %, no lookahead). The
+  final strategy must also be compliant: switching off RSI, EMA or VWAP changes its target weights on at least 5 %
+  of sessions.
+* **Audits**: every round's best candidate per lens was re-run by an independent agent that re-checked every gate,
+  removed each window's best days, tested 25 and 40 bps, ablated every rule and read the code; from round 3 the audits
+  also moved all parameters at once (60 draws). Amendments (v4.1, v4.2) and merges were recorded in `program.md` before the next round.
+* **Deep hold-out**: 2011-04-01 → 2016-05-31 on the point-in-time Nifty 50 of 2008-2016 (47-49 members with bars;
+  documented corrections for the 2010 Grasim demerger, Bajaj Auto's 2008 demerger, a vendor gap in HDFC, one
+  exchange holiday and the Muhurat sessions; NIFTY and BANK NIFTY gaps rebuilt from constituents). Built before
+  round 1, kept outside the repository until the end, scored once for a set registered before the look; its
+  scores could not change which strategy is final.
+
+## Caveats
+
+Indicators must be fully warmed up before 2020-01-01 (3.5 years of history are provided); an indicator
+that is NaN must never be read as a signal. Daily bars: VWAP here is a rolling / anchored VWAP of the typical price, not an intraday session VWAP
+(the vendor's intraday history for NSE starts in 2023, so a session-VWAP backtest cannot cover 2020-2026).
+Dividends are not included for the stocks (price returns), which understates long-only returns by
+roughly 1-1.5 %/yr versus a total-return benchmark for a fully invested book (about 0.2 %/yr for the v2 strategy, 16 %
+invested); the NIFTY 50 series is a price index too, while NIFTYBEES (and R0, which holds it) carries its dividends in
+the ETF price. The cost model is a flat estimate; results at
+25 and 40 bps are reported in the validation.
